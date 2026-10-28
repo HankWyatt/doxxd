@@ -211,3 +211,36 @@ it("renders holdings without waiting for trading details and isolates their fail
   expect(screen.getByText("USD Coin")).toBeVisible();
   expect(screen.getByText("$12,345.67")).toBeVisible();
 });
+
+it("shows chips only for sources with something, and summarises the rest", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    const resource = new URL(input, "http://doxxd.test").pathname.split("/").at(-1) as ResourceName;
+    if (resource === "summary") {
+      const result = readFixture("summary", "complete");
+      if (!result.ok) throw Error("fixture");
+      const { components } = result.data;
+      const set = (id: string, value: string, extra = {}) =>
+        Object.assign(components.find((c) => c.id === id)!, {
+          known_asset_value_usd: value,
+          known_debt_value_usd: "0",
+          known_net_value_usd: value,
+        }, extra);
+      for (const c of components) set(c.id, "0");
+      set("tokens_native_sol", "31.07");
+      set("kamino_lend", "400");
+      set("native_stake", "0", { coverage_status: "disabled", reason: "disabled" });
+      result.data.known_component_net_value_usd = "431.07";
+      expect(validResourcePayload("summary", result.data)).toBe(true);
+      return Response.json(result);
+    }
+    return Response.json(readFixture(resource, "complete"));
+  }));
+  render(<Portfolio address={DEMO_ADDRESS} />);
+  const strip = await screen.findByLabelText("Portfolio sources");
+  const links = Array.from(strip.querySelectorAll("a"));
+  expect(links.map((a) => a.getAttribute("href"))).toEqual(["#protocol-kamino", "#holdings"]);
+  expect(links[0]).toHaveTextContent("$400.00");
+  expect(links[1]).toHaveTextContent("$31.07");
+  expect(strip).toHaveTextContent("+1 protocol checked · nothing found");
+  expect(strip).toHaveTextContent("1 not available yet");
+});

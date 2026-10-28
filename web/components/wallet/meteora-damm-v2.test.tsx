@@ -322,49 +322,76 @@ it("finds a receipt by its protocol label in the holdings search", () => {
   expect(screen.getAllByRole("button", { name: /^Inspect .*holding$/ })).toHaveLength(1);
 });
 
-it.each([
-  ["disabled", false, null],
-  ["queued", false, null],
-  ["stale", true, "75"],
-] as const)(
-  "links a %s DAMM v2 summary component to its protocol section",
-  async (status, included, value) => {
-    const fetcher = vi.fn(async (input: string) => {
-      const url = new URL(input, "http://doxxd.test");
-      const resource = url.pathname.split("/").at(-1) as ResourceName;
-      const result = readFixture(resource, "complete");
-      if (resource === "summary" && result.ok && "components" in result.data) {
-        result.data.components.push({
-          id: "meteora_damm_v2",
-          source_path: `/wallets/${result.data.wallet}/meteora-damm-v2-positions`,
-          included_in_known_total: included,
-          coverage_complete: false,
-          coverage_fresh: false,
-          coverage_status: status,
-          reason: status,
-          known_net_value_usd: value,
-          snapshot_slot: null,
-        });
-        expect(validResourcePayload("summary", result.data)).toBe(true);
-      }
-      return Response.json(result);
-    });
-    vi.stubGlobal("fetch", fetcher);
-    const { DEMO_ADDRESS } = await import("@/lib/fixtures/wallet");
-    render(<Portfolio address={DEMO_ADDRESS} />);
-    const link = await screen.findByRole("link", { name: /Meteora DAMM v2/ });
-    expect(link).toHaveAttribute("href", "#protocol-meteora-damm-v2");
-    expect(document.getElementById("protocol-meteora-damm-v2")).not.toBeNull();
-    expect(screen.getByText("$12,345.67")).toBeVisible();
-    expect(
-      fetcher.mock.calls.every(([input]) => !String(input).includes("meteora-damm-v2")),
-    ).toBe(true);
-    if (status === "queued")
-      expect(screen.getByText(/sources? still updating/)).toBeVisible();
-    if (status === "stale") expect(screen.getByText(/^Saved data from/)).toBeVisible();
-    if (status === "disabled") expect(screen.queryByText(/sources? still updating/)).toBeNull();
-  },
-);
+async function renderDammSummary(
+  status: string,
+  included: boolean,
+  value: string | null,
+) {
+  const fetcher = vi.fn(async (input: string) => {
+    const url = new URL(input, "http://doxxd.test");
+    const resource = url.pathname.split("/").at(-1) as ResourceName;
+    const result = readFixture(resource, "complete");
+    if (resource === "summary" && result.ok && "components" in result.data) {
+      result.data.components.push({
+        id: "meteora_damm_v2",
+        source_path: `/wallets/${result.data.wallet}/meteora-damm-v2-positions`,
+        included_in_known_total: included,
+        coverage_complete: false,
+        coverage_fresh: false,
+        coverage_status: status,
+        reason: status,
+        known_net_value_usd: value,
+        snapshot_slot: null,
+      });
+      expect(validResourcePayload("summary", result.data)).toBe(true);
+    }
+    return Response.json(result);
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const { DEMO_ADDRESS } = await import("@/lib/fixtures/wallet");
+  render(<Portfolio address={DEMO_ADDRESS} />);
+  await screen.findByText("$12,345.67");
+  const noDetailFetch = () =>
+    fetcher.mock.calls.every(([input]) => !String(input).includes("meteora-damm-v2"));
+  return { noDetailFetch };
+}
+
+const dammLink = () => screen.queryByRole("link", { name: /Meteora DAMM v2/ });
+
+it("links a stale DAMM v2 summary component with a value to its protocol section", async () => {
+  const { noDetailFetch } = await renderDammSummary("stale", true, "75");
+  expect(await screen.findByRole("link", { name: /Meteora DAMM v2/ }))
+    .toHaveAttribute("href", "#protocol-meteora-damm-v2");
+  expect(document.getElementById("protocol-meteora-damm-v2")).not.toBeNull();
+  expect(noDetailFetch()).toBe(true);
+  expect(screen.getByText(/^Saved data from/)).toBeVisible();
+});
+
+it("links a valued DAMM v2 component that the known total excludes", async () => {
+  const { noDetailFetch } = await renderDammSummary("stale", false, "75");
+  expect(await screen.findByRole("link", { name: /Meteora DAMM v2/ }))
+    .toHaveAttribute("href", "#protocol-meteora-damm-v2");
+  expect(document.getElementById("protocol-meteora-damm-v2")).not.toBeNull();
+  expect(noDetailFetch()).toBe(true);
+});
+
+it("gives a disabled DAMM v2 component no chip but counts it as not available", async () => {
+  const { noDetailFetch } = await renderDammSummary("disabled", false, null);
+  expect(dammLink()).toBeNull();
+  expect(document.getElementById("protocol-meteora-damm-v2")).not.toBeNull();
+  expect(screen.getByText("1 not available yet")).toBeVisible();
+  expect(screen.queryByText(/sources? still updating/)).toBeNull();
+  expect(noDetailFetch()).toBe(true);
+});
+
+it("gives a queued DAMM v2 component no chip and leaves it to the header status", async () => {
+  const { noDetailFetch } = await renderDammSummary("queued", false, null);
+  expect(dammLink()).toBeNull();
+  expect(document.getElementById("protocol-meteora-damm-v2")).not.toBeNull();
+  expect(screen.queryByText(/not available yet/)).toBeNull();
+  expect(screen.getByText(/sources? still updating/)).toBeVisible();
+  expect(noDetailFetch()).toBe(true);
+});
 
 function copycatPage(resource: "orca" | "raydium-clmm" | "meteora") {
   const copycat = syntheticAddress("copycat/usdc-symbol");

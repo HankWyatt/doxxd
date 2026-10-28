@@ -11,6 +11,7 @@ import {
 } from "@/lib/dmnd/contracts";
 import { protocolResources, resources } from "@/lib/dmnd/resources";
 import { formatUsd } from "@/lib/decimal";
+import { chipModel } from "@/lib/portfolio/chips";
 import { ResourceState, LoadingRows } from "../resource-state";
 import { WalletFrame, usePortfolioSummary } from "./frame";
 import { Holdings } from "./holdings";
@@ -40,6 +41,7 @@ function PortfolioContent({
   const trading = useWalletPositions(address, mode);
   const summary = usePortfolioSummary();
   const [showAll, setShowAll] = useState(false);
+  const chips = chipModel(summary?.components ?? []);
   const represented = protocolResources.filter((resource) =>
     summary?.components.some(
       (c) =>
@@ -81,38 +83,29 @@ function PortfolioContent({
     <>
       {summary && (
         <div className="protocol-strip" aria-label="Portfolio sources">
-          {summary.components.map((c) => {
-            const resource = (
-              Object.keys(resources) as (keyof typeof resources)[]
-            ).find((r) => resources[r].componentId === c.id);
-            return (
-              <a
-                className="protocol-pill"
-                key={c.id}
-                href={
-                  resource === "overview"
-                    ? "#holdings"
-                    : resource
-                      ? "#protocol-" + resource
-                      : "#coverage"
-                }
-              >
-                <span className="protocol-icon">
-                  {resource ? resources[resource].label.slice(0, 2) : "·"}
-                </span>
-                <span>
-                  <span className="small">
-                    {resource
-                      ? resources[resource].label
-                      : c.id.replaceAll("_", " ")}
-                  </span>
-                  <strong className="numeric">
-                    {formatUsd(c.known_net_value_usd)}
-                  </strong>
-                </span>
-              </a>
-            );
-          })}
+          {chips.chips.map((chip) => (
+            <a className="protocol-pill" key={chip.id} href={chip.href}>
+              <span className="protocol-icon" aria-hidden="true">
+                {chip.initials}
+              </span>
+              <span>
+                <span className="small">{chip.label}</span>
+                <strong className="numeric">{formatUsd(chip.valueUsd)}</strong>
+              </span>
+            </a>
+          ))}
+          {chips.nothingFound > 0 && (
+            <span className="chip-note">
+              +{chips.nothingFound}{" "}
+              {chips.nothingFound === 1 ? "protocol" : "protocols"} checked ·
+              nothing found
+            </span>
+          )}
+          {chips.notAvailable > 0 && (
+            <span className="chip-note">
+              {chips.notAvailable} not available yet
+            </span>
+          )}
         </div>
       )}
       <RecoveryNotice state={overview.recovery} retained={Boolean(overview.refreshError)} retry={overview.refresh} />
