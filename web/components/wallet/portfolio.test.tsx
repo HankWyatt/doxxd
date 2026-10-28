@@ -23,12 +23,7 @@ function network(summaryError = false) {
 }
 it("shows holdings and protocol detail without changing the authoritative headline", async () => {
   network();
-  render(
-    <Portfolio
-      address={DEMO_ADDRESS}
-      mode={{ kind: "demo", scenario: "protocol-error" }}
-    />,
-  );
+  render(<Portfolio address={DEMO_ADDRESS} />);
   expect(await screen.findByText("$12,345.67")).toBeVisible();
   expect(await screen.findByText("USD Coin")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: /expand kamino/i }));
@@ -43,12 +38,7 @@ it("keeps holdings usable when the summary fails", async () => {
 });
 it("isolates a protocol failure from the rest of the wallet", async () => {
   network();
-  render(
-    <Portfolio
-      address={DEMO_ADDRESS}
-      mode={{ kind: "demo", scenario: "protocol-error" }}
-    />,
-  );
+  render(<Portfolio address={DEMO_ADDRESS} />);
   await screen.findByText("$12,345.67");
   fireEvent.click(screen.getByRole("button", { name: /expand orca/i }));
   expect(await screen.findByText("Couldn’t load this section")).toBeVisible();

@@ -4,6 +4,7 @@ import { PositionDetail } from "@/components/wallet/position-detail";
 import { ProtocolSection } from "@/components/wallet/protocol-section";
 import { useWalletResource } from "@/lib/use-wallet-resource";
 import type { ResourceData, Schemas, ProtocolResource } from "../dmnd/contracts";
+import { LIVE_MODE } from "../dmnd/contracts";
 import { validResourcePayload } from "../dmnd/validation.server";
 import { DEMO_ADDRESS, MINTS, readFixture } from "../fixtures/wallet";
 import { toProtocolView as adaptProtocol, type ProtocolPayload } from "./model";
@@ -167,7 +168,7 @@ it.each([
       recovery: "idle", refreshError: null,
     });
     const { container } = render(<ProtocolSection address={DEMO_ADDRESS}
-      resource="raydium-farms" mode={{ kind: "demo", scenario: "complete" }} labels={{}} />);
+      resource="raydium-farms" mode={LIVE_MODE} labels={{}} />);
     fireEvent.click(screen.getByRole("button", { name: "Expand Raydium farms" }));
     const note = container.querySelector<HTMLElement>(".coverage-note")!;
     fireEvent.click(note.querySelector("summary")!);

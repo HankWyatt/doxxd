@@ -23,15 +23,11 @@ export function activityHref(
   source: "transactions" | "activity" = "transactions",
 ): string {
   const params = new URLSearchParams();
-  if (mode.kind === "demo") {
-    params.set("tab", "activity");
-    if (mode.scenario !== "complete") params.set("scenario", mode.scenario);
-  }
   if (window.from) params.set("from", window.from);
   if (window.to) params.set("to", window.to);
   if (cursor) params.set("cursor", cursor);
   if (source === "activity") params.set("source", "activity");
-  const path = mode.kind === "demo" ? "/demo" : walletHref(wallet, "activity");
+  const path = walletHref(wallet, "activity");
   return path + (params.size ? "?" + params.toString() : "");
 }
 export function activityPageInput(

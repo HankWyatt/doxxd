@@ -58,29 +58,13 @@ function FrameContent({
   children: React.ReactNode;
 }) {
   const summary = useWalletResource(address, "summary", {}, mode);
-  const href = (next: "portfolio" | "activity") =>
-    mode.kind === "demo"
-      ? "/demo?" +
-        new URLSearchParams({
-          tab: next,
-          ...(mode.scenario === "complete" ? {} : { scenario: mode.scenario }),
-        }).toString()
-      : walletHref(address, next);
+  const href = (next: "portfolio" | "activity") => walletHref(address, next);
   return (
     <main className="page">
-      {mode.kind === "demo" && (
-        <div className="demo-banner">
-          <span className="badge demo">Demo data</span>
-          <span>Illustrative portfolio. No live wallet is queried.</span>
-          <a href="/" className="hide-mobile">
-            Explore an address <ArrowUpRight size={12} />
-          </a>
-        </div>
-      )}
       <div className="breadcrumb">
         <a href="/">Explorer</a>
         <ChevronRight size={11} />
-        <span>{mode.kind === "demo" ? "Demo wallet" : "Wallet"}</span>
+        <span>Wallet</span>
       </div>
       <div className="wallet-topline">
         <div className="wallet-id">
@@ -88,7 +72,7 @@ function FrameContent({
             <Wallet size={21} />
           </span>
           <div>
-            <h1>{mode.kind === "demo" ? "Demo wallet" : short(address)}</h1>
+            <h1>{short(address)}</h1>
             <div className="inline small muted">
               <span className="mono">{short(address)}</span>
               <CopyButton

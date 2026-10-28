@@ -61,7 +61,7 @@ export const fixtureScenarios = [
   "truncated",
 ] as const;
 export type FixtureScenario = (typeof fixtureScenarios)[number];
-export type WalletDataMode =
-  | { kind: "live" }
-  | { kind: "demo"; scenario: FixtureScenario };
+// Wallet pages read live data only. Synthetic fixtures are a test transport:
+// tests intercept /api/wallet requests and no fixture route or mode ships.
+export type WalletDataMode = { kind: "live" };
 export const LIVE_MODE: WalletDataMode = { kind: "live" };

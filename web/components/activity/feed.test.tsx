@@ -63,15 +63,11 @@ it("shows grouped activity independently of unavailable portfolio valuation", as
 });
 it("retains pagination on an empty activity page", async () => {
   network("activity-continuation");
-  render(
-    <Activity
-      address={DEMO_ADDRESS}
-      mode={{ kind: "demo", scenario: "activity-continuation" }}
-    />,
-  );
-  expect(
-    await screen.findByRole("link", { name: /load more/i }),
-  ).toHaveAttribute("href", expect.stringContaining("cursor=demo-next"));
+  render(<Activity address={DEMO_ADDRESS} />);
+  const more = await screen.findByRole("link", { name: /load more/i });
+  const href = new URL(more.getAttribute("href")!, "https://doxxd.test");
+  expect(href.pathname).toBe("/wallet/" + DEMO_ADDRESS + "/activity");
+  expect(href.searchParams.get("cursor")).toBe("demo-next");
   expect(screen.getByText(/another page is available/i)).toBeVisible();
 });
 it("distinguishes incomplete capture from no wallet history", async () => {

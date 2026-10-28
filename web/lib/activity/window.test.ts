@@ -32,16 +32,12 @@ it("normalizes explicit offsets to UTC and permits a genuinely unbounded window"
   ).toEqual({ from: "2026-10-01T00:00:00.000Z" });
   expect(parseActivityWindow(new URLSearchParams())).toEqual({});
 });
-it("binds fallback cursors to their source and retains demo mode only on the demo route", () => {
-  const href = activityHref(
-    DEMO_ADDRESS,
-    {},
-    "next",
-    { kind: "demo", scenario: "activity-continuation" },
-    "activity",
-  );
+it("binds fallback cursors to their source on the wallet activity route", () => {
+  const href = activityHref(DEMO_ADDRESS, {}, "next", undefined, "activity");
   const url = new URL(href, "https://doxxd.test");
-  expect(url.pathname).toBe("/demo");
+  expect(url.pathname).toBe("/wallet/" + DEMO_ADDRESS + "/activity");
   expect(url.searchParams.get("source")).toBe("activity");
-  expect(url.searchParams.get("scenario")).toBe("activity-continuation");
+  expect(url.searchParams.get("cursor")).toBe("next");
+  expect(url.searchParams.has("scenario")).toBe(false);
+  expect(url.searchParams.has("tab")).toBe(false);
 });

@@ -51,22 +51,20 @@ it("never selects demo data from a live wallet query", async () => {
   );
   expect(String(network.mock.calls[0]?.[0])).toContain("/api/wallet/");
 });
-it("fetches demo resources through the explicit demo boundary", async () => {
+it("fetches resources only through the same-origin wallet route", async () => {
   const network = vi.fn(
     async (_url: RequestInfo | URL) =>
       new Response(JSON.stringify(readFixture("summary", "complete"))),
   );
   vi.stubGlobal("fetch", network);
   const { result } = renderHook(() =>
-    useWalletResource(
-      DEMO_ADDRESS,
-      "summary",
-      {},
-      { kind: "demo", scenario: "complete" },
-    ),
+    useWalletResource(DEMO_ADDRESS, "summary"),
   );
   await waitFor(() => expect(result.current.result?.ok).toBe(true));
-  expect(String(network.mock.calls[0]?.[0])).toContain("/api/demo/summary");
+  expect(network).toHaveBeenCalledTimes(1);
+  expect(String(network.mock.calls[0]?.[0])).toBe(
+    "/api/wallet/" + DEMO_ADDRESS + "/summary",
+  );
 });
 it("bounds simultaneously open protocol requests to four", async () => {
   const finishes: (() => void)[] = [];
@@ -101,14 +99,7 @@ it("bounds simultaneously open protocol requests to four", async () => {
       "drift",
     ] as ProtocolResource[]
   ).map((resource) =>
-    renderHook(() =>
-      useWalletResource(
-        DEMO_ADDRESS,
-        resource,
-        {},
-        { kind: "demo", scenario: "complete" },
-      ),
-    ),
+    renderHook(() => useWalletResource(DEMO_ADDRESS, resource)),
   );
   await waitFor(() => expect(finishes.length).toBe(4));
   await act(async () => {

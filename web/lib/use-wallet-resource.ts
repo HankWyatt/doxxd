@@ -123,11 +123,7 @@ export function useWalletResource<K extends ResourceName>(
     const params = new URLSearchParams();
     for (const [k, v] of Object.entries(query))
       if (v !== undefined) params.set(k, String(v));
-    if (mode.kind === "demo") params.set("scenario", mode.scenario);
-    const path =
-      mode.kind === "demo"
-        ? "/api/demo/" + resource
-        : "/api/wallet/" + encodeURIComponent(wallet) + "/" + resource;
+    const path = "/api/wallet/" + encodeURIComponent(wallet) + "/" + resource;
     const url = path + (params.size ? "?" + params.toString() : "");
     const run = async (automatic: boolean) => {
       if (!current || inFlight) return;

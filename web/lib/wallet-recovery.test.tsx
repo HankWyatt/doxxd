@@ -172,14 +172,13 @@ it.each(["partial", "stale", "unpriced"] as const)("does not poll terminal %s co
   expect(network).toHaveBeenCalledTimes(1);
 });
 
-it("does not auto-refresh the demo, activity, or continuation pages", async () => {
+it("does not auto-refresh the activity or continuation pages", async () => {
   const network = respond(readFixture("summary", "pending"));
-  renderHook(() => useWalletResource(DEMO_ADDRESS, "summary", {}, { kind: "demo", scenario: "pending" }));
   renderHook(() => useWalletResource(DEMO_ADDRESS, "activity"));
   renderHook(() => useWalletResource(DEMO_ADDRESS, "kamino", { cursor: "page2" }));
   await flush();
   await advance(150_000);
-  expect(network).toHaveBeenCalledTimes(3);
+  expect(network).toHaveBeenCalledTimes(2);
 });
 
 it("still exposes failed activity refreshes to its existing error UI", async () => {
