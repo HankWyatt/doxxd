@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Layers3 } from "lucide-react";
 import { useWalletResource } from "@/lib/use-wallet-resource";
 import {
@@ -48,6 +48,22 @@ function PortfolioContent({
     ? represented
     : (["stake", "kamino", "orca"] satisfies ProtocolResource[]);
   const other = protocolResources.filter((r) => !featured.includes(r));
+  // A receipt link reveals hidden protocol views, then follows the anchor once
+  // its section is mounted.
+  const [target, setTarget] = useState<ProtocolResource | null>(null);
+  useEffect(() => {
+    if (!target) return;
+    const id = "protocol-" + target;
+    const element = document.getElementById(id);
+    if (!element) return;
+    setTarget(null);
+    if (window.location.hash === "#" + id) element.scrollIntoView?.();
+    else window.location.hash = id;
+  }, [target, showAll]);
+  function showProtocol(resource: ProtocolResource) {
+    if (!featured.includes(resource)) setShowAll(true);
+    setTarget(resource);
+  }
   const labels: Record<string, string> = {
     So11111111111111111111111111111111111111112: "WSOL",
   };
@@ -97,7 +113,11 @@ function PortfolioContent({
           <LoadingRows />
         </div>
       ) : overview.result.ok ? (
-        <Holdings key={address} overview={overview.result.data} />
+        <Holdings
+          key={address}
+          overview={overview.result.data}
+          showProtocol={showProtocol}
+        />
       ) : (
         <div className="panel">
           <ResourceState error={overview.result} retry={overview.refresh} />

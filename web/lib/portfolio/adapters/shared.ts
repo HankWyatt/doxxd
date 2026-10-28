@@ -11,7 +11,7 @@ export const sourceClockNote = {
 export const short = (value: string) =>
   value.length > 16 ? value.slice(0, 5) + "…" + value.slice(-5) : value;
 export function mintName(mint: string): string {
-  return mint === "So11111111111111111111111111111111111111112"
+  return mint === WSOL_MINT
     ? "WSOL"
     : mint === "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
       ? "USDC"
@@ -26,6 +26,11 @@ export const position = (id: string, label: string): PositionView => ({
   valueUsd: null,
   details: [],
 });
+const WSOL_MINT = "So11111111111111111111111111111111111111112";
+// Wrapped SOL keeps the WSOL label used across LP rows, even though DMND
+// reports its symbol as SOL. Blank symbols fall back to the short mint.
+export const legLabel = (row: { mint: string; symbol?: string | null }) =>
+  (row.mint !== WSOL_MINT && row.symbol?.trim()) || mintName(row.mint);
 export const leg = (row: {
   mint: string;
   symbol?: string | null;
@@ -33,7 +38,7 @@ export const leg = (row: {
   value_usd?: string | null;
   amount_reason?: string | null;
 }): AmountView => ({
-  label: row.symbol?.trim() ? row.symbol : mintName(row.mint),
+  label: legLabel(row),
   mint: row.mint,
   amount: row.ui_amount ?? null,
   valueUsd: row.value_usd ?? null,

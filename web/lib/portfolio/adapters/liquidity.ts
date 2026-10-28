@@ -1,7 +1,14 @@
 import type { Schemas } from "../../dmnd/contracts";
 import type { AmountView, PositionView } from "../model";
 import { atomsToUi } from "../../decimal";
-import { position, leg, mintName, sourceDetail, sourceClockNote } from "./shared";
+import {
+  position,
+  leg,
+  legLabel,
+  mintName,
+  sourceDetail,
+  sourceClockNote,
+} from "./shared";
 export function sourceContextDetails(
   sources: Schemas["WalletFungibleLiquiditySource"][],
   prefix = "Source",
@@ -17,7 +24,7 @@ export function liquidityRows(
   return raw.data.map((row) => ({
     ...position(
       row.position,
-      mintName(row.principal_a.mint) + " / " + mintName(row.principal_b.mint),
+      legLabel(row.principal_a) + " / " + legLabel(row.principal_b),
     ),
     assets: [leg(row.principal_a), leg(row.principal_b)],
     rewards: row.rewards.map((r) => ({
@@ -52,7 +59,7 @@ export function meteoraRows(
   return raw.data.map((row) => ({
     ...position(
       row.position,
-      mintName(row.principal_x.mint) + " / " + mintName(row.principal_y.mint),
+      legLabel(row.principal_x) + " / " + legLabel(row.principal_y),
     ),
     assets: [leg(row.principal_x), leg(row.principal_y)],
     rewards: row.rewards.map((r) => ({
@@ -108,11 +115,6 @@ export function dammV2Rows(
     const assets = [row.token_a, row.token_b].map(
       (source): AmountView => ({
         ...leg(source),
-        amount:
-          source.ui_amount ??
-          (source.decimals == null
-            ? null
-            : atomsToUi(source.amount_atoms, source.decimals)),
         sourceDetails: [
           sourceDetail("Mint", source.mint),
           sourceDetail("Raw atoms", source.amount_atoms),

@@ -34,8 +34,11 @@ type Receipt = {
   resource?: ProtocolResource;
   position: string | null;
   pool: string | null;
-  metadata: string | null;
+  // Creator-supplied token metadata: searchable, never a trust signal.
+  tokenSymbol: string | null;
+  tokenName: string | null;
 };
+type ShowProtocol = (resource: ProtocolResource) => void;
 // An LP position NFT is a receipt for a protocol position: it is never valued
 // here, and its token metadata is creator-supplied rather than a trust signal.
 function positionReceipt(asset: Schemas["WalletAsset"]): Receipt | null {
@@ -44,16 +47,13 @@ function positionReceipt(asset: Schemas["WalletAsset"]): Receipt | null {
   const resource = protocolResources.find(
     (r) => resources[r].componentId === protocol,
   );
-  const metadata = [asset.symbol, asset.name]
-    .map((value) => value?.trim())
-    .filter(Boolean)
-    .join(" · ");
   return {
     label: resource ? resources[resource].label : protocol.replaceAll("_", " "),
     resource,
     position: asset.position.position ?? null,
     pool: asset.position.pool ?? null,
-    metadata: metadata || null,
+    tokenSymbol: asset.symbol?.trim() || null,
+    tokenName: asset.name?.trim() || null,
   };
 }
 function AssetIcon({ row }: { row: Row }) {
@@ -76,12 +76,27 @@ function AssetIcon({ row }: { row: Row }) {
 }
 export function Holdings({
   overview,
+  showProtocol,
 }: {
   overview: Schemas["WalletOverview"];
+  /** Reveals and scrolls to a protocol section; without it receipts are not linked. */
+  showProtocol?: ShowProtocol;
 }) {
-  return <HoldingsTable key={overview.wallet} overview={overview} />;
+  return (
+    <HoldingsTable
+      key={overview.wallet}
+      overview={overview}
+      showProtocol={showProtocol}
+    />
+  );
 }
-function HoldingsTable({ overview }: { overview: Schemas["WalletOverview"] }) {
+function HoldingsTable({
+  overview,
+  showProtocol,
+}: {
+  overview: Schemas["WalletOverview"];
+  showProtocol?: ShowProtocol;
+}) {
   const [open, setOpen] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
@@ -150,7 +165,14 @@ function HoldingsTable({ overview }: { overview: Schemas["WalletOverview"] }) {
   const search = query.trim().toLowerCase();
   const matches = search
     ? rows.filter((row) =>
-        [row.symbol, row.name, row.mint, row.id].some((value) =>
+        [
+          row.symbol,
+          row.name,
+          row.mint,
+          row.id,
+          row.receipt?.tokenSymbol,
+          row.receipt?.tokenName,
+        ].some((value) =>
           value?.toLowerCase().includes(search),
         ),
       )
@@ -344,7 +366,12 @@ function HoldingsTable({ overview }: { overview: Schemas["WalletOverview"] }) {
                               <dt>Token accounts</dt>
                               <dd>{row.accountCount ?? "Native balance"}</dd>
                             </div>
-                            {row.receipt && <ReceiptDetail receipt={row.receipt} />}
+                            {row.receipt && (
+                              <ReceiptDetail
+                                receipt={row.receipt}
+                                showProtocol={showProtocol}
+                              />
+                            )}
                           </dl>
                         </td>
                       </tr>
@@ -419,15 +446,33 @@ function HoldingsTable({ overview }: { overview: Schemas["WalletOverview"] }) {
     </section>
   );
 }
-function ReceiptDetail({ receipt }: { receipt: Receipt }) {
+function ReceiptDetail({
+  receipt,
+  showProtocol,
+}: {
+  receipt: Receipt;
+  showProtocol?: ShowProtocol;
+}) {
+  const { resource } = receipt;
   const unidentified = receipt.position === null || receipt.pool === null;
+  const metadata = [receipt.tokenSymbol, receipt.tokenName]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <>
       <div>
         <dt>Protocol position</dt>
         <dd>
-          {receipt.resource ? (
-            <a href={"#protocol-" + receipt.resource}>{receipt.label}</a>
+          {resource && showProtocol ? (
+            <a
+              href={"#protocol-" + resource}
+              onClick={(event) => {
+                event.preventDefault();
+                showProtocol(resource);
+              }}
+            >
+              {receipt.label}
+            </a>
           ) : (
             receipt.label
           )}
@@ -445,16 +490,20 @@ function ReceiptDetail({ receipt }: { receipt: Receipt }) {
         <dt>Receipt reference</dt>
         <dd>
           This NFT is a receipt for an LP position and overlaps protocol
-          positions. It has no price or value of its own; the position&apos;s
-          principal is reported in its protocol section.
+          positions. It has no price or value of its own here.
+          {resource
+            ? " Look for this position in the " +
+              receipt.label +
+              " protocol section; that section reports its own coverage."
+            : " Doxxd has no protocol view for this receipt, so its position is not shown."}
           {unidentified &&
-            " The source does not identify a single position before the wallet’s first completed position scan, or when one NFT backs several positions."}
+            " The source does not identify a single position when the wallet’s position scan is disabled or has not had a first completed position scan, or when one NFT backs several positions."}
         </dd>
       </div>
-      {receipt.metadata && (
+      {metadata && (
         <div>
           <dt>Token metadata</dt>
-          <dd>{receipt.metadata} (creator-supplied, not verified)</dd>
+          <dd>{metadata} (creator-supplied, not verified)</dd>
         </div>
       )}
     </>

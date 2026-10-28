@@ -25,19 +25,37 @@ it("presents the pair with provided symbols and short-mint fallbacks", () => {
   expect(detail(row.details, "Position NFT mint")).toBe(DAMM.positionMint);
 });
 
-it("derives leg amounts from atoms and decimals and keeps unknown value unknown", () => {
+it("uses DMND's leg amounts and keeps unknown value unknown", () => {
   const [a, b] = view().positions[0].assets;
   expect(a).toMatchObject({ label: "SYNA", mint: DAMM.tokenA, amount: "2.5", valueUsd: "40" });
   expect(b).toMatchObject({ mint: DAMM.tokenB, amount: "1234.5", valueUsd: null });
+  expect(b.qualifier).toBeUndefined();
   expect(b.sourceDetails).toContainEqual({ label: "Raw atoms", value: "1234500000" });
 });
 
-it("keeps a leg amount unknown when its decimals are unknown", () => {
+it("never derives a leg amount the source left unknown", () => {
   const data = dammV2Page();
+  // Same pass-through as Orca, Raydium CLMM and DLMM legs.
+  data.data[0].token_b.ui_amount = null;
+  expect(view(data).positions[0].assets[1].amount).toBeNull();
   data.data[0].token_b.decimals = null;
+  data.data[0].token_b.value_reason = "decimals_unknown";
   const b = view(data).positions[0].assets[1];
   expect(b.amount).toBeNull();
   expect(b.sourceDetails).toContainEqual({ label: "Raw atoms", value: "1234500000" });
+});
+
+it("labels a wrapped SOL pair consistently and trims symbols", () => {
+  const data = dammV2Page();
+  data.data[0].token_a.mint = "So11111111111111111111111111111111111111112";
+  data.data[0].token_a.symbol = "SOL";
+  data.data[0].token_b.symbol = "  SYNB  ";
+  const row = view(data).positions[0];
+  expect(row.label).toBe("WSOL / SYNB");
+  expect(row.assets.map((a) => a.label)).toEqual(["WSOL", "SYNB"]);
+  expect(row.rewards.slice(0, 2).map((a) => a.label)).toEqual(["WSOL", "SYNB"]);
+  data.data[0].token_b.symbol = " \t ";
+  expect(view(data).positions[0].label).toBe("WSOL / " + short(DAMM.tokenB));
 });
 
 it("shows claimable fees and rewards without a USD value", () => {
@@ -128,8 +146,40 @@ it("provides a synthetic empty demo page like Meteora DLMM", () => {
 it("labels shared liquidity legs with a provided symbol", () => {
   const result = readFixture("orca", "complete");
   if (!result.ok) throw new Error("Fixture must succeed");
-  result.data.data[0].principal_b.symbol = "SYNB";
-  result.data.data[0].principal_a.symbol = " ";
+  result.data.data[0].principal_b.symbol = " SYNB ";
+  result.data.data[0].principal_a.symbol = "SOL";
   const row = toProtocolView({ resource: "orca", data: result.data }).positions[0];
+  expect(row.assets.map((a) => a.label)).toEqual(["WSOL", "SYNB"]);
+  expect(row.label).toBe("WSOL / SYNB");
+});
+
+it("titles DLMM pairs with the same leg labels", () => {
+  const result = readFixture("meteora", "complete");
+  if (!result.ok) throw new Error("Fixture must succeed");
+  const orca = readFixture("orca", "complete");
+  if (!orca.ok) throw new Error("Fixture must succeed");
+  const source = orca.data.data[0];
+  result.data.data = [
+    {
+      position: DAMM.position,
+      pair: DAMM.pool,
+      program: DAMM.program,
+      lower_bin_id: -10,
+      upper_bin_id: 10,
+      principal_x: { ...source.principal_a, symbol: "SOL" },
+      principal_y: { ...source.principal_b, mint: DAMM.tokenB, symbol: "SYNB" },
+      fee_pending_x_atoms: "1",
+      fee_pending_y_atoms: "2",
+      rewards: [],
+      owner_slot: 410000003,
+      position_slot: 410000002,
+      pair_slot: 410000001,
+      bin_arrays_slot: 410000001,
+      snapshot_slot: 410000004,
+    },
+  ];
+  expect(validResourcePayload("meteora", result.data)).toBe(true);
+  const row = toProtocolView({ resource: "meteora", data: result.data }).positions[0];
+  expect(row.label).toBe("WSOL / SYNB");
   expect(row.assets.map((a) => a.label)).toEqual(["WSOL", "SYNB"]);
 });

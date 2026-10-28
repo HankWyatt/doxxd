@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { ProtocolSection } from "./protocol-section";
 import { Holdings } from "./holdings";
@@ -122,6 +122,7 @@ function receiptOverview(position: Schemas["WalletAssetPosition"]) {
 }
 
 it("labels an LP position NFT as an unvalued receipt overlapping the protocol section", () => {
+  const showProtocol = vi.fn();
   render(
     <Holdings
       overview={receiptOverview({
@@ -129,6 +130,7 @@ it("labels an LP position NFT as an unvalued receipt overlapping the protocol se
         position: DAMM.position,
         pool: DAMM.pool,
       })}
+      showProtocol={showProtocol}
     />,
   );
   const button = screen.getByRole("button", {
@@ -143,9 +145,14 @@ it("labels an LP position NFT as an unvalued receipt overlapping the protocol se
   const detail = row.nextElementSibling as HTMLElement;
   expect(within(detail).getByText(DAMM.position)).toBeVisible();
   expect(within(detail).getByText(DAMM.pool)).toBeVisible();
-  expect(within(detail).getByRole("link", { name: "Meteora DAMM v2" }))
-    .toHaveAttribute("href", "#protocol-meteora-damm-v2");
+  const link = within(detail).getByRole("link", { name: "Meteora DAMM v2" });
+  expect(link).toHaveAttribute("href", "#protocol-meteora-damm-v2");
+  fireEvent.click(link);
+  expect(showProtocol).toHaveBeenCalledWith("meteora-damm-v2");
   expect(within(detail).getByText(/overlaps protocol positions/i)).toBeVisible();
+  // The section has its own coverage; the receipt never asserts what it shows.
+  expect(within(detail).getByText(/that section reports its own coverage/i)).toBeVisible();
+  expect(within(detail).queryByText(/principal is reported/i)).toBeNull();
   expect(within(detail).getByText(/CLAIMED · Creator-supplied name/)).toBeVisible();
   expect(within(detail).getByText(/not verified/i)).toBeVisible();
   expect(within(detail).queryByText(/\$999/)).toBeNull();
@@ -167,6 +174,74 @@ it("labels a receipt whose position and pool are not yet identified", () => {
   );
   expect(screen.getAllByText("Not reported")).toHaveLength(2);
   expect(screen.getByText(/first completed position scan/i)).toBeVisible();
+  expect(screen.getByText(/scan is disabled/i)).toBeVisible();
+  // Without a mounted section target there is no link, only the label.
+  expect(screen.queryByRole("link", { name: "Meteora DAMM v2" })).toBeNull();
+  expect(screen.getByText("Meteora DAMM v2")).toBeVisible();
+});
+
+it("does not point an unknown protocol receipt at a protocol section", () => {
+  render(
+    <Holdings
+      overview={receiptOverview({ protocol: "future_amm", position: null, pool: null })}
+      showProtocol={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Inspect future amm position holding" }));
+  expect(screen.getByText(/Doxxd has no protocol view for this receipt/)).toBeVisible();
+  expect(screen.queryByText(/protocol section/i)).toBeNull();
+  expect(screen.queryByRole("link", { name: "future amm" })).toBeNull();
+});
+
+it.each(["claimed", "creator-supplied"])(
+  "finds a receipt by its own token metadata %s and keeps it labelled",
+  (query) => {
+    render(
+      <Holdings
+        overview={receiptOverview({ protocol: "meteora_damm_v2", position: null, pool: null })}
+      />,
+    );
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search observed holdings" }), {
+      target: { value: query },
+    });
+    expect(screen.getAllByRole("button", { name: /^Inspect .*holding$/ })).toEqual([
+      screen.getByRole("button", { name: "Inspect Meteora DAMM v2 position holding" }),
+    ]);
+    expect(screen.getByText("LP position receipt")).toBeVisible();
+  },
+);
+
+it("reveals a hidden protocol view before following a receipt link", async () => {
+  const fetcher = vi.fn(async (input: string) => {
+    const url = new URL(input, "http://doxxd.test");
+    const resource = url.pathname.split("/").at(-1) as ResourceName;
+    if (resource === "summary")
+      return Response.json({ ok: false, kind: "configuration" });
+    if (resource === "overview")
+      return Response.json({
+        ok: true,
+        data: receiptOverview({
+          protocol: "meteora_damm_v2",
+          position: DAMM.position,
+          pool: DAMM.pool,
+        }),
+      });
+    return Response.json(readFixture(resource, "complete"));
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const { DEMO_ADDRESS } = await import("@/lib/fixtures/wallet");
+  render(<Portfolio address={DEMO_ADDRESS} />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Inspect Meteora DAMM v2 position holding" }),
+  );
+  expect(document.getElementById("protocol-meteora-damm-v2")).toBeNull();
+  fireEvent.click(screen.getByRole("link", { name: "Meteora DAMM v2" }));
+  expect(await screen.findByRole("button", { name: "Show fewer protocols" })).toBeVisible();
+  expect(document.getElementById("protocol-meteora-damm-v2")).not.toBeNull();
+  await waitFor(() => expect(window.location.hash).toBe("#protocol-meteora-damm-v2"));
+  expect(
+    fetcher.mock.calls.every(([input]) => !String(input).includes("meteora-damm-v2")),
+  ).toBe(true);
 });
 
 it("labels Orca, Raydium and unknown LP receipts without valuing them", () => {
