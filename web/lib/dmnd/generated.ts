@@ -1165,7 +1165,7 @@ export interface paths {
         };
         /**
          * List token accounts and snapshot coverage for a wallet
-         * @description Positive token accounts seen by DMND's balance stream or an owner-wide background snapshot, including airdrops, transfers and non-associated accounts. Each account is a separate row. When coverage.complete is true, token-account holdings excluding WSOL have been scanned and reconciled with uninterrupted live ingest. An incomplete empty page does not establish a zero balance. Native SOL and wrapped SOL are reported separately as decimal lamports at their own snapshot slots, if available. WSOL is not live-stream complete. USD prices require a selected-pool token trade at most one hour old, with required quote conversion and SOL/USD observations no more than 120 seconds old; responses can be cached for up to five seconds, bounded by actual conversion expiry. Confirmed NFTs and one-unit zero-decimal candidates awaiting a fresh non-NFT inspection are left unpriced. DeFi positions are not included. The request itself never reads upstream RPC; when enabled, it queues a bounded background scan.
+         * @description Positive token accounts seen by DMND's balance stream or an owner-wide background snapshot, including airdrops, transfers and non-associated accounts. Each account is a separate row. When coverage.complete is true, token-account holdings excluding WSOL have been scanned and reconciled with uninterrupted live ingest. An incomplete empty page does not establish a zero balance. Native SOL and wrapped SOL are reported separately as decimal lamports at their own snapshot slots, if available. WSOL is not live-stream complete. USD prices require a selected-pool token trade at most one hour old, with required quote conversion and SOL/USD observations no more than 120 seconds old; responses can be cached for up to five seconds, bounded by actual conversion expiry. Confirmed NFTs and one-unit zero-decimal candidates awaiting a fresh non-NFT inspection are left unpriced. DeFi positions are not included. name, symbol and image_url come from DMND's token index; where it has none, they come from the mint's latest saved metadata inspection, which reads Token-2022 TokenMetadata (in the mint or through its metadata pointer) before Metaplex Token Metadata. The request itself never reads upstream RPC; when enabled, it queues a bounded background scan.
          */
         get: operations["getWalletHoldings"];
         put?: never;
@@ -1296,6 +1296,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/wallets/{wallet}/meteora-damm-v2-positions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List held Meteora DAMM v2 positions
+         * @description Pages saved finalized Meteora DAMM v2 (cp-amm) positions whose position NFT the wallet holds directly. A bounded background scan uses standard Solana RPC to find one-unit, zero-decimal token accounts in both token programs, derive each Position account, read each position with its pool and the Clock sysvar at one finalized slot, and confirm the holdings again before saving. The public read uses DMND rows only. Token amounts are exact atoms for the position's total liquidity (unlocked, vesting and permanently locked) at the saved pool price, floored as cp-amm floors a withdrawal and before any Token-2022 transfer fee. Claimable fees and rewards are exact atoms at the snapshot clock; rewards have no USD value. USD values require a selected-pool token trade at most one hour old, with required quote conversion and SOL/USD observations no more than 120 seconds old. Fresh complete zero-row coverage verifies that no position NFT is directly held at the snapshot slot; positions held through custody, vaults or lockers, and DAMM v1 positions, are outside this scope.
+         */
+        get: operations["getWalletMeteoraDammV2Positions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/wallets/{wallet}/meteora-dlmm-positions": {
         parameters: {
             query?: never;
@@ -1305,7 +1325,7 @@ export interface paths {
         };
         /**
          * List directly owned Meteora DLMM positions
-         * @description Pages saved finalized directly owned Meteora PositionV2 accounts. A bounded background scan uses standard Solana RPC to discover old and current positions, verify ownership and compute exact per-bin principal atoms. The public read uses DMND rows only. USD values require a selected-pool token trade at most one hour old, with required quote conversion and SOL/USD observations no more than 120 seconds old. Pending fee and reward counters are lower bounds. Fresh complete zero-row coverage verifies no directly owned PositionV2 at the snapshot slot; custody, staking, DAMM and vault positions are outside this scope.
+         * @description Pages saved finalized directly owned Meteora PositionV2 accounts. A bounded background scan uses standard Solana RPC to discover old and current positions, verify ownership and compute exact per-bin principal atoms. The public read uses DMND rows only. USD values require a selected-pool token trade at most one hour old, with required quote conversion and SOL/USD observations no more than 120 seconds old. Pending fee and reward counters are lower bounds. Fresh complete zero-row coverage verifies no directly owned PositionV2 at the snapshot slot; custody, staking, DAMM v1 and vault positions are outside this scope; DAMM v2 positions have their own resource.
          */
         get: operations["getWalletMeteoraDlmmPositions"];
         put?: never;
@@ -1344,8 +1364,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List observed uncompressed Metaplex NFT candidates for a wallet
-         * @description Pages one-unit zero-decimal token accounts in (mint, token_account) order. A row is confirmed only after a background finalized mint and Metaplex metadata inspection. Pending, non-NFT, unsupported, and queue-full rows remain visible so pagination is stable. Coverage applies to token-account Metaplex NFTs only; compressed Bubblegum and Metaplex Core assets are not indexed. An incomplete empty page does not establish that the wallet owns no NFTs. Public requests never call Solana RPC or fetch metadata URIs.
+         * List observed uncompressed token-account NFT candidates for a wallet
+         * @description Pages one-unit zero-decimal token accounts in (mint, token_account) order. A row is confirmed only after a background finalized mint and on-chain metadata inspection (Metaplex Token Metadata, or Token-2022 TokenMetadata when no Metaplex account exists). Pending, non-NFT, unsupported, and queue-full rows remain visible so pagination is stable. Coverage applies to token-account Metaplex Token Metadata and Token-2022 metadata NFTs only; compressed Bubblegum and Metaplex Core assets are not indexed. An incomplete empty page does not establish that the wallet owns no NFTs. Public requests never call Solana RPC or fetch metadata URIs.
          */
         get: operations["getWalletNfts"];
         put?: never;
@@ -1365,7 +1385,7 @@ export interface paths {
         };
         /**
          * Aggregate a wallet's token assets and known USD value
-         * @description Groups positive SPL Token and Token-2022 accounts by mint, up to 5,000 accounts. Native SOL and wrapped SOL are separate slot-stamped snapshot balances; WSOL token rows are excluded from assets and known value to avoid counting the snapshot balance twice. known_value_usd sums assets with a known quantity and USD conversion whose selected-pool token trade is at most one hour old and required quote conversion and SOL/USD observations are no more than 120 seconds old. observed_price_usd keeps an older selected-pool observation separate and converts it through the same fresh conversion references; estimated_value_usd and estimated_known_value_usd identify values derived from those observations. Trailing 24-hour volume uses current conversion legs and remains null if an active pool volume cannot be converted. Responses can be cached for up to five seconds, bounded by actual conversion expiry. Confirmed NFTs and one-unit zero-decimal candidates awaiting a fresh non-NFT inspection are excluded from both valuation paths. It is not net worth. Use coverage to distinguish an incomplete wallet scan from an empty wallet. NFT valuations and DeFi positions are not included. This request never calls upstream RPC.
+         * @description Groups positive SPL Token and Token-2022 accounts by mint, up to 5,000 accounts. Native SOL and wrapped SOL are separate slot-stamped snapshot balances; WSOL token rows are excluded from assets and known value to avoid counting the snapshot balance twice. known_value_usd sums assets with a known quantity and USD conversion whose selected-pool token trade is at most one hour old and required quote conversion and SOL/USD observations are no more than 120 seconds old. observed_price_usd keeps an older selected-pool observation separate and converts it through the same fresh conversion references; estimated_value_usd and estimated_known_value_usd identify values derived from those observations. Trailing 24-hour volume uses current conversion legs and remains null if an active pool volume cannot be converted. This optional volume read admits at most 256 distinct requested mints and 2,048 pools across those mints. Above either work limit, all assets' volume_24h_usd values remain null; token quantities, metadata and prices still use the normal reader. These limits are work bounds, not a throughput guarantee. Responses can be cached for up to five seconds, bounded by actual conversion expiry; unavailable optional volume is not cached. Confirmed NFTs and one-unit zero-decimal candidates awaiting a fresh non-NFT inspection are excluded from both valuation paths. It is not net worth. Use coverage to distinguish an incomplete wallet scan from an empty wallet. NFT valuations and DeFi positions are not included. name, symbol and image_url come from DMND's token index; where it has none, they come from the mint's latest saved metadata inspection, which reads Token-2022 TokenMetadata (in the mint or through its metadata pointer) before Metaplex Token Metadata. This request never calls upstream RPC. `position` labels a held LP position NFT (Meteora DAMM v2, Orca Whirlpools or Raydium CLMM) from the wallet's latest saved scan. Until the wallet has a completed DAMM v2 scan, a one-unit zero-decimal holding whose inspected mint authority equals the cp-amm pool authority is marked `meteora_damm_v2` with null position and pool. Labelled NFTs are never valued here.
          */
         get: operations["getWalletOverview"];
         put?: never;
@@ -1447,7 +1467,7 @@ export interface paths {
         };
         /**
          * Compose known wallet token, stake, lending and LP values
-         * @description Composes DMND's saved wallet endpoints without request-time RPC. The known component net value sums only available token/native SOL, native stake, Kamino, Solend, MarginFi and complete saved Orca/Raydium/Meteora principal inventories, plus direct CPMM/AMM v4 principal and Velocity account equity with fresh complete same-slot valuation coverage. Fungible LP principal replaces a token receipt only after its aggregate amount and account count match the overview; a mismatch preserves the token value and excludes that LP component. Velocity account equity includes funding and live-price isolated deposits; it excludes health and withdrawal limits. Otherwise unpriced direct JitoSOL, bSOL and mSOL can receive a protocol-claim fallback after complete owner snapshots, exact receipt atoms, account counts and token slots match. Existing market marks take precedence. The fallback recalculates the floor SOL claim from a supported saved finalized rate no older than one hour and the overview SOL/USD mark no older than 120 seconds; future observations are refused. Its liquid_staking_fallback metadata preserves independent source clocks and identifies withdrawal fees, slippage and withdrawal restrictions as excluded. Components expose independent coverage and snapshot slots. Unpriced assets and liabilities, NFT values, unsupported protocols and non-atomic snapshots mean this is neither full net worth nor a lower bound. Each LP venue is valued from one saved-inventory and price read, bounded by its scanner limit (2,000 Orca or Raydium positions; 500 Meteora positions); a capped or inconsistent inventory is excluded rather than partially summed.
+         * @description Composes DMND's saved wallet endpoints without request-time RPC. The known component net value sums only available token/native SOL, native stake, Kamino, Solend, MarginFi and complete saved Orca/Raydium/Meteora DLMM/Meteora DAMM v2 principal inventories, plus direct CPMM/AMM v4 principal and Velocity account equity with fresh complete same-slot valuation coverage. Fungible LP principal replaces a token receipt only after its aggregate amount and account count match the overview; a mismatch preserves the token value and excludes that LP component. Velocity account equity includes funding and live-price isolated deposits; it excludes health and withdrawal limits. Otherwise unpriced direct JitoSOL, bSOL and mSOL can receive a protocol-claim fallback after complete owner snapshots, exact receipt atoms, account counts and token slots match. Existing market marks take precedence. The fallback recalculates the floor SOL claim from a supported saved finalized rate no older than one hour and the overview SOL/USD mark no older than 120 seconds; future observations are refused. Its liquid_staking_fallback metadata preserves independent source clocks and identifies withdrawal fees, slippage and withdrawal restrictions as excluded. Components expose independent coverage and snapshot slots. Unpriced assets and liabilities, NFT values, unsupported protocols and non-atomic snapshots mean this is neither full net worth nor a lower bound. Each LP venue is valued from one saved-inventory and price read, bounded by its scanner limit (2,000 Orca or Raydium positions; 500 Meteora DLMM or DAMM v2 positions); a capped or inconsistent inventory is excluded rather than partially summed. While Meteora DAMM v2 positions are disabled on this deployment, that component reports coverage_status disabled and saved rows are not read or counted.
          */
         get: operations["getWalletPortfolioSummary"];
         put?: never;
@@ -2217,76 +2237,6 @@ export interface components {
             };
         };
         /** @description Response envelope wrapping a single value. */
-        DataResponse_Vec_OhlcvBar: {
-            data: {
-                /**
-                 * Format: date-time
-                 * @description Candle start time (UTC).
-                 */
-                bucket: string;
-                /**
-                 * Format: int64
-                 * @description Number of buy trades.
-                 */
-                buy_count: number;
-                /**
-                 * Format: decimal
-                 * @description Buy volume in quote units.
-                 */
-                buy_volume_quote: string;
-                /**
-                 * Format: decimal
-                 * @description Close price, in quote units.
-                 */
-                close: string;
-                /**
-                 * Format: decimal
-                 * @description High price, in quote units.
-                 */
-                high: string;
-                /**
-                 * Format: decimal
-                 * @description Low price, in quote units.
-                 */
-                low: string;
-                /**
-                 * Format: decimal
-                 * @description Open price, in quote units.
-                 */
-                open: string;
-                /** @description Pool address (base-58). */
-                pool_address: string;
-                post_swap_spot?: null | components["schemas"]["SpotCandleBasis"];
-                /** @description Absent on legacy/default execution bars; explicit on opt-in spot bars. */
-                price_basis?: components["schemas"]["OhlcvPriceBasis"];
-                /**
-                 * Format: int64
-                 * @description Number of sell trades.
-                 */
-                sell_count: number;
-                /**
-                 * Format: decimal
-                 * @description Sell volume in quote units.
-                 */
-                sell_volume_quote: string;
-                /**
-                 * Format: int64
-                 * @description Number of trades in the candle.
-                 */
-                trade_count: number;
-                /**
-                 * Format: decimal
-                 * @description Quote-token volume traded in the candle.
-                 */
-                volume_quote: string;
-                /**
-                 * Format: decimal
-                 * @description Base-token volume traded in the candle.
-                 */
-                volume_tokens: string;
-            }[];
-        };
-        /** @description Response envelope wrapping a single value. */
         DataResponse_Vec_TokenOhlcvBar: {
             data: {
                 /**
@@ -3048,8 +2998,11 @@ export interface components {
             symbol: string;
         };
         /**
-         * @description Finalized mint and Metaplex metadata evidence for an uncompressed asset.
-         *     `confirmed` verifies the stored snapshot, not every later chain state.
+         * @description Finalized mint and on-chain metadata evidence for an uncompressed asset.
+         *     Classification comes from Metaplex Token Metadata when its account exists,
+         *     otherwise from Token-2022 TokenMetadata; `name`, `symbol` and `uri` prefer
+         *     Token-2022 TokenMetadata when the mint has it. `confirmed` verifies the
+         *     stored snapshot, not every later chain state.
          */
         NftInspection: {
             collection_mint?: string | null;
@@ -3074,6 +3027,13 @@ export interface components {
             status: components["schemas"]["NftInspectionStatus"];
             symbol?: string | null;
             token_program?: string | null;
+            /**
+             * @description Metaplex token standard (`non_fungible`, `non_fungible_edition`,
+             *     `programmable_non_fungible`, `programmable_non_fungible_edition`,
+             *     `legacy_edition`, `not_nft`), or `token2022_embedded` /
+             *     `token2022_external` for a Token-2022 NFT whose metadata is in the mint
+             *     or in the account its metadata pointer names.
+             */
             token_standard?: string | null;
             update_authority?: string | null;
             uri?: string | null;
@@ -3199,6 +3159,16 @@ export interface components {
          * @enum {string}
          */
         OhlcvResolution: "1s" | "5s" | "15s" | "1m" | "5m" | "15m" | "1h" | "4h" | "1d";
+        /** @description Successful pool OHLCV response, including the selected spot basis when empty. */
+        OhlcvResponse: {
+            /** @description Candles, oldest first. Unoccupied source buckets are omitted. */
+            data: components["schemas"]["OhlcvBar"][];
+            /**
+             * @description Explicit on successful post_swap_spot requests, even with no candles.
+             *     Omitted for default/execution requests. Does not attest complete history.
+             */
+            price_basis?: components["schemas"]["OhlcvPriceBasis"];
+        };
         /**
          * @description A paginated response envelope.
          *
@@ -6439,6 +6409,7 @@ export interface components {
             observed_price_at?: string | null;
             /** @description Last selected-pool observation converted through references no more than 120 seconds old. */
             observed_price_usd?: string | null;
+            position?: null | components["schemas"]["WalletAssetPosition"];
             /** @description Selected market's 24-hour price change percentage as exact decimal text. */
             price_change_24h?: string | null;
             /**
@@ -6455,6 +6426,19 @@ export interface components {
              *     encoded as exact decimal USD text. Null if any active pool volume cannot be converted.
              */
             volume_24h_usd?: string | null;
+        };
+        /** @description The LP position a held NFT represents. */
+        WalletAssetPosition: {
+            /** @description Pool account (base-58); null when `position` is null. */
+            pool?: string | null;
+            /**
+             * @description Position account (base-58); null when unknown or when one NFT backs several positions.
+             *     An Orca position bundle with one open position looks like a single position NFT here;
+             *     its `position` and `pool` become null once a second bundled position opens.
+             */
+            position?: string | null;
+            /** @description `meteora_damm_v2`, `orca_whirlpools` or `raydium_clmm`. */
+            protocol: string;
         };
         /**
          * @description Latest indexed Bubblegum owner event for an asset. Optional metadata is
@@ -7444,6 +7428,8 @@ export interface components {
             /** Format: date-time */
             price_updated_at?: string | null;
             price_usd?: string | null;
+            /** @description Token symbol from DMND metadata; always `SOL` for wrapped SOL. */
+            symbol?: string | null;
             ui_amount?: string | null;
             value_reason?: string | null;
             value_usd?: string | null;
@@ -7561,6 +7547,110 @@ export interface components {
             unsupported_leg_count?: number | null;
             valuation_consistency: string;
             wallet: string;
+        };
+        /**
+         * @description Position liquidity by lock state, as exact u128 decimal strings. Locked and
+         *     vesting liquidity is included in the token amounts and values.
+         */
+        WalletMeteoraDammV2Liquidity: {
+            permanent_locked: string;
+            /** @description Exact sum of `unlocked`, `vested` and `permanent_locked`. */
+            total: string;
+            unlocked: string;
+            /**
+             * @description Liquidity locked by any vesting, through external `lock_position`
+             *     Vesting accounts or `lock_inner_position`. It decreases only when
+             *     `refresh_vesting` runs, so part of it may already be releasable.
+             */
+            vested: string;
+        };
+        WalletMeteoraDammV2Position: {
+            /** @description Pool fee collection mode: `both_token`, `only_b` or `compounding`. */
+            collect_fee_mode: string;
+            /**
+             * @description Claimable token A fee atoms at `snapshot_block_time` (pending plus
+             *     accrual, as cp-amm computes it), before any Token-2022 transfer fee.
+             */
+            fee_a_claimable_atoms: string;
+            /** @description Claimable token B fee atoms on the same basis as `fee_a_claimable_atoms`. */
+            fee_b_claimable_atoms: string;
+            liquidity: components["schemas"]["WalletMeteoraDammV2Liquidity"];
+            owner_token_account: string;
+            /** Format: int64 */
+            owner_token_slot: number;
+            pool: string;
+            /**
+             * @description Token A priced in token B, decimal adjusted and rounded down to 30
+             *     places; absent when either token's decimals are unknown.
+             */
+            pool_price?: string | null;
+            /** Format: int64 */
+            pool_slot: number;
+            position: string;
+            /** @description Position NFT mint held by the wallet. It has no price or value of its own. */
+            position_mint: string;
+            /** Format: int64 */
+            position_slot: number;
+            /** @description Sum of both legs' `value_usd`; absent unless both legs are valued. */
+            principal_value_usd?: string | null;
+            program: string;
+            rewards: components["schemas"]["WalletMeteoraDammV2Reward"][];
+            /**
+             * Format: date-time
+             * @description Clock sysvar time from the same read as the position, at
+             *     `position_slot` (not `snapshot_slot`); claimable amounts use it.
+             */
+            snapshot_block_time: string;
+            /** Format: int64 */
+            snapshot_slot: number;
+            /** @description Pool square-root price as a raw Q64.64 u128 decimal string. */
+            sqrt_price: string;
+            /**
+             * @description Gross atoms the pool would release for the total liquidity at the saved
+             *     pool price, floored like `remove_liquidity` over total liquidity (which
+             *     can exceed per-bucket floors by up to 2 atoms per leg), before any
+             *     Token-2022 transfer fee.
+             */
+            token_a: components["schemas"]["WalletLiquidityLeg"];
+            /** @description Same basis as `token_a`. */
+            token_b: components["schemas"]["WalletLiquidityLeg"];
+            /** @description Token program of the position NFT account. */
+            token_program: string;
+        };
+        WalletMeteoraDammV2Positions: {
+            /**
+             * @description A pool with an unsupported account layout fails the whole scan, reported
+             *     as status `failed` with reason `meteora_damm_v2_scan_failed`.
+             */
+            coverage: components["schemas"]["WalletLiquidityCoverage"];
+            cursor?: string | null;
+            data: components["schemas"]["WalletMeteoraDammV2Position"][];
+            has_more: boolean;
+            /** @description Known principal USD value for this page only; absent before any saved scan. */
+            page_known_principal_value_usd?: string | null;
+            /**
+             * Format: int64
+             * @description Principal legs on this page without a value; absent before any saved scan.
+             */
+            page_unpriced_leg_count?: number | null;
+            protocol: string;
+            wallet: string;
+        };
+        /**
+         * @description Claimable reward atoms at `snapshot_block_time` (pending plus accrual, as
+         *     cp-amm computes it), before any Token-2022 transfer fee. Rewards carry no
+         *     USD value.
+         */
+        WalletMeteoraDammV2Reward: {
+            claimable_atoms: string;
+            /** Format: int32 */
+            decimals?: number | null;
+            /**
+             * Format: int32
+             * @description Pool reward slot, 0 or 1.
+             */
+            index: number;
+            mint: string;
         };
         WalletMeteoraPosition: {
             /** Format: int64 */
@@ -8941,13 +9031,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Candles, oldest first */
+            /** @description Candles, oldest first. Successful post_swap_spot responses include top-level price_basis=post_swap_spot even when data is empty; execution responses omit it. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataResponse_Vec_OhlcvBar"];
+                    "application/json": components["schemas"]["OhlcvResponse"];
                 };
             };
             /** @description Invalid request parameters */
@@ -17660,6 +17750,148 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WalletMarginfiPositions"];
+                };
+            };
+            /** @description Invalid request parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "bad_request",
+                     *         "message": "Invalid or missing query parameter",
+                     *         "request_id": "req_9f8c1a2b3d4e5f60a1b2c3d4e5f60718",
+                     *         "status": 400
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "unauthorized",
+                     *         "message": "Missing or invalid API key.",
+                     *         "request_id": "req_9f8c1a2b3d4e5f60a1b2c3d4e5f60718",
+                     *         "status": 401
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The API key is valid but not permitted to do this */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "forbidden",
+                     *         "message": "publishable keys need a paid plan",
+                     *         "request_id": "req_9f8c1a2b3d4e5f60a1b2c3d4e5f60718",
+                     *         "status": 403
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "rate_limited",
+                     *         "message": "Rate limit exceeded.",
+                     *         "request_id": "req_9f8c1a2b3d4e5f60a1b2c3d4e5f60718",
+                     *         "status": 429
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "internal_error",
+                     *         "message": "An unexpected error occurred.",
+                     *         "request_id": "req_9f8c1a2b3d4e5f60a1b2c3d4e5f60718",
+                     *         "status": 500
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A dependency needed to serve the request is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "service_unavailable",
+                     *         "message": "Service temporarily unavailable.",
+                     *         "request_id": "req_9f8c1a2b3d4e5f60a1b2c3d4e5f60718",
+                     *         "status": 503
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getWalletMeteoraDammV2Positions: {
+        parameters: {
+            query?: {
+                /** @description Page size (default 50). */
+                limit?: number;
+                /** @description Opaque snapshot-bound continuation cursor. */
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Position NFT holder wallet (base-58). */
+                wallet: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Saved Meteora DAMM v2 page and finalized scan coverage */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WalletMeteoraDammV2Positions"];
                 };
             };
             /** @description Invalid request parameters */
