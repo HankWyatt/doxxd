@@ -1,6 +1,6 @@
 "use client";
 import { createContext, useContext, useState } from "react";
-import { Wallet, ArrowUpRight, RefreshCw, ChevronRight } from "lucide-react";
+import { ArrowUpRight, RefreshCw, ChevronRight } from "lucide-react";
 import {
   useWalletResource,
   WalletRefreshContext,
@@ -17,6 +17,7 @@ import { RecoveryNotice } from "./recovery-notice";
 import { SaveWalletButton } from "../watchlist/watchlist";
 import { CopyButton } from "../copy-button";
 import { short } from "@/lib/portfolio/adapters/shared";
+import { avatarStyle } from "@/lib/portfolio/headline";
 const SummaryContext = createContext<ResourceData["summary"] | null>(null);
 export const usePortfolioSummary = () => useContext(SummaryContext);
 export function WalletFrame({
@@ -66,54 +67,54 @@ function FrameContent({
         <ChevronRight size={11} />
         <span>Wallet</span>
       </div>
-      <div className="wallet-topline">
-        <div className="wallet-id">
-          <span className="wallet-avatar">
-            <Wallet size={21} />
-          </span>
-          <div>
-            <h1>{short(address)}</h1>
-            <div className="inline small muted">
-              <span className="mono">{short(address)}</span>
-              <CopyButton
-                key={address}
-                value={address}
-                label="Copy wallet address"
-              />
-              <a
-                className="icon-button"
-                href={explorerHref("address", address)}
-                target="_blank"
-                rel="noreferrer"
-                aria-label="View wallet on Solana Explorer"
-              >
-                <ArrowUpRight size={13} />
-              </a>
-            </div>
-          </div>
-        </div>
-        <div className="wallet-actions">
-          {mode.kind === "live" && <SaveWalletButton key={address} address={address} />}
-        <button
-          type="button"
-          className="button"
-          onClick={refresh}
-          aria-label="Refresh wallet"
-        >
-          <RefreshCw size={13} />
-          Refresh
-        </button>
-        </div>
-      </div>
-      <details className="full-address">
-        <summary>Full address</summary>
-        <p className="mono break">{address}</p>
-      </details>
       <WalletSummary
         result={summary.result}
         loading={summary.loading}
         retry={summary.refresh}
+        identity={
+          <div className="wallet-id">
+            <span className="wallet-avatar" style={avatarStyle(address)} aria-hidden="true" />
+            <div>
+              <h1>{short(address)}</h1>
+              <div className="inline small muted">
+                <CopyButton
+                  key={address}
+                  value={address}
+                  label="Copy wallet address"
+                />
+                <a
+                  className="icon-button"
+                  href={explorerHref("address", address)}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="View wallet on Solana Explorer"
+                >
+                  <ArrowUpRight size={13} />
+                </a>
+              </div>
+            </div>
+          </div>
+        }
+        actions={
+          <div className="wallet-actions">
+            {/* Room for the later "Connect wallet" button (next project). */}
+            {mode.kind === "live" && <SaveWalletButton key={address} address={address} />}
+            <button
+              type="button"
+              className="button"
+              onClick={refresh}
+              aria-label="Refresh wallet"
+            >
+              <RefreshCw size={13} />
+              Refresh
+            </button>
+          </div>
+        }
       />
+      <details className="full-address">
+        <summary>Full address</summary>
+        <p className="mono break">{address}</p>
+      </details>
       <RecoveryNotice state={summary.recovery} retained={Boolean(summary.refreshError)} retry={summary.refresh} />
       <nav className="tabs" aria-label="Wallet views">
         <a

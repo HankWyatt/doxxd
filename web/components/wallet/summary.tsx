@@ -1,108 +1,83 @@
 "use client";
+import { useState, type ReactNode } from "react";
 import type { ResourceData, ResourceResult } from "@/lib/dmnd/contracts";
 import { toSummary } from "@/lib/portfolio/model";
-import { formatUsd } from "@/lib/decimal";
+import {
+  formatHeadline,
+  headlineLabel,
+  statusLine,
+} from "@/lib/portfolio/headline";
 import { ResourceState } from "../resource-state";
 export function WalletSummary({
   result,
   loading,
   retry,
+  identity,
+  actions,
 }: {
   result: ResourceResult<ResourceData["summary"]> | null;
   loading: boolean;
   retry: () => void;
+  identity?: ReactNode;
+  actions?: ReactNode;
 }) {
+  const [open, setOpen] = useState(false);
+  const hero = (total: ReactNode) => (
+    <section className="wallet-hero" aria-busy={loading}>
+      {identity}
+      <div className="wallet-total">
+        {total}
+        {actions}
+      </div>
+    </section>
+  );
   if (!result)
-    return (
-      <section className="wallet-summary" aria-label="Loading portfolio value">
-        <div>
-          <div className="summary-label">Known portfolio value</div>
-          <span className="skeleton big" />
-        </div>
-      </section>
+    return hero(
+      <div aria-label="Loading portfolio value">
+        <div className="label-mono">Net worth</div>
+        <span className="skeleton big" />
+      </div>,
     );
   if (!result.ok)
-    return (
-      <section className="wallet-summary">
-        <div>
-          <div className="summary-label">Known portfolio value</div>
-          <div className="summary-value">—</div>
-          <ResourceState error={result} retry={retry} />
-        </div>
-      </section>
+    return hero(
+      <div>
+        <div className="label-mono">Known value</div>
+        <div className="summary-value numeric">{formatHeadline(null)}</div>
+        <ResourceState error={result} retry={retry} />
+      </div>,
     );
   const view = toSummary(result.data);
-  const preparing = view.components.some((c) =>
-    /queued|pending|running/.test(c.coverage_status),
-  );
-  const pending = view.valueUsd === null && preparing;
-  const wallet = view.components.find((c) => c.id === "tokens_native_sol");
-  const subtotal = !view.complete && view.valueUsd !== null &&
-    wallet?.included_in_known_total === false;
-  const subtotalUpdating = subtotal && (
-      /^(snapshot_)?(queued|pending|running)$/.test(wallet.coverage_status) ||
-      (wallet.coverage_status === "native_balance_stale_or_unavailable" && preparing)
-    );
-  const saved =
-    view.components.some(
-      (c) => c.included_in_known_total && c.coverage_fresh === false,
-    ) &&
-    view.valueUsd !== null;
-  const label = subtotal
-    ? subtotalUpdating ? "Portfolio still updating" : "Wallet balances unavailable"
-    : pending
-      ? "Preparing wallet data"
-      : saved
-        ? "Saved snapshots"
-        : view.complete
-          ? "Complete coverage"
-          : "Partial coverage";
+  const status = statusLine(view, new Date());
   return (
     <>
-      <section className="wallet-summary" aria-busy={loading}>
+      {hero(
         <div>
-          <div className="summary-label inline">
-            {subtotal ? "Subtotal from available sources" : view.label}
-            <span
-              className={
-                "badge " +
-                (pending || subtotalUpdating ? "pending" : view.complete ? "ready" : "partial")
-              }
+          <div className="label-mono inline">
+            {headlineLabel(view)}
+            <button
+              type="button"
+              className="info-button"
+              aria-label="About this value"
+              aria-controls="coverage"
+              aria-expanded={open}
+              onClick={() => setOpen((v) => !v)}
             >
-              {label}
-            </span>
+              ⓘ
+            </button>
           </div>
           <div className="summary-value numeric">
-            {formatUsd(view.valueUsd)}
+            {formatHeadline(view.valueUsd)}
           </div>
-          <div className="summary-note">
-            {subtotal
-              ? subtotalUpdating
-                ? "Wallet balances are not included in this subtotal yet."
-                : "Wallet balances are not included in this subtotal."
-              : pending
-                ? "Wallet data is being prepared. Available sources will appear as they finish."
-                : preparing
-                  ? "Some wallet data is still being prepared. Available sources will appear as they finish."
-                  : "Known values from independent source snapshots. Some assets, debts, or prices may be missing."}
+          <div className="status-line" data-tone={status.tone}>
+            {status.text}
           </div>
-        </div>
-        <div className="summary-side">
-          <div>
-            <span className="eyebrow">Included sources</span>
-            <strong>
-              {view.components.filter((c) => c.included_in_known_total).length}
-            </strong>
-          </div>
-          <div>
-            <span className="eyebrow">Network</span>
-            <strong>Solana</strong>
-          </div>
-        </div>
-      </section>
+        </div>,
+      )}
       <details
         className="coverage-note"
         id="coverage"
+        open={open}
+        onToggle={(e) => setOpen(e.currentTarget.open)}
         style={{ borderTop: 0, padding: "0 0 20px" }}
       >
         <summary>About this portfolio value</summary>

@@ -356,27 +356,84 @@ a svg {
   font-size: 11px;
   margin: 2px 0 27px;
 }
-.wallet-topline {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
 .wallet-id {
   display: flex;
   align-items: center;
   gap: 14px;
   min-width: 0;
 }
+.wallet-hero {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin: 14px 0 20px;
+  padding: 20px 24px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background:
+    radial-gradient(90% 160% at 0% 0%, var(--glow), transparent 55%),
+    radial-gradient(70% 140% at 100% 0%, #b0a0ef1f, transparent 60%),
+    var(--panel);
+}
+.wallet-total {
+  margin-left: auto;
+  text-align: right;
+}
+.wallet-total .label-mono.inline {
+  justify-content: flex-end;
+}
+.wallet-total .wallet-actions {
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.info-button {
+  border: 0;
+  background: none;
+  padding: 0 2px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.info-button:hover {
+  color: var(--text);
+}
+.status-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.status-line::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--tone, var(--muted));
+  box-shadow: 0 0 8px var(--tone, transparent);
+}
+.status-line[data-tone="ready"] {
+  --tone: var(--positive);
+}
+.status-line[data-tone="pending"] {
+  --tone: var(--accent);
+}
+.status-line[data-tone="saved"] {
+  --tone: var(--violet);
+}
+.status-line[data-tone="partial"] {
+  --tone: var(--warning);
+}
 .wallet-avatar {
-  width: 43px;
-  height: 43px;
-  border: 1px solid #35554f;
-  border-radius: 12px;
-  display: grid;
-  place-items: center;
-  color: var(--accent);
-  background: #172923;
+  width: 56px;
+  height: 56px;
+  flex: none;
+  border-radius: 16px;
+  box-shadow: 0 0 0 3px var(--glow);
 }
 .wallet-id h1 {
   font-size: 17px;
@@ -417,44 +474,12 @@ a svg {
 .button.ghost {
   background: transparent;
 }
-.wallet-summary {
-  padding: 29px 0 30px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 28px;
-}
 .summary-value {
-  font-size: 46px;
-  font-weight: 500;
-  line-height: 1.2;
-  letter-spacing: -1.8px;
-  margin: 9px 0;
-}
-.summary-label {
-  font-size: 12px;
-  color: var(--muted);
-}
-.summary-note {
-  font-size: 11px;
-  color: var(--faint);
-  line-height: 1.6;
-  max-width: 470px;
-}
-.summary-side {
-  display: flex;
-  gap: 30px;
-  padding-bottom: 8px;
-}
-.summary-side > div {
-  border-left: 1px solid var(--line);
-  padding-left: 24px;
-}
-.summary-side strong {
-  font-size: 17px;
-  font-weight: 500;
-  display: block;
-  margin-top: 8px;
+  font-size: 38px;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -1px;
+  margin: 6px 0;
 }
 .badge {
   display: inline-flex;
@@ -1073,12 +1098,6 @@ tbody tr.data-row:hover {
   .page {
     padding: 24px;
   }
-  .summary-side {
-    gap: 16px;
-  }
-  .summary-side > div {
-    padding-left: 16px;
-  }
   .detail-grid {
     grid-template-columns: 1fr 1fr;
   }
@@ -1087,9 +1106,6 @@ tbody tr.data-row:hover {
   }
   .header-meta {
     gap: 10px;
-  }
-  .summary-value {
-    font-size: 40px;
   }
 }
 @media (max-width: 600px) {
@@ -1154,26 +1170,26 @@ tbody tr.data-row:hover {
   .feature-grid article p {
     grid-column: 2;
   }
-  .wallet-summary {
-    display: block;
-    padding: 24px 0;
+  .wallet-hero {
+    padding: 16px;
+  }
+  .wallet-total {
+    margin-left: 0;
+    text-align: left;
+    width: 100%;
+  }
+  .wallet-total .label-mono.inline,
+  .wallet-total .wallet-actions {
+    justify-content: flex-start;
   }
   .summary-value {
-    font-size: 38px;
+    font-size: 32px;
   }
-  .summary-side {
-    display: none;
-  }
-  .wallet-topline {
-    align-items: flex-start;
-  }
-  .wallet-topline > .button,
   .wallet-actions .button {
     padding: 9px;
     font-size: 0;
     gap: 0;
   }
-  .wallet-topline > .button svg,
   .wallet-actions .button svg {
     width: 15px;
   }
@@ -1184,8 +1200,8 @@ tbody tr.data-row:hover {
     font-size: 15px;
   }
   .wallet-avatar {
-    width: 36px;
-    height: 36px;
+    width: 44px;
+    height: 44px;
   }
   .protocol-pill {
     min-width: calc(50% - 4px);
@@ -1258,7 +1274,6 @@ tbody tr.data-row:hover {
 
 .header-watchlist { display: inline-flex; align-items: center; gap: 6px; }
 .header-watchlist:hover { color: var(--text); }
-.wallet-topline { flex-wrap: wrap; }
 .wallet-actions { display: flex; align-items: flex-start; gap: 10px; margin-left: auto; max-width: 100%; }
 .save-wallet-control { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: 220px; }
 .save-wallet-feedback { color: var(--muted); max-width: 220px; overflow-wrap: anywhere; }

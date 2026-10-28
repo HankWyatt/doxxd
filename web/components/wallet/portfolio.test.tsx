@@ -115,18 +115,15 @@ it("keeps a pending zero subtotal separate from positive holdings until the summ
   await act(async () => {});
   expect(container.querySelector("#holdings .section-heading > .numeric"))
     .toHaveTextContent("$318.47 known");
-  expect(screen.getByText("Subtotal from available sources")).toBeVisible();
-  expect(screen.getByText("Portfolio still updating")).toBeVisible();
-  expect(screen.getByText("Wallet balances are not included in this subtotal yet.")).toBeVisible();
+  expect(screen.getByText("Wallet balances unavailable · showing protocols only")).toHaveAttribute("data-tone", "pending");
   expect(container.querySelector(".summary-value")).toHaveTextContent("$0.00");
   expect(fetcher).toHaveBeenCalledTimes(3);
   expect(fetcher.mock.calls.filter(([input]) => input.endsWith("/overview"))).toHaveLength(1);
 
   await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
   expect(container.querySelector(".summary-value")).toHaveTextContent("$123.45");
-  expect(screen.getByText("Known portfolio value")).toBeVisible();
-  expect(screen.queryByText("Portfolio still updating")).not.toBeInTheDocument();
-  expect(screen.queryByText("Subtotal from available sources")).not.toBeInTheDocument();
+  expect(screen.getByText("Known value")).toBeVisible();
+  expect(screen.queryByText("Wallet balances unavailable · showing protocols only")).not.toBeInTheDocument();
   expect(container.querySelector("#holdings .section-heading > .numeric"))
     .toHaveTextContent("$318.47 known");
   await act(async () => { await vi.advanceTimersByTimeAsync(150_000); });
@@ -176,12 +173,11 @@ it("keeps holdings and the subtotal usable after snapshot failure, then stops au
   vi.stubGlobal("fetch", fetcher);
   const { container } = render(<Portfolio address={DEMO_ADDRESS} />);
   await act(async () => {});
-  expect(screen.getByText("Portfolio still updating")).toBeVisible();
+  expect(screen.getByText("Wallet balances unavailable · showing protocols only")).toHaveAttribute("data-tone", "pending");
   expect(fetcher).toHaveBeenCalledTimes(3);
 
   await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
-  expect(screen.getByText("Wallet balances unavailable")).toBeVisible();
-  expect(screen.getByText("Subtotal from available sources")).toBeVisible();
+  expect(screen.getByText("Wallet balances unavailable · showing protocols only")).toHaveAttribute("data-tone", "partial");
   expect(container.querySelector(".summary-value")).toHaveTextContent("$0.00");
   expect(container.querySelector("#holdings .section-heading > .numeric"))
     .toHaveTextContent("$318.47 known");
@@ -189,7 +185,7 @@ it("keeps holdings and the subtotal usable after snapshot failure, then stops au
   expect(screen.getByRole("button", { name: "Inspect USDC holding" })).toBeVisible();
   expect(screen.getByText("Native SOL balance: Unknown")).toBeVisible();
   expect(screen.getByText("Wrapped SOL balance: Unknown")).toBeVisible();
-  expect(screen.queryByText("Portfolio still updating")).not.toBeInTheDocument();
+  expect(screen.queryByText(/sources still updating/)).not.toBeInTheDocument();
   expect(screen.queryByText("Checking for wallet data automatically…")).not.toBeInTheDocument();
   expect(fetcher).toHaveBeenCalledTimes(5);
   await act(async () => { await vi.advanceTimersByTimeAsync(150_000); });
