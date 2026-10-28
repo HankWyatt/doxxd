@@ -50,9 +50,17 @@ CI runs the same checks on every pull request.
 - Add or update tests with the change. New decoder or data-format behavior needs representative fixtures and regression coverage.
 - Follow the data principles in the README. Unknown values stay unknown, and the UI must not infer financial meaning that the upstream data does not state.
 
-## Fixtures: synthetic data only
+## Secrets, personal data and fixtures
 
-Test fixtures and demo data must be synthetic. Never commit real wallet addresses, transaction signatures, API keys, private recordings or screenshots of real wallets. Invent values, or derive them deterministically (for example from a hash of a label), and keep them internally consistent so tests still mean something. Well-known public IDs such as the system and token programs, wrapped SOL and USDC are fine.
+This is a public repository. Never commit:
+
+- API keys, tokens, passwords, `.env` files (other than `web/.env.example`) or private key files.
+- Personal information: names, personal email addresses, home-directory paths or machine names.
+- Real wallet data: real wallet addresses, transaction signatures, account addresses, recorded API responses or screenshots of real wallets. A recording with the addresses swapped can still identify a wallet through its exact amounts, slots and times.
+
+Test fixtures and demo data must be synthetic. Invent values, or derive them deterministically (for example from a hash of a label), and keep them internally consistent so tests still mean something. Well-known public IDs such as the system and token programs, wrapped SOL and USDC are fine. Screenshots come from the synthetic `/demo` pages.
+
+Secret scanning and push protection are enabled on this repository. If you think a secret was committed, report it privately as described in [SECURITY.md](SECURITY.md) instead of opening an issue.
 
 ## Generated files
 
