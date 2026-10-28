@@ -1,0 +1,35 @@
+# Build outputs and caches
+target/
+node_modules/
+.turbo/
+.next/
+dist/
+out/
+coverage/
+__pycache__/
+*.pyc
+*.log
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.key
+
+# Editor
+*.swp
+*.swo
+
+# Runtime and local checkouts
+logs/
+.worktrees/
+
+# Application runtime and browser artifacts
+.sites-runtime/
+.wrangler/
+.vite/
+.vinext/
+playwright-report/
+test-results/
+*.tsbuildinfo

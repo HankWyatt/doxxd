@@ -1,0 +1,10 @@
+import { Portfolio } from "@/components/wallet/portfolio";
+export const dynamic = "force-dynamic";
+export default async function WalletPage({
+  params,
+}: {
+  params: Promise<{ address: string }>;
+}) {
+  const { address } = await params;
+  return <Portfolio address={address} />;
+}

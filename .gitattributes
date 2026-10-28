@@ -1,0 +1,11 @@
+* text=auto eol=lf
+
+*.bin binary
+*.gpg binary
+*.gz binary
+*.ico binary
+*.parquet binary
+*.pdf binary
+*.png binary
+*.tgz binary
+*.woff2 binary

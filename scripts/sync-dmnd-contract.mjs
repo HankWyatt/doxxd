@@ -1,0 +1,15 @@
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+const args = process.argv.slice(2);
+const repo = args[args.indexOf('--repo') + 1];
+const revision = args[args.indexOf('--ref') + 1];
+if (!args.includes('--repo') || !args.includes('--ref') || !repo || !/^[a-f0-9]{40}$/.test(revision ?? '')) throw new Error('Usage: node scripts/sync-dmnd-contract.mjs --repo PATH --ref FULL_COMMIT_SHA');
+const contract = execFileSync('git', ['-C', path.resolve(repo), 'show', revision + ':packages/api-spec/openapi.yaml']);
+const destination = fileURLToPath(new URL('../web/contracts/', import.meta.url));
+mkdirSync(destination, { recursive: true });
+writeFileSync(path.join(destination, 'dmnd.openapi.yaml'), contract);
+writeFileSync(path.join(destination, 'dmnd.revision.json'), JSON.stringify({ repository: 'HLWGroup/dmnd.dev', revision, sha256: createHash('sha256').update(contract).digest('hex') }, null, 2) + '\n');
+console.log('Imported committed DMND contract ' + revision);

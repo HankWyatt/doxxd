@@ -1,0 +1,33 @@
+{
+  "at": "2026-05-20T10:27:54.055886+00:00",
+  "format": "dmnd-consumer-finite-new-address-initial-refresh-v1",
+  "scope_id": "new-address-initial-refresh-4-20261025",
+  "wallet": "aLqXroJ6z41nDQ9zEmqj5mPU86DJ1LXfABfAKxFzDS2",
+  "wallet_kind": "Locally generated unfunded public address; only public bytes are retained. Empty or unseen is unproven until an actual response is observed. Refuse unexpected non-empty or source-mismatched responses; no alternate wallet.",
+  "public_address_hex": "088a98a0395dabd96be68d4c8d0e0c31626914d49c27d9c3d02c8a6812399f83",
+  "max_actual_DMND_GET_attempts": 4,
+  "selected_routes": [
+    "/api/v1/wallets/aLqXroJ6z41nDQ9zEmqj5mPU86DJ1LXfABfAKxFzDS2/overview",
+    "/api/v1/wallets/aLqXroJ6z41nDQ9zEmqj5mPU86DJ1LXfABfAKxFzDS2/portfolio-summary"
+  ],
+  "queries": [
+    ""
+  ],
+  "request_plan": [
+    "Initial navigation: overview and summary once each.",
+    "One explicit refresh after at least 5 seconds: the same two reads once each, then stop at 4. No polling, retry, redirect, pagination, stake, other protocol or other wallet."
+  ],
+  "requirements": [
+    "Show queued, running or unknown truthfully; never invent complete or zero.",
+    "The refreshed view may claim fresh complete zero only if the observed supported sources and clocks prove it; otherwise pending or failure stays unqualified.",
+    "whole_wallet_complete stays false while other components are unknown.",
+    "A new exclusive, non-resumable ledger counts every failure, reservation and redirect attempt as spent.",
+    "Server-only DMND credential; no secret in the browser, argv or output."
+  ],
+  "before_live": [
+    "Run the synthetic count, denied-route, rejection and finally proof for the new profile.",
+    "Confirm fresh API and worker identity within 15 minutes of the read."
+  ],
+  "status": "Preparation only; no live read has been performed under this scope.",
+  "limits": "No new frontend feature, broad cohort, history, financial or protocol admission."
+}

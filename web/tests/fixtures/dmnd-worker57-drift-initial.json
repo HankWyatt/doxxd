@@ -1,0 +1,19 @@
+{
+  "wallet": "aLqXroJ6z41nDQ9zEmqj5mPU86DJ1LXfABfAKxFzDS2",
+  "protocol": "drift",
+  "data": [],
+  "cursor": null,
+  "has_more": false,
+  "known_equity_usd": null,
+  "valuation_status": "unavailable_equity",
+  "coverage": {
+    "complete": false,
+    "fresh": false,
+    "status": "queued",
+    "reason": "drift_scan_queued",
+    "requested_at": "2026-05-23T13:37:49.935548Z",
+    "fetched_at": null,
+    "snapshot_slot": null,
+    "scope": "drift_user_accounts_authorized_by_wallet"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "note": "Scrubbed fixtures derived from recorded Drift responses. Addresses, slots, timestamps and values are synthetic and are not byte-equal to the recordings; sha256 and bytes describe the scrubbed fixtures.",
+  "fixtures": [
+    {
+      "phase": "initial",
+      "fixturePath": "web/tests/fixtures/dmnd-worker57-drift-initial.json",
+      "sha256": "00cf4611cb81e970885777b23450152d20ed55eb9b904f06a649b75cc80b4de4",
+      "bytes": 491
+    },
+    {
+      "phase": "final",
+      "fixturePath": "web/tests/fixtures/dmnd-worker57-drift-final.json",
+      "sha256": "9d1f661c4a4ede97741db1af414ebe42e554559ff7f61ca6e11a6cb320761585",
+      "bytes": 518
+    }
+  ],
+  "limits": [
+    "Derived from recorded response objects; no consumer GET or provider request is made by the tests",
+    "Fresh complete empty Drift user-account scope; equity remains unavailable",
+    "Core/cNFT resources are not added in this change"
+  ]
+}
