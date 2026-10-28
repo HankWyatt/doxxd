@@ -43,6 +43,19 @@ unshare --user --map-root-user --net sh -c 'ip link set lo up && npm run test:e2
 
 CI runs the same checks on every pull request.
 
+## Dependencies and overrides
+
+Changing or regenerating `web/package-lock.json` needs npm 11 or newer, for example `npx npm@11 install`. The npm 10 that ships with Node 22 crashes with `Cannot read properties of null (reading 'edgesOut')` when it resolves the whole tree from scratch with vitest 4. `npm ci` and installing a single package still work on npm 10, so CI and normal setup are unaffected.
+
+`web/package.json` `overrides` force patched versions of transitive dependencies that their parents pin exactly. Each one has a condition for removal; delete the override, regenerate the lockfile and run `npm audit` once the condition holds.
+
+| Override | Why | Remove when |
+| --- | --- | --- |
+| `miniflare` -> `undici` 7.30.1 | The stable miniflare 4.x line pins `undici` 7.28.0 or older, which has published advisories. | A stable miniflare, as pinned by `@cloudflare/vite-plugin` and `wrangler`, depends on `undici` 7.30.1 or newer. |
+| `miniflare` -> `sharp` 0.35.5 | miniflare pins `sharp` 0.35.2, which has a published advisory. | A stable miniflare depends on `sharp` 0.35.5 or newer. |
+| `@esbuild-kit/core-utils` -> `esbuild` 0.25.12 | `drizzle-kit` (used only by `npm run db:generate`) still depends on the deprecated `@esbuild-kit` loader, which pins `esbuild` 0.18.20. | `drizzle-kit` drops `@esbuild-kit`, or `@esbuild-kit/core-utils` allows `esbuild` 0.25 or newer. |
+| `vinext` -> `image-size` 2.0.3 | vinext 1.0.0-beta.5 pins `image-size` 2.0.2, which has a published advisory. | The vinext version in use depends on `image-size` 2.0.3 or newer. |
+
 ## Pull requests
 
 - Keep each pull request small and focused on one change. Open an issue first for anything large.
