@@ -1,6 +1,6 @@
 # Doxxd
 
-Look up any public Solana wallet and see its holdings, staking, lending, liquidity and trading positions and activity, powered by the DMND API.
+Look up any public Solana wallet and see its holdings, staking, lending, liquidity and trading positions and activity, powered by the [DMND](https://dmnd.dev) API.
 
 [![CI](https://github.com/HankWyatt/doxxd/actions/workflows/ci.yml/badge.svg)](https://github.com/HankWyatt/doxxd/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -34,7 +34,7 @@ Live routes are `/wallet/<address>` and `/wallet/<address>/activity`. They need 
 
 ## Configuration
 
-Live data comes from the DMND API through a server-side gateway. Set these environment names when starting the server; the same names are documented in [`web/.env.example`](web/.env.example). Never expose credentials with a `NEXT_PUBLIC_` prefix, and keep local secrets out of Git.
+Live data comes from the [DMND API](https://docs.dmnd.dev) through a server-side gateway. Get an API key at [dmnd.dev](https://dmnd.dev). Set these environment names when starting the server; the same names are documented in [`web/.env.example`](web/.env.example). Never expose credentials with a `NEXT_PUBLIC_` prefix, and keep local secrets out of Git.
 
 | Name | Purpose |
 | --- | --- |
