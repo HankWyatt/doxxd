@@ -19,7 +19,7 @@ The development server runs without a key; wallet routes then show a connection 
 npm run dev -- --host 127.0.0.1 --port 4317
 ```
 
-Open `http://127.0.0.1:4317/`. There is no public demo route. To exercise portfolio and activity states without a key, run the browser tests (`npm run test:e2e`); they serve the synthetic fixtures in `web/lib/fixtures/` to an isolated server.
+Open `http://127.0.0.1:4317/`. There is no public demo route. To exercise portfolio and activity states without a key, run the browser tests (`npm run test:e2e`); they intercept the browser's `/api/wallet` requests and answer them from the synthetic fixtures in `web/lib/fixtures/`. The test server itself gets only a synthetic key and an unreachable upstream address, so it cannot call DMND.
 
 Live routes (`/wallet/<address>`) need a DMND API key supplied as a server environment variable. The names are in [`web/.env.example`](web/.env.example) and the [README](README.md#configuration): `DMND_API_BASE_URL`, `DMND_API_KEY` and `DMND_ENABLED_PROTOCOLS`. Never commit a key, put it in a URL, or expose it with a `NEXT_PUBLIC_` prefix. You do not need a key to contribute; the automated tests never call the live service.
 
