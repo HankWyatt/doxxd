@@ -113,7 +113,7 @@ it("keeps a pending zero subtotal separate from positive holdings until the summ
   vi.stubGlobal("fetch", fetcher);
   const { container } = render(<Portfolio address={DEMO_ADDRESS} />);
   await act(async () => {});
-  expect(container.querySelector("#holdings .section-heading > .numeric"))
+  expect(container.querySelector("#holdings .holdings-total"))
     .toHaveTextContent("$318.47 known");
   expect(screen.getByText("Wallet balances unavailable · showing protocols only")).toHaveAttribute("data-tone", "pending");
   expect(container.querySelector(".summary-value")).toHaveTextContent("$0.00");
@@ -124,7 +124,7 @@ it("keeps a pending zero subtotal separate from positive holdings until the summ
   expect(container.querySelector(".summary-value")).toHaveTextContent("$123.45");
   expect(screen.getByText("Known value")).toBeVisible();
   expect(screen.queryByText("Wallet balances unavailable · showing protocols only")).not.toBeInTheDocument();
-  expect(container.querySelector("#holdings .section-heading > .numeric"))
+  expect(container.querySelector("#holdings .holdings-total"))
     .toHaveTextContent("$318.47 known");
   await act(async () => { await vi.advanceTimersByTimeAsync(150_000); });
   expect(fetcher).toHaveBeenCalledTimes(4);
@@ -179,7 +179,7 @@ it("keeps holdings and the subtotal usable after snapshot failure, then stops au
   await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
   expect(screen.getByText("Wallet balances unavailable · showing protocols only")).toHaveAttribute("data-tone", "partial");
   expect(container.querySelector(".summary-value")).toHaveTextContent("$0.00");
-  expect(container.querySelector("#holdings .section-heading > .numeric"))
+  expect(container.querySelector("#holdings .holdings-total"))
     .toHaveTextContent("$318.47 known");
   expect(screen.getByText("Wallet refresh failed. Showing available holdings; some balances may be missing or out of date.")).toBeVisible();
   expect(screen.getByRole("button", { name: "Inspect USDC holding" })).toBeVisible();

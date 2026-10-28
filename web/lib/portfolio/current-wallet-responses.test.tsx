@@ -50,7 +50,7 @@ it("keeps the newly acquired wallet's exact native amount, token amount and inde
   const request = vi.fn();
   vi.stubGlobal("fetch", request);
   render(<Holdings overview={data} />);
-  expect(screen.getByRole("status")).toHaveTextContent("Showing 1–2 of 2 observed holdings");
+  expect(screen.getAllByRole("button", { name: /^Inspect .* holding$/ })).toHaveLength(2);
   expect(screen.getByText("$2.77", { exact: false })).toBeVisible();
   expect(screen.queryByRole("button", { name: "Inspect WSOL holding" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Inspect SOL holding" }));

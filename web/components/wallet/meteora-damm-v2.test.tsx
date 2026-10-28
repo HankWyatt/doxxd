@@ -101,6 +101,12 @@ it("pages manually with the opaque cursor and returns to the first page", async 
   expect(fetch).toHaveBeenCalledTimes(3);
 });
 
+// Receipts collapse to one line on the card; a search lists their rows.
+function revealReceipts(query = "claimed") {
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search observed holdings" }), {
+    target: { value: query },
+  });
+}
 function receiptOverview(position: Schemas["WalletAssetPosition"]) {
   const result = readFixture("overview", "complete");
   if (!result.ok) throw new Error("Fixture must succeed");
@@ -134,6 +140,11 @@ it("labels an LP position NFT as an unvalued receipt overlapping the protocol se
       showProtocol={showProtocol}
     />,
   );
+  expect(screen.queryByRole("button", { name: "Inspect Meteora DAMM v2 position holding" })).toBeNull();
+  expect(screen.getByText(/1 LP position NFT/).closest("p")).toHaveTextContent(
+    "1 LP position NFT — shown in Meteora DAMM v2 below",
+  );
+  revealReceipts();
   const button = screen.getByRole("button", {
     name: "Inspect Meteora DAMM v2 position holding",
   });
@@ -141,7 +152,7 @@ it("labels an LP position NFT as an unvalued receipt overlapping the protocol se
   expect(within(row).queryByText("Unknown token")).toBeNull();
   expect(within(row).getByText("LP position receipt")).toBeVisible();
   expect(within(row).queryByText(/\$999/)).toBeNull();
-  expect(within(row).getAllByText("—").length).toBeGreaterThanOrEqual(2);
+  expect(within(row).getAllByText("—")).toHaveLength(3);
   fireEvent.click(button);
   const detail = row.nextElementSibling as HTMLElement;
   expect(within(detail).getByText(DAMM.position)).toBeVisible();
@@ -196,12 +207,13 @@ it("never joins indexed trading results to an LP receipt's NFT mint", () => {
       trading={trading}
     />,
   );
+  revealReceipts();
   const button = screen.getByRole("button", {
     name: "Inspect Meteora DAMM v2 position holding",
   });
   const row = button.closest("tr")!;
   const cells = within(row).getAllByRole("cell");
-  for (const index of [4, 5, 6, 7]) expect(cells[index]).toHaveTextContent("—");
+  for (const index of [1, 3, 4]) expect(cells[index]).toHaveTextContent("—");
   expect(within(row).queryByText("+$75.00")).toBeNull();
   expect(within(row).queryByText(/trades?$/)).toBeNull();
   fireEvent.click(button);
@@ -222,6 +234,7 @@ it("labels a receipt whose position and pool are not yet identified", () => {
       })}
     />,
   );
+  revealReceipts();
   fireEvent.click(
     screen.getByRole("button", { name: "Inspect Meteora DAMM v2 position holding" }),
   );
@@ -230,7 +243,7 @@ it("labels a receipt whose position and pool are not yet identified", () => {
   expect(screen.getByText(/scan is disabled/i)).toBeVisible();
   // Without a mounted section target there is no link, only the label.
   expect(screen.queryByRole("link", { name: "Meteora DAMM v2" })).toBeNull();
-  expect(screen.getByText("Meteora DAMM v2")).toBeVisible();
+  expect(within(screen.getByText("Protocol position").parentElement!).getByText("Meteora DAMM v2")).toBeVisible();
 });
 
 it("does not point an unknown protocol receipt at a protocol section", () => {
@@ -240,6 +253,9 @@ it("does not point an unknown protocol receipt at a protocol section", () => {
       showProtocol={vi.fn()}
     />,
   );
+  expect(screen.getByText(/1 LP position NFT/).closest("p")).toHaveTextContent("future amm (no protocol view)");
+  expect(screen.queryByRole("link", { name: "future amm" })).toBeNull();
+  revealReceipts();
   fireEvent.click(screen.getByRole("button", { name: "Inspect future amm position holding" }));
   expect(screen.getByText(/Doxxd has no protocol view for this receipt/)).toBeVisible();
   expect(screen.queryByText(/protocol section/i)).toBeNull();
@@ -284,11 +300,9 @@ it("reveals a hidden protocol view before following a receipt link", async () =>
   vi.stubGlobal("fetch", fetcher);
   const { DEMO_ADDRESS } = await import("@/lib/fixtures/wallet");
   render(<Portfolio address={DEMO_ADDRESS} />);
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Inspect Meteora DAMM v2 position holding" }),
-  );
+  const line = (await screen.findByText(/1 LP position NFT/)).closest("p")!;
   expect(document.getElementById("protocol-meteora-damm-v2")).toBeNull();
-  fireEvent.click(screen.getByRole("link", { name: "Meteora DAMM v2" }));
+  fireEvent.click(within(line).getByRole("link", { name: "Meteora DAMM v2" }));
   expect(await screen.findByRole("button", { name: "Show fewer protocols" })).toBeVisible();
   expect(document.getElementById("protocol-meteora-damm-v2")).not.toBeNull();
   await waitFor(() => expect(window.location.hash).toBe("#protocol-meteora-damm-v2"));
@@ -304,6 +318,9 @@ it("labels Orca, Raydium and unknown LP receipts without valuing them", () => {
     { ...data.assets.at(-1)!, mint: syntheticAddress("receipt/future"), position: { protocol: "future_amm" } },
   );
   render(<Holdings overview={data} />);
+  for (const label of ["Orca Whirlpools", "Raydium CLMM", "future amm"])
+    expect(screen.getByText(new RegExp(label)).closest("p")).toHaveTextContent("1 LP position NFT");
+  revealReceipts("position");
   for (const name of ["Orca Whirlpools position", "Raydium CLMM position", "future amm position"])
     expect(screen.getByRole("button", { name: `Inspect ${name} holding` })).toBeVisible();
   expect(screen.queryByText(/\$999/)).toBeNull();
@@ -463,9 +480,7 @@ it("moves focus to the protocol section each time a receipt link is followed", a
   window.location.hash = "";
   const { DEMO_ADDRESS } = await import("@/lib/fixtures/wallet");
   render(<Portfolio address={DEMO_ADDRESS} />);
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Inspect Meteora DAMM v2 position holding" }),
-  );
+  await screen.findByText(/1 LP position NFT/);
   const toggle = () => screen.getByRole("button", { name: "Expand Meteora DAMM v2" });
   for (let attempt = 0; attempt < 2; attempt++) {
     const link = screen.getByRole("link", { name: "Meteora DAMM v2" });

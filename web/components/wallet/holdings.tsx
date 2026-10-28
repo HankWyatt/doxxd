@@ -1,6 +1,6 @@
 "use client";
 import { Fragment, useRef, useState } from "react";
-import { ChevronDown, Wallet } from "lucide-react";
+import { ChevronDown, Layers3 } from "lucide-react";
 import type { ProtocolResource, Schemas } from "@/lib/dmnd/contracts";
 import { protocolResources, resources } from "@/lib/dmnd/resources";
 import {
@@ -18,8 +18,11 @@ import {
   pnlTone,
   type HoldingsTradingDetails,
 } from "@/lib/indexed-trading";
-const PAGE_SIZE = 20;
-type Row = {
+// Priced tokens listed before the "Show all" control; the rest stay one click away.
+const TOP_TOKENS = 10;
+// Balances worth less than a cent collapse with the unpriced ones.
+const TINY_VALUE = 0.01;
+export type Row = {
   id: string;
   mint?: string;
   symbol: string;
@@ -61,6 +64,47 @@ function positionReceipt(asset: Schemas["WalletAsset"]): Receipt | null {
     tokenSymbol: asset.symbol?.trim() || null,
     tokenName: asset.name?.trim() || null,
   };
+}
+/**
+ * Splits the card's rows. Receipts (LP position NFTs) never list as rows; a
+ * null or sub-cent value collapses a token; the rest sort by value descending.
+ */
+export function splitRows(rows: Row[]): {
+  shown: Row[];
+  collapsed: Row[];
+  receipts: Row[];
+} {
+  const sorted = [...rows].sort((a, b) => compareDecimalDesc(a.value, b.value));
+  const receipts = sorted.filter((row) => row.receipt);
+  const tokens = sorted.filter((row) => !row.receipt);
+  const priced = (row: Row) =>
+    row.value != null && Number(row.value) >= TINY_VALUE;
+  return {
+    shown: tokens.filter(priced),
+    collapsed: tokens.filter((row) => !priced(row)),
+    receipts,
+  };
+}
+// One summary line per protocol, in the order the receipts first appear.
+function receiptGroups(receipts: Row[]) {
+  const groups = new Map<
+    string,
+    { key: string; label: string; resource?: ProtocolResource; count: number }
+  >();
+  for (const { receipt } of receipts) {
+    if (!receipt) continue;
+    const key = receipt.resource ?? receipt.label;
+    const group = groups.get(key);
+    if (group) group.count++;
+    else
+      groups.set(key, {
+        key,
+        label: receipt.label,
+        resource: receipt.resource,
+        count: 1,
+      });
+  }
+  return [...groups.values()];
 }
 function AssetIcon({ row }: { row: Row }) {
   const candidates = tokenImageCandidates(row.image);
@@ -174,6 +218,9 @@ export function Holdings({
     />
   );
 }
+function plural(count: number, noun: string) {
+  return count + " " + noun + (count === 1 ? "" : "s");
+}
 function HoldingsTable({
   overview,
   showProtocol,
@@ -185,7 +232,8 @@ function HoldingsTable({
 }) {
   const [open, setOpen] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [page, setPage] = useState(0);
+  const [showAll, setShowAll] = useState(false);
+  const [showCollapsed, setShowCollapsed] = useState(false);
   const searchInput = useRef<HTMLInputElement>(null);
   const rows: Row[] = overview.assets.map((a) => {
     const row: Row = {
@@ -263,73 +311,68 @@ function HoldingsTable({
         ),
       )
     : rows;
-  const lastPage = Math.max(0, Math.ceil(matches.length / PAGE_SIZE) - 1);
-  const currentPage = Math.min(page, lastPage);
-  // Adjust during render so refreshed data never commits an out-of-range page.
-  if (page !== currentPage) {
-    setPage(currentPage);
-    setOpen(null);
-  }
-  const start = currentPage * PAGE_SIZE;
-  const visibleRows = matches.slice(start, start + PAGE_SIZE);
+  const { shown, collapsed, receipts } = splitRows(rows);
+  // A search lists every match, collapsed or not; otherwise only the top
+  // priced tokens show until the reader asks for more.
+  const pool = search ? matches : shown;
+  const listed = showAll ? pool : pool.slice(0, TOP_TOKENS);
+  const visibleRows = search
+    ? listed
+    : showCollapsed
+      ? [...listed, ...collapsed]
+      : listed;
+  const receiptLines = receiptGroups(receipts);
   function changeQuery(value: string) {
     setQuery(value);
-    setPage(0);
-    setOpen(null);
-  }
-  function changePage(value: number) {
-    setPage(value);
+    setShowAll(false);
     setOpen(null);
   }
   return (
     <section id="holdings">
-      <div className="section-heading">
-        <h2>
-          <Wallet size={16} />
-          Wallet holdings <span className="count">{rows.length}</span>
-        </h2>
-        <span className="small numeric muted">
-          {formatUsd(overview.known_value_usd)}{" "}
-          <span className="faint">known</span>
-        </span>
-      </div>
       <div className="panel">
+        <div className="holdings-head">
+          <span className="protocol-icon" aria-hidden="true">W</span>
+          <h2>Wallet</h2>
+          <span className="holdings-total numeric">
+            {formatUsd(overview.known_value_usd)}{" "}
+            <span className="faint">known</span>
+          </span>
+          {rows.length > 0 && (
+            <div className="holdings-search">
+              <label>
+                <span className="sr-only">Search observed holdings</span>
+                <input
+                  ref={searchInput}
+                  type="search"
+                  placeholder="Token name, symbol or mint"
+                  value={query}
+                  onChange={(event) => changeQuery(event.target.value)}
+                />
+              </label>
+              {query.length > 0 && (
+                <button
+                  type="button"
+                  className="button"
+                  aria-label="Clear holdings search"
+                  onClick={() => {
+                    changeQuery("");
+                    searchInput.current?.focus();
+                  }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          )}
+        </div>
         {overview.coverage.snapshot_status === "failed" && (
           <p className="coverage-note" role="status">
             Wallet refresh failed. Showing available holdings; some balances may be missing or out of date.
           </p>
         )}
-        {rows.length > 0 && (
-          <div className="holdings-search">
-            <label>
-              <span>Search observed holdings</span>
-              <input
-                ref={searchInput}
-                type="search"
-                placeholder="Token name, symbol or mint"
-                value={query}
-                onChange={(event) => changeQuery(event.target.value)}
-              />
-            </label>
-            {query.length > 0 && (
-              <button
-                type="button"
-                className="button"
-                aria-label="Clear holdings search"
-                onClick={() => {
-                  changeQuery("");
-                  searchInput.current?.focus();
-                }}
-              >
-                Clear search
-              </button>
-            )}
-          </div>
-        )}
-        {trading && (
-          <p className="holdings-trading-note">
-            Trading history is partial. P&amp;L is an indexed average-cost estimate and does not account for all opening balances, transfers or fees.
-            {" "}Buy/sell USD totals include priced indexed fills; counts include all indexed trades. Missing trading details are not zero.
+        {search && rows.length > 0 && (
+          <p className="holdings-search-status" role="status">
+            {matches.length} of {rows.length} observed holdings match
           </p>
         )}
         {(overview.native_sol_lamports == null ||
@@ -360,254 +403,102 @@ function HoldingsTable({
               ? "This describes the token-account snapshot only. Native SOL, wrapped SOL and protocol positions have independent coverage."
               : "A missing or incomplete snapshot does not establish an empty wallet."}
           </div>
-        ) : matches.length === 0 ? (
+        ) : search && matches.length === 0 ? (
           <div className="empty-state">No observed holdings match this search.</div>
         ) : (
-          <div className="table-scroll">
-            <table className="holdings-table">
-              <thead>
-                <tr>
-                  <th className="token-col">Asset</th>
-                  <th className="right hide-mobile price-col">Price</th>
-                  <th className="right hide-mobile amount-col">Balance</th>
-                  <th className="right">Value</th>
-                  <th className="right hide-mobile holding-trading-col" title="Indexed average-cost estimate; partial history, opening balances, transfers and fees can affect actual results.">P&amp;L estimate</th>
-                  <th className="right hide-mobile holding-trading-col">Buys</th>
-                  <th className="right hide-mobile holding-trading-col">Sells</th>
-                  <th className="right hide-mobile holding-activity-col">Last trade</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleRows.map((row) => {
-                  // An LP receipt overlaps a protocol position; its NFT mint never
-                  // carries per-token trading results here.
-                  const position = row.mint && !row.receipt ? trading?.positions.get(row.mint) : undefined;
-                  const pnl = position ? indexedPnl(position) : null;
-                  const unavailable = row.id === "native-sol"
-                    ? "Native SOL has no per-token trading position in this feed."
-                    : row.receipt
-                      ? "LP position receipts have no per-token trading position here."
-                      : "Trading details are unavailable for this mint in the loaded indexed history.";
-                  const fullBalance = row.amount == null ? "Unknown balance" : row.amount + " " + row.symbol;
-                  return (
-                  <Fragment key={row.id}>
-                    <tr className="data-row">
-                      <td>
-                        <button
-                          className="row-expander"
-                          aria-label={"Inspect " + row.symbol + " holding"}
-                          aria-expanded={open === row.id}
-                          onClick={() =>
-                            setOpen(open === row.id ? null : row.id)
-                          }
-                        >
-                          <AssetIcon row={row} />
-                          <span className="asset stack">
-                            <strong>{row.symbol}</strong>
-                            <small>{row.name}</small>
-                            <span className="holding-balance-mobile numeric" title={fullBalance}>
-                              Balance {formatCompactAmount(row.amount)}
-                            </span>
-                          </span>
-                          <ChevronDown size={12} className="expand-icon" />
-                        </button>
-                      </td>
-                      <td className="right hide-mobile numeric muted">
-                        {formatPrice(row.price)}
-                      </td>
-                      <td className="right hide-mobile numeric">
-                        <span title={fullBalance}>{formatCompactAmount(row.amount)}</span>
-                      </td>
-                      <td className="right numeric">
-                        {row.value == null && row.estimate != null ? (
-                          <span className="muted">
-                            {formatUsd(row.estimate)}{" "}
-                            <span className="badge">estimate</span>
-                          </span>
-                        ) : (
-                          <span className={row.value == null ? "muted" : "holdings-value"}>
-                            {formatUsd(row.value)}
-                          </span>
-                        )}
-                      </td>
-                      <td className="right hide-mobile numeric" title={pnl?.unavailableReason ?? (!position ? unavailable : undefined)}>
-                        <span className={pnlTone(pnl?.total)}>{formatSignedUsd(pnl?.total)}</span>
-                      </td>
-                      <td className="right hide-mobile numeric">
-                        {position ? <TradeTotal total={position.bought} side="buy" /> : <span className="muted" title={unavailable}>—</span>}
-                      </td>
-                      <td className="right hide-mobile numeric">
-                        {position ? <TradeTotal total={position.sold} side="sell" /> : <span className="muted" title={unavailable}>—</span>}
-                      </td>
-                      <td className="right hide-mobile numeric muted">
-                        {position ? <TradeTime value={position.last_trade_at} /> : <span title={unavailable}>—</span>}
-                      </td>
+          <>
+            {visibleRows.length > 0 && (
+              <div className="table-scroll">
+                <table className="holdings-table">
+                  <thead>
+                    <tr>
+                      <th className="token-col">Token</th>
+                      <th className="right hide-mobile price-col">Price</th>
+                      <th className="right hide-mobile amount-col">Amount</th>
+                      <th className="right hide-mobile holding-trading-col" title="Indexed average-cost estimate; partial history, opening balances, transfers and fees can affect actual results.">
+                        P&amp;L <span aria-hidden="true">ⓘ</span>
+                      </th>
+                      <th className="right">USD Value</th>
                     </tr>
-                    {open === row.id && (
-                      <tr className="detail-row">
-                        <td colSpan={8}>
-                          <dl className="detail-grid">
-                            <div>
-                              <dt>Token / address</dt>
-                              <dd className="mono break">
-                                {row.mint ? (
-                                  <a
-                                    href={explorerHref("address", row.mint)}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                  >
-                                    {row.mint}
-                                  </a>
-                                ) : (
-                                  "Native SOL"
-                                )}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt>Balance</dt>
-                              <dd>
-                                {row.amount ?? "Unknown"} {row.symbol}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt>Raw atoms</dt>
-                              <dd className="mono">{row.raw}</dd>
-                            </div>
-                            <div>
-                              <dt>Price</dt>
-                              <dd>{formatPrice(row.price)}</dd>
-                            </div>
-                            <div>
-                              <dt>Balance observation slot</dt>
-                              <dd className="numeric">
-                                {row.balanceSlot ?? "Unknown"}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt>Price observation</dt>
-                              <dd>
-                                {row.priceAt
-                                  ? new Date(row.priceAt).toLocaleString()
-                                  : "Unknown"}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt>Token accounts</dt>
-                              <dd>{row.accountCount ?? "Native balance"}</dd>
-                            </div>
-                            {row.receipt && (
-                              <ReceiptDetail
-                                receipt={row.receipt}
-                                showProtocol={showProtocol}
-                              />
-                            )}
-                            {position ? (
-                              <>
-                                <div>
-                                  <dt>Indexed total P&amp;L estimate</dt>
-                                  <dd className={pnlTone(pnl?.total)}>{formatSignedUsd(pnl?.total)}</dd>
-                                </div>
-                                <div>
-                                  <dt>Indexed realized P&amp;L estimate</dt>
-                                  <dd className={pnlTone(pnl?.realized)}>{formatSignedUsd(pnl?.realized)}</dd>
-                                </div>
-                                <div>
-                                  <dt>Indexed unrealized P&amp;L estimate</dt>
-                                  <dd className={pnlTone(pnl?.unrealized)}>{formatSignedUsd(pnl?.unrealized)}</dd>
-                                </div>
-                                <div>
-                                  <dt>Average indexed buy price</dt>
-                                  <dd>{formatPrice(position.avg_buy_price_usd)}</dd>
-                                </div>
-                                <div>
-                                  <dt>Average indexed sell price</dt>
-                                  <dd>{formatPrice(position.avg_sell_price_usd)}</dd>
-                                </div>
-                                <div>
-                                  <dt>Recorded buys</dt>
-                                  <dd><TradeTotal total={position.bought} side="buy" /></dd>
-                                </div>
-                                <div>
-                                  <dt>Recorded sells</dt>
-                                  <dd><TradeTotal total={position.sold} side="sell" /></dd>
-                                </div>
-                                <div>
-                                  <dt>Recorded tokens bought</dt>
-                                  <dd>{position.bought.amount ?? "Unknown"} {row.symbol}</dd>
-                                </div>
-                                <div>
-                                  <dt>Recorded tokens sold</dt>
-                                  <dd>{position.sold.amount ?? "Unknown"} {row.symbol}</dd>
-                                </div>
-                                <div>
-                                  <dt>First indexed trade</dt>
-                                  <dd>{new Date(position.first_trade_at).toLocaleString()}</dd>
-                                </div>
-                                <div>
-                                  <dt>Last indexed trade</dt>
-                                  <dd>{new Date(position.last_trade_at).toLocaleString()}</dd>
-                                </div>
-                                <div>
-                                  <dt>Unpriced indexed trades</dt>
-                                  <dd>{position.unpriced_trades.toLocaleString()}</dd>
-                                </div>
-                                <div>
-                                  <dt>P&amp;L estimate basis</dt>
-                                  <dd>{pnl?.unavailableReason ?? "Indexed average cost with partial history; opening balances, transfers and fees are not fully accounted for."}</dd>
-                                </div>
-                              </>
-                            ) : trading ? (
-                              <div>
-                                <dt>Trading details</dt>
-                                <dd>{unavailable}</dd>
-                              </div>
-                            ) : null}
-                          </dl>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-        {rows.length > 0 && (
-          <nav className="paging holdings-paging" aria-label="Holdings pages">
-            <span role="status">
-              Showing {matches.length ? start + 1 : 0}
-              {matches.length > 0 && "–" + (start + visibleRows.length)} of{" "}
-              {matches.length}{" "}
-              {search
-                ? "matching observed holdings (" + rows.length + " observed holdings total)"
-                : "observed holdings"}
-            </span>
-            <div className="holdings-page-buttons">
-              <button
-                type="button"
-                className="button"
-                aria-label="Previous holdings"
-                disabled={currentPage === 0}
-                onClick={() => changePage(currentPage - 1)}
-              >
-                Previous
-              </button>
-              <button
-                type="button"
-                className="button"
-                aria-label="Next holdings"
-                disabled={currentPage === lastPage}
-                onClick={() => changePage(currentPage + 1)}
-              >
-                Next
-              </button>
+                  </thead>
+                  <tbody>
+                    {visibleRows.map((row) => (
+                      <HoldingRow
+                        key={row.id}
+                        row={row}
+                        open={open === row.id}
+                        toggle={() => setOpen(open === row.id ? null : row.id)}
+                        showProtocol={showProtocol}
+                        trading={trading}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="holdings-more">
+              {pool.length > TOP_TOKENS && (
+                <button
+                  type="button"
+                  className="holdings-toggle"
+                  aria-expanded={showAll}
+                  onClick={() => setShowAll(!showAll)}
+                >
+                  {showAll
+                    ? "Show fewer"
+                    : search
+                      ? "Show all " + pool.length + " matches"
+                      : "Show all " + pool.length + " tokens"}
+                </button>
+              )}
+              {!search && collapsed.length > 0 && (
+                <button
+                  type="button"
+                  className="holdings-toggle"
+                  aria-expanded={showCollapsed}
+                  onClick={() => setShowCollapsed(!showCollapsed)}
+                >
+                  {showCollapsed
+                    ? "Hide " + plural(collapsed.length, "token") + " with no price or tiny balances"
+                    : "+" + plural(collapsed.length, "token") + " with no price or tiny balances · show"}
+                </button>
+              )}
+              {!search &&
+                receiptLines.map((line) => (
+                  <p className="holdings-note" key={line.key}>
+                    <Layers3 size={13} aria-hidden="true" />
+                    <span>
+                      <strong>{plural(line.count, "LP position NFT")}</strong>
+                      {" — "}
+                      {line.resource && showProtocol ? (
+                        <>
+                          shown in{" "}
+                          <a
+                            href={"#protocol-" + line.resource}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              showProtocol(line.resource!);
+                            }}
+                          >
+                            {line.label}
+                          </a>{" "}
+                          below
+                        </>
+                      ) : line.resource ? (
+                        line.label
+                      ) : (
+                        line.label + " (no protocol view)"
+                      )}
+                    </span>
+                  </p>
+                ))}
             </div>
-          </nav>
+          </>
         )}
         {trading && <TradingCoverage trading={trading} />}
         <details className="coverage-note">
           <summary>
+            <span aria-hidden="true">ⓘ</span>{" "}
             {overview.coverage.complete
               ? "Token snapshot observed"
               : "Token coverage is incomplete"}
@@ -615,6 +506,12 @@ function HoldingsTable({
               ? " · " + overview.unpriced_asset_count + " unpriced"
               : ""}
           </summary>
+          {trading && (
+            <p className="holdings-trading-note">
+              Trading history is partial. P&amp;L is an indexed average-cost estimate and does not account for all opening balances, transfers or fees.
+              {" "}Buy/sell USD totals include priced indexed fills; counts include all indexed trades. Missing trading details are not zero.
+            </p>
+          )}
           <p>
             Native SOL, wrapped SOL, and token observations may have independent
             source clocks. Unpriced quantities are retained; unknown value is
@@ -636,6 +533,198 @@ function HoldingsTable({
         </details>
       </div>
     </section>
+  );
+}
+function HoldingRow({
+  row,
+  open,
+  toggle,
+  showProtocol,
+  trading,
+}: {
+  row: Row;
+  open: boolean;
+  toggle: () => void;
+  showProtocol?: ShowProtocol;
+  trading?: HoldingsTradingDetails;
+}) {
+  // An LP receipt overlaps a protocol position; its NFT mint never
+  // carries per-token trading results here.
+  const position = row.mint && !row.receipt ? trading?.positions.get(row.mint) : undefined;
+  const pnl = position ? indexedPnl(position) : null;
+  const unavailable = row.id === "native-sol"
+    ? "Native SOL has no per-token trading position in this feed."
+    : row.receipt
+      ? "LP position receipts have no per-token trading position here."
+      : "Trading details are unavailable for this mint in the loaded indexed history.";
+  const fullBalance = row.amount == null ? "Unknown balance" : row.amount + " " + row.symbol;
+  return (
+    <>
+      <tr className="data-row">
+        <td>
+          <button
+            className="row-expander"
+            aria-label={"Inspect " + row.symbol + " holding"}
+            aria-expanded={open}
+            onClick={toggle}
+          >
+            <AssetIcon row={row} />
+            <span className="asset stack">
+              <strong>{row.symbol}</strong>
+              <small>{row.name}</small>
+              <span className="holding-balance-mobile numeric" title={fullBalance}>
+                Balance {formatCompactAmount(row.amount)}
+              </span>
+            </span>
+            <ChevronDown size={12} className="expand-icon" />
+          </button>
+        </td>
+        <td className="right hide-mobile numeric muted">
+          {formatPrice(row.price)}
+        </td>
+        <td className="right hide-mobile numeric">
+          <span title={fullBalance}>{formatCompactAmount(row.amount)}</span>
+        </td>
+        <td className="right hide-mobile numeric" title={pnl?.unavailableReason ?? (!position ? unavailable : undefined)}>
+          <span className={pnlTone(pnl?.total)}>{formatSignedUsd(pnl?.total)}</span>
+        </td>
+        <td className="right numeric">
+          {row.value == null && row.estimate != null ? (
+            <span className="muted">
+              {formatUsd(row.estimate)}{" "}
+              <span className="badge">estimate</span>
+            </span>
+          ) : (
+            <span className={row.value == null ? "muted" : "holdings-value"}>
+              {formatUsd(row.value)}
+            </span>
+          )}
+        </td>
+      </tr>
+      {open && (
+        <tr className="detail-row">
+          <td colSpan={5}>
+            <dl className="detail-grid">
+              <div>
+                <dt>Token / address</dt>
+                <dd className="mono break">
+                  {row.mint ? (
+                    <a
+                      href={explorerHref("address", row.mint)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {row.mint}
+                    </a>
+                  ) : (
+                    "Native SOL"
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>Balance</dt>
+                <dd>
+                  {row.amount ?? "Unknown"} {row.symbol}
+                </dd>
+              </div>
+              <div>
+                <dt>Raw atoms</dt>
+                <dd className="mono">{row.raw}</dd>
+              </div>
+              <div>
+                <dt>Price</dt>
+                <dd>{formatPrice(row.price)}</dd>
+              </div>
+              <div>
+                <dt>Balance observation slot</dt>
+                <dd className="numeric">
+                  {row.balanceSlot ?? "Unknown"}
+                </dd>
+              </div>
+              <div>
+                <dt>Price observation</dt>
+                <dd>
+                  {row.priceAt
+                    ? new Date(row.priceAt).toLocaleString()
+                    : "Unknown"}
+                </dd>
+              </div>
+              <div>
+                <dt>Token accounts</dt>
+                <dd>{row.accountCount ?? "Native balance"}</dd>
+              </div>
+              {row.receipt && (
+                <ReceiptDetail
+                  receipt={row.receipt}
+                  showProtocol={showProtocol}
+                />
+              )}
+              {position ? (
+                <>
+                  <div>
+                    <dt>Indexed total P&amp;L estimate</dt>
+                    <dd className={pnlTone(pnl?.total)}>{formatSignedUsd(pnl?.total)}</dd>
+                  </div>
+                  <div>
+                    <dt>Indexed realized P&amp;L estimate</dt>
+                    <dd className={pnlTone(pnl?.realized)}>{formatSignedUsd(pnl?.realized)}</dd>
+                  </div>
+                  <div>
+                    <dt>Indexed unrealized P&amp;L estimate</dt>
+                    <dd className={pnlTone(pnl?.unrealized)}>{formatSignedUsd(pnl?.unrealized)}</dd>
+                  </div>
+                  <div>
+                    <dt>Average indexed buy price</dt>
+                    <dd>{formatPrice(position.avg_buy_price_usd)}</dd>
+                  </div>
+                  <div>
+                    <dt>Average indexed sell price</dt>
+                    <dd>{formatPrice(position.avg_sell_price_usd)}</dd>
+                  </div>
+                  <div>
+                    <dt>Recorded buys</dt>
+                    <dd><TradeTotal total={position.bought} side="buy" /></dd>
+                  </div>
+                  <div>
+                    <dt>Recorded sells</dt>
+                    <dd><TradeTotal total={position.sold} side="sell" /></dd>
+                  </div>
+                  <div>
+                    <dt>Recorded tokens bought</dt>
+                    <dd>{position.bought.amount ?? "Unknown"} {row.symbol}</dd>
+                  </div>
+                  <div>
+                    <dt>Recorded tokens sold</dt>
+                    <dd>{position.sold.amount ?? "Unknown"} {row.symbol}</dd>
+                  </div>
+                  <div>
+                    <dt>First indexed trade</dt>
+                    <dd>{new Date(position.first_trade_at).toLocaleString()}</dd>
+                  </div>
+                  <div>
+                    <dt>Last indexed trade</dt>
+                    <dd>{new Date(position.last_trade_at).toLocaleString()}</dd>
+                  </div>
+                  <div>
+                    <dt>Unpriced indexed trades</dt>
+                    <dd>{position.unpriced_trades.toLocaleString()}</dd>
+                  </div>
+                  <div>
+                    <dt>P&amp;L estimate basis</dt>
+                    <dd>{pnl?.unavailableReason ?? "Indexed average cost with partial history; opening balances, transfers and fees are not fully accounted for."}</dd>
+                  </div>
+                </>
+              ) : trading ? (
+                <div>
+                  <dt>Trading details</dt>
+                  <dd>{unavailable}</dd>
+                </div>
+              ) : null}
+                        </dl>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 function ReceiptDetail({

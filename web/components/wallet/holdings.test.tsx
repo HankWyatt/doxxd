@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import bs58 from "bs58";
-import { Holdings } from "./holdings";
+import { Holdings, splitRows, type Row } from "./holdings";
 import { readFixture } from "@/lib/fixtures/wallet";
 import { validResourcePayload } from "@/lib/dmnd/validation.server";
 import type { Schemas } from "@/lib/dmnd/contracts";
@@ -56,6 +56,14 @@ function largeOverview() {
 }
 function holdingButtons() {
   return screen.getAllByRole("button", { name: /^Inspect .*holding$/ });
+}
+function showCollapsed() {
+  fireEvent.click(screen.getByRole("button", { name: /tokens? with no price or tiny balances · show$/ }));
+}
+function openDetails() {
+  const details = document.querySelector("details.coverage-note") as HTMLDetailsElement;
+  details.open = true;
+  return details;
 }
 function searchFor(value: string) {
   fireEvent.change(screen.getByRole("searchbox", { name: "Search observed holdings" }), {
@@ -146,42 +154,29 @@ it("tries an alternate IPFS gateway once, then falls back without a retry loop",
   expect(container.querySelector("img")).not.toBeInTheDocument();
 });
 
-it("bounds loaded observations to 20 rows per page without changing the DTO or fetching", () => {
+it("collapses unpriced observations behind one line without changing the DTO or fetching", () => {
   const data = largeOverview();
   const original = structuredClone(data);
   const fetchSpy = vi.spyOn(globalThis, "fetch");
   try {
     render(<Holdings overview={data} />);
-    const pages = screen.getByRole("navigation", { name: "Holdings pages" });
-    const previous = within(pages).getByRole("button", { name: "Previous holdings" });
-    const next = within(pages).getByRole("button", { name: "Next holdings" });
-    expect(holdingButtons()).toHaveLength(20);
-    expect(screen.getByText("Showing 1–20 of 47 observed holdings")).toBeVisible();
-    expect(previous).toBeDisabled();
-    expect(next).toBeEnabled();
+    // Zero and unpriced values are all collapsed, so no table row is listed.
+    expect(screen.queryAllByRole("button", { name: /^Inspect .*holding$/ })).toHaveLength(0);
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Holdings pages" })).not.toBeInTheDocument();
+    showCollapsed();
+    expect(holdingButtons()).toHaveLength(47);
     expect(holdingButtons().slice(0, 3).map((button) => button.getAttribute("aria-label")))
       .toEqual(["Inspect TOKEN0 holding", "Inspect TOKEN1 holding", "Inspect SOL holding"]);
     fireEvent.click(holdingButtons()[0]);
     expect(screen.getByText("Raw atoms")).toBeVisible();
-    fireEvent.click(next);
-    expect(screen.queryByText("Raw atoms")).not.toBeInTheDocument();
-    expect(holdingButtons()).toHaveLength(20);
-    expect(screen.getByText("Showing 21–40 of 47 observed holdings")).toBeVisible();
-    fireEvent.click(next);
-    expect(holdingButtons()).toHaveLength(7);
-    expect(screen.getByText("Showing 41–47 of 47 observed holdings")).toBeVisible();
-    expect(next).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Inspect TOKEN44 holding" })).toBeVisible();
-    fireEvent.click(previous);
-    expect(screen.getByText("Showing 21–40 of 47 observed holdings")).toBeVisible();
-    expect(holdingButtons()).toHaveLength(20);
-    fireEvent.click(previous);
-    expect(screen.getByText("Showing 1–20 of 47 observed holdings")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Hide 47 tokens with no price or tiny balances" }));
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
     searchFor("TOKEN44");
     fireEvent.click(screen.getByRole("button", { name: "Inspect TOKEN44 holding" }));
     searchFor("no-such-observation");
     fireEvent.click(screen.getByRole("button", { name: "Clear holdings search" }));
-    expect(screen.getByRole("heading", { name: "Wallet holdings 47" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Wallet" })).toBeVisible();
     expect(data).toEqual(original);
     expect(fetchSpy).not.toHaveBeenCalled();
   } finally {
@@ -198,7 +193,7 @@ it("searches every loaded observed symbol, name and mint with null or empty meta
     searchFor(query);
     expect(holdingButtons()).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Inspect TOKEN44 holding" })).toBeVisible();
-    expect(screen.getByText("Showing 1–1 of 1 matching observed holdings (47 observed holdings total)")).toBeVisible();
+    expect(screen.getByRole("status")).toHaveTextContent("1 of 47 observed holdings match");
   }
   for (const index of [42, 43]) {
     searchFor(data.assets[index].mint);
@@ -211,8 +206,8 @@ it("searches every loaded observed symbol, name and mint with null or empty meta
   searchFor("wrapped-sol");
   expect(screen.getByRole("button", { name: "Inspect WSOL holding" })).toBeVisible();
   searchFor("   ");
-  expect(holdingButtons()).toHaveLength(20);
-  expect(screen.getByText("Showing 1–20 of 47 observed holdings")).toBeVisible();
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "+47 tokens with no price or tiny balances · show" })).toBeVisible();
 });
 
 it.each(["", " \t\n ", null])("labels missing metadata %j with a searchable mint fallback", (metadata) => {
@@ -263,7 +258,7 @@ it("keeps raw details, source clocks, coverage and the known subtotal independen
     fireEvent.click(screen.getByRole("button", { name: "Inspect " + symbol + " holding" }));
     expect(within(screen.getByText("Balance observation slot").parentElement!).getByText(slot)).toBeVisible();
   }
-  expect(screen.getByText("$0.00", { selector: ".section-heading > span" })).toBeVisible();
+  expect(screen.getByText("$0.00", { selector: ".holdings-total" })).toBeVisible();
   const coverage = screen.getByText(/Token coverage is incomplete/).closest("details")!;
   expect(coverage).toHaveTextContent("44 unpriced");
   expect(coverage).toHaveTextContent("Snapshot status: queued. Token slot: 99.");
@@ -279,21 +274,26 @@ it("retains the authoritative known subtotal when a filter only matches an unpri
   searchFor("TOKEN44");
   const row = screen.getByRole("button", { name: "Inspect TOKEN44 holding" }).closest("tr")!;
   const cells = within(row).getAllByRole("cell");
+  expect(cells).toHaveLength(5);
   expect(cells[1]).toHaveTextContent("—");
-  expect(cells[3]).toHaveTextContent("—");
-  expect(screen.getByText("$7,200.00", { selector: ".section-heading > span" })).toBeVisible();
+  expect(cells[4]).toHaveTextContent("—");
+  expect(screen.getByText("$7,200.00", { selector: ".holdings-total" })).toBeVisible();
   expect(screen.getByText(/Token snapshot observed/)).toHaveTextContent("43 unpriced");
 });
 
-it("resets paging and expansion for search changes and distinguishes no matches from an empty source", () => {
+it("resets expansion for search changes and distinguishes no matches from an empty source", () => {
   render(<Holdings overview={largeOverview()} />);
-  fireEvent.click(screen.getByRole("button", { name: "Next holdings" }));
+  showCollapsed();
   fireEvent.click(holdingButtons()[0]);
+  expect(screen.getByText("Raw atoms")).toBeVisible();
   searchFor("TOKEN");
   expect(screen.queryByText("Raw atoms")).not.toBeInTheDocument();
-  expect(screen.getByText("Showing 1–20 of 45 matching observed holdings (47 observed holdings total)")).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "Next holdings" }));
-  expect(screen.getByText("Showing 21–40 of 45 matching observed holdings (47 observed holdings total)")).toBeVisible();
+  expect(screen.getByRole("status")).toHaveTextContent("45 of 47 observed holdings match");
+  expect(holdingButtons()).toHaveLength(10);
+  fireEvent.click(screen.getByRole("button", { name: "Show all 45 matches" }));
+  expect(holdingButtons()).toHaveLength(45);
+  searchFor("TOKEN4");
+  expect(holdingButtons()).toHaveLength(4);
   searchFor("no-such-observation");
   expect(screen.getByText("No observed holdings match this search.")).toBeVisible();
   expect(screen.queryByRole("table")).not.toBeInTheDocument();
@@ -302,32 +302,31 @@ it("resets paging and expansion for search changes and distinguishes no matches 
   fireEvent.click(screen.getByRole("button", { name: "Clear holdings search" }));
   expect(screen.getByRole("searchbox", { name: "Search observed holdings" })).toHaveValue("");
   expect(screen.getByRole("searchbox", { name: "Search observed holdings" })).toHaveFocus();
-  expect(screen.getByText("Showing 1–20 of 47 observed holdings")).toBeVisible();
-  expect(holdingButtons()).toHaveLength(20);
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  // Clearing the search returns to the list as the reader left it.
+  expect(screen.getByRole("button", { name: "Hide 47 tokens with no price or tiny balances" })).toBeVisible();
 });
 
-it("clamps the current filtered page when refreshed data shrinks and resets for a new wallet", () => {
+it("keeps refreshed data readable and resets search and expansion for a new wallet", () => {
   const data = largeOverview();
   const { rerender } = render(<Holdings overview={data} />);
   searchFor("TOKEN");
-  fireEvent.click(screen.getByRole("button", { name: "Next holdings" }));
-  fireEvent.click(screen.getByRole("button", { name: "Next holdings" }));
+  fireEvent.click(screen.getByRole("button", { name: "Show all 45 matches" }));
   fireEvent.click(screen.getByRole("button", { name: "Inspect TOKEN44 holding" }));
   const smaller = { ...data, assets: data.assets.slice(0, 22), unpriced_asset_count: 21 };
   expect(validResourcePayload("overview", smaller)).toBe(true);
   rerender(<Holdings overview={smaller} />);
-  expect(screen.getByText("Showing 21–22 of 22 matching observed holdings (24 observed holdings total)")).toBeVisible();
-  expect(holdingButtons()).toHaveLength(2);
-  expect(screen.queryByText("Raw atoms")).not.toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("22 of 24 observed holdings match");
+  expect(screen.queryByRole("button", { name: "Inspect TOKEN44 holding" })).not.toBeInTheDocument();
   rerender(<Holdings overview={data} />);
-  expect(screen.getByText("Showing 21–40 of 45 matching observed holdings (47 observed holdings total)")).toBeVisible();
+  expect(screen.getByRole("status")).toHaveTextContent("45 of 47 observed holdings match");
   fireEvent.click(holdingButtons()[0]);
   expect(screen.getByText("Raw atoms")).toBeVisible();
   const other = { ...data, wallet: bs58.encode(new Uint8Array(32).fill(90)) };
   expect(validResourcePayload("overview", other)).toBe(true);
   rerender(<Holdings overview={other} />);
   expect(screen.getByRole("searchbox", { name: "Search observed holdings" })).toHaveValue("");
-  expect(screen.getByText("Showing 1–20 of 47 observed holdings")).toBeVisible();
+  expect(screen.getByRole("button", { name: "+47 tokens with no price or tiny balances · show" })).toBeVisible();
   expect(screen.queryByText("Raw atoms")).not.toBeInTheDocument();
   searchFor("TOKEN44");
   const pending = {
@@ -363,6 +362,7 @@ it("retains separate SOL, wrapped SOL and token balance slots including zero and
   data.assets[0].last_slot = 0;
   data.assets[1].last_slot = 303;
   render(<Holdings overview={data} />);
+  showCollapsed();
   for (const [symbol, slot] of [
     ["SOL", "101"],
     ["WSOL", "202"],
@@ -425,7 +425,7 @@ it("shows a generic failed-refresh notice while preserving available holdings an
   render(<Holdings overview={data} />);
   expect(screen.getByText("Wallet refresh failed. Showing available holdings; some balances may be missing or out of date.")).toBeVisible();
   expect(screen.getByRole("button", { name: "Inspect USDC holding" })).toBeVisible();
-  expect(screen.getByText("$7,200.00", { selector: ".section-heading > span" })).toBeVisible();
+  expect(screen.getByText("$7,200.00", { selector: ".holdings-total" })).toBeVisible();
   expect(screen.getByText("Native SOL balance: Unknown")).toBeVisible();
   expect(screen.getByText("Wrapped SOL balance: Unknown")).toBeVisible();
   expect(data).toEqual(original);
@@ -469,6 +469,7 @@ it("retains a large wrapped SOL observation before token inventory completes", (
   expect(validResourcePayload("overview", data)).toBe(true);
   render(<Holdings overview={data} />);
   expect(screen.getByText("Native SOL balance: Unknown")).toBeVisible();
+  showCollapsed();
   fireEvent.click(screen.getByRole("button", { name: "Inspect WSOL holding" }));
   expect(screen.getByText("10000000000000001", { exact: true })).toBeVisible();
   expect(screen.getByText("10000000.000000001 WSOL", { exact: true })).toBeVisible();
@@ -493,7 +494,7 @@ it("compacts token balances while preserving exact expanded quantities and highl
   fireEvent.click(screen.getByRole("button", { name: "Inspect BONK holding" }));
   expect(screen.getByText("10000000 BONK", { exact: true })).toBeVisible();
   expect(screen.getByText("100000000000000", { exact: true })).toBeVisible();
-  expect(screen.getByText("Raw atoms").closest("td")).toHaveAttribute("colspan", "8");
+  expect(screen.getByText("Raw atoms").closest("td")).toHaveAttribute("colspan", "5");
   expect(data).toEqual(original);
 });
 
@@ -503,13 +504,14 @@ it("keeps estimated and missing holdings values distinct from highlighted known 
   data.assets[0].estimated_value_usd = "12.34";
   data.assets[1].value_usd = null;
   render(<Holdings overview={data} />);
+  showCollapsed();
   const estimated = holdingRow("USDC");
   expect(estimated.querySelector(".holdings-value")).not.toBeInTheDocument();
   expect(within(estimated).getByText("estimate")).toBeVisible();
   expect(within(estimated).getByText("$12.34")).toBeVisible();
   const unknown = holdingRow("JitoSOL");
   expect(unknown.querySelector(".holdings-value")).not.toBeInTheDocument();
-  expect(within(unknown).getAllByRole("cell")[3]).toHaveTextContent("—");
+  expect(within(unknown).getAllByRole("cell")[4]).toHaveTextContent("—");
 });
 
 it("joins indexed trading details by mint while preserving holdings valuations and explicit estimate basis", () => {
@@ -522,15 +524,21 @@ it("joins indexed trading details by mint while preserving holdings valuations a
     total_pnl_usd: "-25",
   });
   render(<Holdings overview={data} trading={tradingDetails([positive, negative])} />);
-  expect(screen.getByRole("columnheader", { name: "P&L estimate" })).toBeVisible();
-  expect(screen.getByText(/Trading history is partial/)).toHaveTextContent("opening balances, transfers or fees");
+  expect(screen.getByRole("columnheader", { name: "P&L" })).toHaveAttribute("title", expect.stringContaining("estimate"));
+  expect(screen.queryByRole("columnheader", { name: "Buys" })).not.toBeInTheDocument();
+  // The partial-history caveat lives in the card's details, not above the table.
+  const note = screen.getByText(/Trading history is partial/);
+  expect(note.closest("details")).toHaveClass("coverage-note");
+  expect(note).toHaveTextContent("opening balances, transfers or fees");
   expect(screen.getByText(/Buy\/sell USD totals include priced indexed fills/)).toHaveTextContent("counts include all indexed trades");
+  openDetails();
+  expect(note).toBeVisible();
   const jup = holdingRow("JUP");
   expect(within(jup).getByText("+$150.00")).toHaveClass("positive");
-  expect(within(jup).getByText("$400.00", { selector: ".holding-trade-buy" })).toBeVisible();
-  expect(within(jup).getByText("4 trades")).toBeVisible();
-  expect(within(jup).getByText("2 trades")).toBeVisible();
-  expect(jup.querySelector("time")).toHaveAttribute("datetime", positive.last_trade_at);
+  // Buys, sells and the last trade moved from the row into its details.
+  expect(within(jup).getAllByRole("cell")).toHaveLength(5);
+  expect(within(jup).queryByText("4 trades")).not.toBeInTheDocument();
+  expect(jup.querySelector("time")).not.toBeInTheDocument();
   const usdc = holdingRow("USDC");
   expect(within(usdc).getByText("-$25.00")).toHaveClass("negative");
   expect(usdc.querySelector(".holdings-value")).toHaveTextContent("$1,800.00");
@@ -545,11 +553,13 @@ it("joins indexed trading details by mint while preserving holdings valuations a
   const recordedBuys = screen.getByText("Recorded buys").parentElement!;
   expect(within(recordedBuys).getByText("$400.00")).toBeVisible();
   expect(within(recordedBuys).getByText("4 trades")).toBeVisible();
+  expect(within(recordedBuys).getByText("$400.00", { selector: ".holding-trade-buy" })).toBeVisible();
   const recordedSells = screen.getByText("Recorded sells").parentElement!;
   expect(within(recordedSells).getByText("$90.00")).toBeVisible();
   expect(within(recordedSells).getByText("2 trades")).toBeVisible();
   expect(within(screen.getByText("Average indexed buy price").parentElement!).getByText("$0.40")).toBeVisible();
   expect(screen.getByText("P&L estimate basis").parentElement!).toHaveTextContent("partial history");
+  expect(within(screen.getByText("Last indexed trade").parentElement!).getByText(new Date(positive.last_trade_at).toLocaleString())).toBeVisible();
 });
 
 it("leaves missing mint details unknown and never lends WSOL trading results to native SOL", () => {
@@ -560,7 +570,8 @@ it("leaves missing mint details unknown and never lends WSOL trading results to 
   render(<Holdings overview={data} trading={tradingDetails([wsol])} />);
   for (const symbol of ["SOL", "USDC"]) {
     const cells = within(holdingRow(symbol)).getAllByRole("cell");
-    for (const index of [4, 5, 6, 7]) expect(cells[index]).toHaveTextContent("—");
+    expect(cells).toHaveLength(5);
+    expect(cells[3]).toHaveTextContent("—");
     expect(within(holdingRow(symbol)).queryByText("0 trades")).not.toBeInTheDocument();
     expect(within(holdingRow(symbol)).queryByText("$0.00")).not.toBeInTheDocument();
   }
@@ -579,13 +590,16 @@ it("withholds P&L without a priced buy basis or with unpriced fills while retain
   });
   const { rerender } = render(<Holdings overview={data} trading={tradingDetails([partial])} />);
   const cells = within(holdingRow("JUP")).getAllByRole("cell");
-  expect(cells[4]).toHaveTextContent("—");
-  expect(cells[4]).toHaveAttribute("title", "Some indexed trades have missing prices.");
-  expect(cells[5]).toHaveTextContent("$400.00");
-  expect(cells[5]).toHaveTextContent("4 trades");
-  expect(cells[6]).toHaveTextContent("$0.00");
-  expect(cells[6]).toHaveTextContent("3 trades");
-  expect(screen.getByText(/Buy\/sell USD totals include priced indexed fills/)).toBeVisible();
+  expect(cells[3]).toHaveTextContent("—");
+  expect(cells[3]).toHaveAttribute("title", "Some indexed trades have missing prices.");
+  fireEvent.click(screen.getByRole("button", { name: "Inspect JUP holding" }));
+  const buys = () => screen.getByText("Recorded buys").parentElement!;
+  const sells = screen.getByText("Recorded sells").parentElement!;
+  expect(buys()).toHaveTextContent("$400.00");
+  expect(buys()).toHaveTextContent("4 trades");
+  expect(sells).toHaveTextContent("$0.00");
+  expect(sells).toHaveTextContent("3 trades");
+  expect(screen.getByText(/Buy\/sell USD totals include priced indexed fills/)).toBeInTheDocument();
   expect(screen.queryByText("+$999.00")).not.toBeInTheDocument();
   const noBasis = indexedPosition({
     total_pnl_usd: "0",
@@ -594,16 +608,16 @@ it("withholds P&L without a priced buy basis or with unpriced fills while retain
   });
   rerender(<Holdings overview={data} trading={tradingDetails([noBasis])} />);
   const nextCells = within(holdingRow("JUP")).getAllByRole("cell");
-  expect(nextCells[4]).toHaveTextContent("—");
-  expect(nextCells[4]).toHaveAttribute("title", "A priced indexed buy basis is unavailable.");
-  expect(nextCells[5]).toHaveTextContent("$0.00");
-  expect(nextCells[5]).toHaveTextContent("0 trades");
+  expect(nextCells[3]).toHaveTextContent("—");
+  expect(nextCells[3]).toHaveAttribute("title", "A priced indexed buy basis is unavailable.");
+  expect(buys()).toHaveTextContent("$0.00");
+  expect(buys()).toHaveTextContent("0 trades");
 });
 
 it("keeps a missing current P&L estimate separate from a recorded realized estimate", () => {
   const position = indexedPosition({ total_pnl_usd: null, unrealized_pnl_usd: null });
   render(<Holdings overview={overview()} trading={tradingDetails([position])} />);
-  expect(within(holdingRow("JUP")).getAllByRole("cell")[4]).toHaveTextContent("—");
+  expect(within(holdingRow("JUP")).getAllByRole("cell")[3]).toHaveTextContent("—");
   fireEvent.click(screen.getByRole("button", { name: "Inspect JUP holding" }));
   expect(within(screen.getByText("Indexed realized P&L estimate").parentElement!).getByText("+$50.00")).toBeVisible();
   expect(within(screen.getByText("Indexed unrealized P&L estimate").parentElement!).getByText("—")).toBeVisible();
@@ -627,4 +641,189 @@ it("keeps holdings available through trading errors and exposes only explicit pa
   fireEvent.click(screen.getByRole("button", { name: "Reload trading details" }));
   expect(trading.reload).toHaveBeenCalledOnce();
   expect(holdingRow("JUP")).toHaveTextContent("+$150.00");
+});
+
+// Synthetic wallets for the card layout: priced tokens, unpriced tokens and
+// LP position receipts built from the same fixture asset.
+function tokenAsset(index: number, overrides: Partial<Schemas["WalletAsset"]> = {}): Schemas["WalletAsset"] {
+  return {
+    ...overview().assets[0],
+    mint: bs58.encode(new Uint8Array(32).fill(index + 60)),
+    symbol: "SYN" + index,
+    name: "Synthetic token " + index,
+    amount: "1000000",
+    decimals: 6,
+    ui_amount: "1",
+    price_usd: "1",
+    value_usd: String(1000 - index),
+    estimated_value_usd: null,
+    price_updated_at: null,
+    last_slot: index,
+    ...overrides,
+  };
+}
+function cardOverview(assets: Schemas["WalletAsset"][]) {
+  const data = overview();
+  data.assets = assets;
+  // No SOL rows: every row on the card comes from the assets under test.
+  data.native_sol_lamports = null;
+  data.native_sol_value_usd = null;
+  data.wrapped_sol_lamports = null;
+  data.wrapped_sol_value_usd = null;
+  return data;
+}
+function receiptAsset(index: number, protocol = "meteora_damm_v2"): Schemas["WalletAsset"] {
+  return tokenAsset(index, {
+    symbol: "RCPT" + index,
+    name: "Receipt token " + index,
+    price_usd: null,
+    value_usd: null,
+    position: { protocol, position: null, pool: null },
+  });
+}
+function bodyRows() {
+  return Array.from(document.querySelectorAll("tr.data-row"));
+}
+function row(id: string, value: string | null | undefined, extra: Partial<Row> = {}): Row {
+  return { id, symbol: id, name: id, amount: "1", raw: "1", value, ...extra };
+}
+
+it("splitRows separates receipts and unpriced", () => {
+  const receipt = row("receipt", null, {
+    receipt: { label: "Meteora DAMM v2", position: null, pool: null, tokenSymbol: null, tokenName: null },
+  });
+  const rows = [
+    row("tiny", "0.0099"),
+    row("small", "0.01"),
+    row("big", "250.5"),
+    row("none", null),
+    row("missing", undefined),
+    row("zero", "0"),
+    receipt,
+    row("mid", "12"),
+  ];
+  const { shown, collapsed, receipts } = splitRows(rows);
+  expect(shown.map((r) => r.id)).toEqual(["big", "mid", "small"]);
+  expect(collapsed.map((r) => r.id)).toEqual(["tiny", "zero", "none", "missing"]);
+  expect(receipts).toEqual([receipt]);
+  expect(splitRows([])).toEqual({ shown: [], collapsed: [], receipts: [] });
+});
+
+it("shows 10 priced tokens then a show line", () => {
+  const priced = Array.from({ length: 12 }, (_, index) => tokenAsset(index));
+  const unpriced = [13, 14, 15].map((index) =>
+    tokenAsset(index, { price_usd: null, value_usd: null }),
+  );
+  render(<Holdings overview={cardOverview([...unpriced, ...priced])} />);
+  expect(bodyRows()).toHaveLength(10);
+  expect(holdingButtons()[0]).toHaveAccessibleName("Inspect SYN0 holding");
+  expect(screen.queryByRole("button", { name: "Inspect SYN10 holding" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Inspect SYN13 holding" })).toBeNull();
+  const collapsedLine = screen.getByRole("button", { name: "+3 tokens with no price or tiny balances · show" });
+  fireEvent.click(collapsedLine);
+  expect(bodyRows()).toHaveLength(13);
+  expect(screen.getByRole("button", { name: "Inspect SYN13 holding" })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Show all 12 tokens" }));
+  expect(bodyRows()).toHaveLength(15);
+  expect(screen.getByRole("button", { name: "Inspect SYN11 holding" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Show all 12 tokens" })).toBeNull();
+});
+
+it("names a single collapsed token in the singular", () => {
+  render(
+    <Holdings
+      overview={cardOverview([tokenAsset(1), tokenAsset(2, { price_usd: null, value_usd: null })])}
+    />,
+  );
+  expect(screen.getByRole("button", { name: "+1 token with no price or tiny balances · show" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: /^Show all/ })).toBeNull();
+});
+
+it("receipts collapse to one line linking to the protocol", () => {
+  const showProtocol = vi.fn();
+  render(
+    <Holdings
+      overview={cardOverview([tokenAsset(1), receiptAsset(2), receiptAsset(3)])}
+      showProtocol={showProtocol}
+    />,
+  );
+  expect(screen.queryByRole("button", { name: /^Inspect RCPT/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /Inspect Meteora DAMM v2 position holding/ })).toBeNull();
+  const line = screen.getByText(/2 LP position NFTs/).closest("p")!;
+  expect(line).toHaveTextContent("2 LP position NFTs — shown in Meteora DAMM v2 below");
+  const link = within(line).getByRole("link", { name: "Meteora DAMM v2" });
+  expect(link).toHaveAttribute("href", "#protocol-meteora-damm-v2");
+  fireEvent.click(link);
+  expect(showProtocol).toHaveBeenCalledWith("meteora-damm-v2");
+});
+
+it("words a single receipt in the singular and does not link without a target", () => {
+  const { unmount } = render(
+    <Holdings overview={cardOverview([receiptAsset(2)])} showProtocol={vi.fn()} />,
+  );
+  expect(screen.getByText(/1 LP position NFT/).closest("p")).toHaveTextContent(
+    "1 LP position NFT — shown in Meteora DAMM v2 below",
+  );
+  unmount();
+  render(<Holdings overview={cardOverview([receiptAsset(2)])} />);
+  const line = screen.getByText(/1 LP position NFT/).closest("p")!;
+  expect(within(line).queryByRole("link")).toBeNull();
+  expect(line).not.toHaveTextContent("below");
+  expect(line).toHaveTextContent("Meteora DAMM v2");
+});
+
+it("only receipts and unpriced", () => {
+  render(
+    <Holdings
+      overview={cardOverview([
+        receiptAsset(1),
+        tokenAsset(2, { price_usd: null, value_usd: null }),
+      ])}
+      showProtocol={vi.fn()}
+    />,
+  );
+  expect(screen.queryByRole("table")).toBeNull();
+  expect(screen.getByRole("button", { name: "+1 token with no price or tiny balances · show" })).toBeVisible();
+  expect(screen.getByText(/1 LP position NFT/)).toBeVisible();
+  expect(screen.queryByText("No token balances in the available snapshot")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "+1 token with no price or tiny balances · show" }));
+  expect(bodyRows()).toHaveLength(1);
+  expect(screen.getByRole("button", { name: "Inspect SYN2 holding" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Hide 1 token with no price or tiny balances" })).toBeVisible();
+});
+
+it("copycat symbol keeps mint", () => {
+  const real = tokenAsset(1, { symbol: "USDC", name: "USD Coin" });
+  const copycat = tokenAsset(2, { symbol: "USDC", name: "USD Coin" });
+  render(<Holdings overview={cardOverview([real, copycat])} />);
+  const buttons = screen.getAllByRole("button", { name: "Inspect USDC holding" });
+  expect(buttons).toHaveLength(2);
+  fireEvent.click(buttons[1]);
+  expect(screen.getByRole("link", { name: copycat.mint })).toBeVisible();
+  expect(screen.queryByRole("link", { name: real.mint })).toBeNull();
+});
+
+it("search still finds collapsed tokens and receipts", () => {
+  const unpriced = tokenAsset(3, { symbol: "HIDDEN", price_usd: null, value_usd: null });
+  render(
+    <Holdings
+      overview={cardOverview([tokenAsset(1), unpriced, receiptAsset(2)])}
+      showProtocol={vi.fn()}
+    />,
+  );
+  expect(bodyRows()).toHaveLength(1);
+  searchFor("hidden");
+  expect(screen.getByRole("button", { name: "Inspect HIDDEN holding" })).toBeVisible();
+  expect(screen.getByRole("status")).toHaveTextContent("1 of 3 observed holdings match");
+  // Matching rows replace the collapsed summary lines while a search is active.
+  expect(screen.queryByText(/LP position NFT/)).toBeNull();
+  expect(screen.queryByRole("button", { name: /tokens? with no price/ })).toBeNull();
+  searchFor("RCPT2");
+  expect(screen.getByRole("button", { name: "Inspect Meteora DAMM v2 position holding" })).toBeVisible();
+  searchFor(unpriced.mint);
+  expect(bodyRows()).toHaveLength(1);
+  searchFor("");
+  expect(bodyRows()).toHaveLength(1);
+  expect(screen.queryByRole("status")).toBeNull();
+  expect(screen.getByText(/1 LP position NFT/)).toBeVisible();
 });

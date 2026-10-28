@@ -24,6 +24,9 @@ test("pending, stale, unpriced, and protocol failure preserve honest values", as
   fixtureApi.setScenario("unpriced");
   await page.goto(`/wallet/${DEMO_ADDRESS}`);
   await waitForWalletHydration(page);
+  await page
+    .getByRole("button", { name: /tokens? with no price or tiny balances · show$/ })
+    .click();
   const unpriced = page
     .getByRole("row")
     .filter({

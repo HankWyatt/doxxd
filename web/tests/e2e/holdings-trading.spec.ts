@@ -37,6 +37,7 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 1000 }, { name: 
     const holdings = page.locator("#holdings");
     const jupButton = holdings.getByRole("button", { name: "Inspect JUP holding", exact: true });
     await expect(jupButton).toBeVisible();
+    await holdings.locator("details.coverage-note summary").click();
     await expect(holdings.getByText(/Trading history is partial/)).toBeVisible();
     await expect(holdings.getByLabel("Trading data coverage")).toContainText("1 of 1 tokens loaded");
     const row = jupButton.locator("xpath=ancestor::tr");
@@ -45,18 +46,21 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 1000 }, { name: 
     if (viewport.name === "desktop") {
       await expect(row.getByText("1.25M", { exact: true })).toBeVisible();
       await expect(row.getByText("+$250.00", { exact: true })).toBeVisible();
-      await expect(row.getByText("4 trades", { exact: true })).toBeVisible();
-      await expect(holdings.getByRole("columnheader", { name: "Buys", exact: true })).toBeVisible();
+      await expect(holdings.getByRole("columnheader", { name: "P&L", exact: true })).toBeVisible();
     } else {
       await expect(jupButton.getByText("Balance 1.25M", { exact: true })).toBeVisible();
-      await expect(holdings.getByRole("columnheader", { name: "Buys", exact: true })).toBeHidden();
+      await expect(holdings.getByRole("columnheader", { name: "P&L", exact: true })).toBeHidden();
     }
+    // Buys, sells and the last trade live in the row details, not the table.
+    await expect(holdings.getByRole("columnheader", { name: "Buys", exact: true })).toHaveCount(0);
+    await expect(row.getByText("4 trades", { exact: true })).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
     await jupButton.click();
     const detail = holdings.locator(".detail-row");
     await expect(detail.getByText("Balance", { exact: true }).locator("..").locator("dd")).toHaveText("1250000 JUP");
     await expect(detail.getByText("1250000000000", { exact: true })).toBeVisible();
     await expect(detail.getByText("Indexed realized P&L estimate", { exact: true })).toBeVisible();
+    await expect(detail.getByText("Recorded buys", { exact: true })).toBeVisible();
     await expect(detail.getByText("$1,000.00", { exact: true })).toBeVisible();
     await expect(detail.getByText("4 trades", { exact: true })).toBeVisible();
     await expect(detail.getByText("$750.00", { exact: true })).toBeVisible();
