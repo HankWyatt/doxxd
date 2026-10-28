@@ -21,6 +21,7 @@ const env = {
 it("registers DAMM v2 as a lazy protocol resource with its summary component", () => {
   expect(protocolResources).toContain("meteora-damm-v2");
   expect(resources["meteora-damm-v2"]).toEqual({
+    kind: "liquidity",
     path: "meteora-damm-v2-positions",
     label: "Meteora DAMM v2",
     field: "data",

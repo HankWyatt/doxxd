@@ -38,6 +38,7 @@ export type PositionView = {
   rewards: AmountView[];
   valueUsd: string | null;
   details: { label: string; value: string }[];
+  links?: { pool?: string; position?: string; positionMint?: string };
 };
 export type ProtocolPayload = {
   [K in ProtocolResource]: { resource: K; data: ResourceData[K] };

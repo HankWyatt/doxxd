@@ -27,6 +27,11 @@ export function liquidityRows(
       legLabel(row.principal_a) + " / " + legLabel(row.principal_b),
     ),
     assets: [leg(row.principal_a), leg(row.principal_b)],
+    links: {
+      pool: row.pool,
+      position: row.position,
+      positionMint: row.position_mint,
+    },
     rewards: row.rewards.map((r) => ({
       label: r.mint ? mintName(r.mint) : "Reward",
       mint: r.mint ?? undefined,
@@ -62,6 +67,7 @@ export function meteoraRows(
       legLabel(row.principal_x) + " / " + legLabel(row.principal_y),
     ),
     assets: [leg(row.principal_x), leg(row.principal_y)],
+    links: { pool: row.pair, position: row.position },
     rewards: row.rewards.map((r) => ({
       label: r.mint ? mintName(r.mint) : "Reward",
       mint: r.mint ?? undefined,
@@ -126,6 +132,11 @@ export function dammV2Rows(
     return {
       ...position(row.position, a.label + " / " + b.label),
       assets,
+      links: {
+        pool: row.pool,
+        position: row.position,
+        positionMint: row.position_mint,
+      },
       valueUsd: row.principal_value_usd ?? null,
       rewards: [
         claimable(a.label, a.mint!, row.fee_a_claimable_atoms, row.token_a.decimals, "claimable fee"),
@@ -177,6 +188,7 @@ export function fungibleRows(
   return raw.data.map((row) => ({
     ...position(row.owner_token_account, "Direct LP receipt"),
     assets: row.principal.map(leg),
+    ...(row.pool ? { links: { pool: row.pool } } : {}),
     details: [
       { label: "LP mint", value: row.lp_mint },
       { label: "Receipt atoms", value: row.lp_atoms },

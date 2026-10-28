@@ -1,5 +1,12 @@
 import type { ResourceName, ProtocolResource } from "./contracts";
+export type ProtocolKind =
+  | "lending"
+  | "staking"
+  | "liquidity"
+  | "perps"
+  | "yield";
 export type ResourceDefinition = {
+  kind?: ProtocolKind;
   path: string;
   label: string;
   field: "data" | "positions" | "assets" | "components";
@@ -20,18 +27,21 @@ export const resources: Record<ResourceName, ResourceDefinition> = {
   },
   positions: { path: "positions", label: "Trading", field: "data" },
   stake: {
+    kind: "staking",
     path: "stake-accounts",
     label: "Native staking",
     field: "data",
     componentId: "native_stake",
   },
   "liquid-staking": {
+    kind: "staking",
     path: "liquid-staking",
     label: "Liquid staking",
     field: "positions",
     componentId: "liquid_staking_receipts",
   },
   kamino: {
+    kind: "lending",
     path: "defi-positions",
     protocol: "kamino_lend",
     label: "Kamino Lend",
@@ -39,18 +49,21 @@ export const resources: Record<ResourceName, ResourceDefinition> = {
     componentId: "kamino_lend",
   },
   solend: {
+    kind: "lending",
     path: "solend-positions",
     label: "Solend",
     field: "data",
     componentId: "solend",
   },
   marginfi: {
+    kind: "lending",
     path: "marginfi-positions",
     label: "MarginFi",
     field: "data",
     componentId: "marginfi",
   },
   orca: {
+    kind: "liquidity",
     path: "liquidity-positions",
     protocol: "orca_whirlpools",
     label: "Orca Whirlpools",
@@ -58,6 +71,7 @@ export const resources: Record<ResourceName, ResourceDefinition> = {
     componentId: "orca_whirlpools",
   },
   "raydium-clmm": {
+    kind: "liquidity",
     path: "liquidity-positions",
     protocol: "raydium_clmm",
     label: "Raydium CLMM",
@@ -65,18 +79,21 @@ export const resources: Record<ResourceName, ResourceDefinition> = {
     componentId: "raydium_clmm",
   },
   meteora: {
+    kind: "liquidity",
     path: "meteora-dlmm-positions",
     label: "Meteora DLMM",
     field: "data",
     componentId: "meteora_dlmm",
   },
   "meteora-damm-v2": {
+    kind: "liquidity",
     path: "meteora-damm-v2-positions",
     label: "Meteora DAMM v2",
     field: "data",
     componentId: "meteora_damm_v2",
   },
   "raydium-cpmm": {
+    kind: "liquidity",
     path: "fungible-liquidity-positions",
     protocol: "raydium_cpmm",
     label: "Raydium CPMM",
@@ -84,6 +101,7 @@ export const resources: Record<ResourceName, ResourceDefinition> = {
     componentId: "raydium_cpmm",
   },
   "raydium-amm-v4": {
+    kind: "liquidity",
     path: "fungible-liquidity-positions",
     protocol: "raydium_amm_v4",
     label: "Raydium AMM v4",
@@ -91,18 +109,21 @@ export const resources: Record<ResourceName, ResourceDefinition> = {
     componentId: "raydium_amm_v4",
   },
   "raydium-farms": {
+    kind: "yield",
     path: "farm-positions",
     label: "Raydium farms",
     field: "data",
     componentId: "raydium_farms",
   },
   drift: {
+    kind: "perps",
     path: "drift-positions",
     label: "Drift",
     field: "data",
     componentId: "drift",
   },
   velocity: {
+    kind: "perps",
     path: "velocity-positions",
     label: "Velocity",
     field: "data",
