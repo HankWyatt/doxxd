@@ -20,7 +20,7 @@ it("replaces a queued headline and failed holdings without a click, then stops c
   vi.stubGlobal("fetch", network);
   render(<Portfolio address={DEMO_ADDRESS} />);
   await act(async () => {});
-  expect(screen.getByText(/sources still updating/)).toBeVisible();
+  expect(screen.getByText(/sources? still updating/)).toBeVisible();
   expect(screen.getByText("Couldn’t load this section")).toBeVisible();
   expect(screen.getAllByText("Checking for wallet data automatically…")).toHaveLength(2);
   await act(async () => { await vi.advanceTimersByTimeAsync(5000); });

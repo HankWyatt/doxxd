@@ -11,7 +11,7 @@ test("pending, stale, unpriced, and protocol failure preserve honest values", as
   await waitForWalletHydration(page);
   await expect(page.getByText("Demo data", { exact: true })).toHaveCount(0);
   await expect(
-    page.getByText(/\d+ sources still updating/),
+    page.getByText(/\d+ sources? still updating/),
   ).toBeVisible();
   await expect(page.getByText("$0.00", { exact: true })).toHaveCount(0);
   fixtureApi.setScenario("stale");

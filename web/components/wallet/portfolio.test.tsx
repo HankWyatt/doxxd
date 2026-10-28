@@ -185,7 +185,7 @@ it("keeps holdings and the subtotal usable after snapshot failure, then stops au
   expect(screen.getByRole("button", { name: "Inspect USDC holding" })).toBeVisible();
   expect(screen.getByText("Native SOL balance: Unknown")).toBeVisible();
   expect(screen.getByText("Wrapped SOL balance: Unknown")).toBeVisible();
-  expect(screen.queryByText(/sources still updating/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/sources? still updating/)).not.toBeInTheDocument();
   expect(screen.queryByText("Checking for wallet data automatically…")).not.toBeInTheDocument();
   expect(fetcher).toHaveBeenCalledTimes(5);
   await act(async () => { await vi.advanceTimersByTimeAsync(150_000); });

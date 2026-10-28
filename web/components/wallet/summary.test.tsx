@@ -92,7 +92,7 @@ it("explains a queued excluded source while keeping the current known total", ()
   });
   show(data);
   expect(screen.getByText("Known value")).toBeVisible();
-  expect(screen.getByText("1 sources still updating")).toBeVisible();
+  expect(screen.getByText("1 source still updating")).toBeVisible();
   expect(screen.getByText("$12,345.67")).toBeVisible();
 });
 
@@ -100,7 +100,7 @@ it("explains a running refresh while preserving an included saved value", () => 
   const data = summary();
   Object.assign(data.components[0], { coverage_fresh: false, coverage_status: "snapshot_running" });
   show(data);
-  expect(screen.getByText("1 sources still updating")).toBeVisible();
+  expect(screen.getByText("1 source still updating")).toBeVisible();
   expect(screen.queryByText(/^Saved data from/)).not.toBeInTheDocument();
   expect(screen.getByText("$12,345.67")).toBeVisible();
 });
@@ -110,7 +110,7 @@ it("keeps an unknown pending headline unknown", () => {
   data.known_component_net_value_usd = null;
   data.components[0].coverage_status = "snapshot_queued";
   show(data);
-  expect(screen.getByText("1 sources still updating")).toBeVisible();
+  expect(screen.getByText("1 source still updating")).toBeVisible();
   expect(screen.getByText("—")).toBeVisible();
   expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
 });
@@ -171,7 +171,7 @@ it("does not infer pending native balances from a terminal unavailable source", 
   });
   show(data);
   expect(screen.getByText(SUBTOTAL)).toHaveAttribute("data-tone", "partial");
-  expect(screen.queryByText(/sources still updating/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/sources? still updating/)).not.toBeInTheDocument();
   expect(screen.queryByText(/refresh failed/i)).not.toBeInTheDocument();
   expect(screen.getByText("$12,345.67")).toBeVisible();
 });
@@ -192,7 +192,7 @@ it.each(["failed", "disabled", "not_requested"])(
     expect(screen.getByText("Known value")).toBeVisible();
     expect(screen.getByText(SUBTOTAL)).toHaveAttribute("data-tone", "partial");
     expect(screen.getByText("$0.00")).toBeVisible();
-    expect(screen.queryByText(/sources still updating/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/sources? still updating/)).not.toBeInTheDocument();
   },
 );
 
@@ -253,6 +253,15 @@ it("renders an unavailable value as a dash with its reason, never zero", () => {
     />,
   );
   expect(screen.getByText("—")).toBeVisible();
+  expect(screen.getByText("Value unavailable")).toBeVisible();
+  expect(screen.getByText("Wallet data is unavailable")).toBeVisible();
   expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
   expect(screen.getByTestId("actions")).toBeVisible();
+});
+
+it("announces loading with a known-value label until completeness is known", () => {
+  render(<WalletSummary result={null} loading retry={vi.fn()} />);
+  expect(screen.getByRole("status", { name: "Loading portfolio value" })).toBeVisible();
+  expect(screen.getByText("Known value")).toBeVisible();
+  expect(screen.queryByText("Net worth")).not.toBeInTheDocument();
 });

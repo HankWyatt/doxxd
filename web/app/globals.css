@@ -392,7 +392,10 @@ a svg {
 .info-button {
   border: 0;
   background: none;
-  padding: 0 2px;
+  min-width: 24px;
+  min-height: 24px;
+  margin: -6px 0;
+  padding: 0;
   color: var(--muted);
   font-size: 12px;
   line-height: 1;

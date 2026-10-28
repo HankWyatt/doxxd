@@ -6,6 +6,7 @@ import {
   formatHeadline,
   headlineLabel,
   statusLine,
+  VALUE_UNAVAILABLE,
 } from "@/lib/portfolio/headline";
 import { ResourceState } from "../resource-state";
 export function WalletSummary({
@@ -33,8 +34,8 @@ export function WalletSummary({
   );
   if (!result)
     return hero(
-      <div aria-label="Loading portfolio value">
-        <div className="label-mono">Net worth</div>
+      <div role="status" aria-label="Loading portfolio value">
+        <div className="label-mono">Known value</div>
         <span className="skeleton big" />
       </div>,
     );
@@ -43,6 +44,9 @@ export function WalletSummary({
       <div>
         <div className="label-mono">Known value</div>
         <div className="summary-value numeric">{formatHeadline(null)}</div>
+        <div className="status-line" data-tone="partial">
+          {VALUE_UNAVAILABLE}
+        </div>
         <ResourceState error={result} retry={retry} />
       </div>,
     );

@@ -360,9 +360,9 @@ it.each([
       fetcher.mock.calls.every(([input]) => !String(input).includes("meteora-damm-v2")),
     ).toBe(true);
     if (status === "queued")
-      expect(screen.getByText(/sources still updating/)).toBeVisible();
+      expect(screen.getByText(/sources? still updating/)).toBeVisible();
     if (status === "stale") expect(screen.getByText(/^Saved data from/)).toBeVisible();
-    if (status === "disabled") expect(screen.queryByText(/sources still updating/)).toBeNull();
+    if (status === "disabled") expect(screen.queryByText(/sources? still updating/)).toBeNull();
   },
 );
 

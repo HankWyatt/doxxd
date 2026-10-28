@@ -78,7 +78,7 @@ it("counts the sources that are still updating", () => {
   const waiting = raw();
   waiting.known_component_net_value_usd = null;
   waiting.components[0].coverage_status = "queued";
-  expect(statusLine(view(waiting), NOW)).toEqual({ tone: "pending", text: "1 sources still updating" });
+  expect(statusLine(view(waiting), NOW)).toEqual({ tone: "pending", text: "1 source still updating" });
 });
 
 it("saved data names the oldest stale included observation in UTC", () => {

@@ -1,6 +1,8 @@
 import { formatUsd } from "@/lib/decimal";
 import type { SummaryView } from "./model";
 
+export const VALUE_UNAVAILABLE = "Value unavailable";
+
 export type StatusTone = "ready" | "pending" | "saved" | "partial";
 
 const UPDATING = /queued|pending|running/;
@@ -48,14 +50,17 @@ export function statusLine(
 ): { tone: StatusTone; text: string } {
   const f = flags(summary);
   if (summary.valueUsd === null && f.updating === 0)
-    return { tone: "partial", text: "Value unavailable" };
+    return { tone: "partial", text: VALUE_UNAVAILABLE };
   if (f.subtotal)
     return {
       tone: f.subtotalUpdating ? "pending" : "partial",
       text: "Wallet balances unavailable · showing protocols only",
     };
   if (f.updating > 0)
-    return { tone: "pending", text: `${f.updating} sources still updating` };
+    return {
+      tone: "pending",
+      text: `${f.updating} ${f.updating === 1 ? "source" : "sources"} still updating`,
+    };
   if (f.saved) {
     const usable =
       savedAt && !Number.isNaN(savedAt.getTime()) && savedAt <= now;
