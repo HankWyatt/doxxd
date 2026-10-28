@@ -51,7 +51,7 @@ export function ProtocolSection({
               : resource === "stake"
                 ? "Native stake accounts"
                 : resource.includes("raydium") ||
-                    ["orca", "meteora"].includes(resource)
+                    ["orca", "meteora", "meteora-damm-v2"].includes(resource)
                   ? "Liquidity positions"
                   : resource === "drift" || resource === "velocity"
                     ? "Trading accounts"

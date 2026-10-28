@@ -11,6 +11,7 @@ export type ResourceData = {
   orca: Schemas["WalletLiquidityPositions"];
   "raydium-clmm": Schemas["WalletLiquidityPositions"];
   meteora: Schemas["WalletMeteoraPositions"];
+  "meteora-damm-v2": Schemas["WalletMeteoraDammV2Positions"];
   "raydium-cpmm": Schemas["WalletFungibleLiquidityPositions"];
   "raydium-amm-v4": Schemas["WalletFungibleLiquidityPositions"];
   "raydium-farms": Schemas["WalletFarmPositions"];

@@ -490,6 +490,14 @@ const fixtureData: ResourceData = {
     page_unpriced_leg_count: 0,
     coverage: lpCoverage,
   },
+  "meteora-damm-v2": {
+    ...basePage,
+    protocol: "meteora_damm_v2",
+    data: [],
+    page_known_principal_value_usd: "0",
+    page_unpriced_leg_count: 0,
+    coverage: lpCoverage,
+  },
   "raydium-cpmm": {
     ...basePage,
     protocol: "raydium_cpmm",

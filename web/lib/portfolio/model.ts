@@ -6,7 +6,12 @@ import type {
 import { coverageView, type CoverageView } from "../coverage";
 import { stakeRows, liquidRows } from "./adapters/staking";
 import { lendingRows, marginfiRows } from "./adapters/lending";
-import { liquidityRows, meteoraRows, fungibleRows } from "./adapters/liquidity";
+import {
+  liquidityRows,
+  meteoraRows,
+  dammV2Rows,
+  fungibleRows,
+} from "./adapters/liquidity";
 import { farmRows } from "./adapters/farms";
 import { tradingRows } from "./adapters/trading";
 import { sourceDetail } from "./adapters/shared";
@@ -84,6 +89,9 @@ export function toProtocolView(
     case "meteora":
       positions = meteoraRows(input.data);
       break;
+    case "meteora-damm-v2":
+      positions = dammV2Rows(input.data);
+      break;
     case "raydium-cpmm":
     case "raydium-amm-v4":
       positions = fungibleRows(input.data);
@@ -106,7 +114,8 @@ export function toProtocolView(
   const hasPositionInventory =
     input.resource === "orca" ||
     input.resource === "raydium-clmm" ||
-    input.resource === "meteora";
+    input.resource === "meteora" ||
+    input.resource === "meteora-damm-v2";
   const rawTotalPositions =
     hasPositionInventory && "total_positions" in c ? c.total_positions : null;
   const totalPositions =

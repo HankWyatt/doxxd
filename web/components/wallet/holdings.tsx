@@ -1,7 +1,8 @@
 "use client";
 import { Fragment, useRef, useState } from "react";
 import { ChevronDown, Wallet } from "lucide-react";
-import type { Schemas } from "@/lib/dmnd/contracts";
+import type { ProtocolResource, Schemas } from "@/lib/dmnd/contracts";
+import { protocolResources, resources } from "@/lib/dmnd/resources";
 import {
   formatAmount,
   formatUsd,
@@ -26,7 +27,35 @@ type Row = {
   priceAt?: string | null;
   accountCount?: number;
   balanceSlot?: number | null;
+  receipt?: Receipt;
 };
+type Receipt = {
+  label: string;
+  resource?: ProtocolResource;
+  position: string | null;
+  pool: string | null;
+  metadata: string | null;
+};
+// An LP position NFT is a receipt for a protocol position: it is never valued
+// here, and its token metadata is creator-supplied rather than a trust signal.
+function positionReceipt(asset: Schemas["WalletAsset"]): Receipt | null {
+  if (!asset.position) return null;
+  const { protocol } = asset.position;
+  const resource = protocolResources.find(
+    (r) => resources[r].componentId === protocol,
+  );
+  const metadata = [asset.symbol, asset.name]
+    .map((value) => value?.trim())
+    .filter(Boolean)
+    .join(" · ");
+  return {
+    label: resource ? resources[resource].label : protocol.replaceAll("_", " "),
+    resource,
+    position: asset.position.position ?? null,
+    pool: asset.position.pool ?? null,
+    metadata: metadata || null,
+  };
+}
 function AssetIcon({ row }: { row: Row }) {
   const [failed, setFailed] = useState(false);
   const image = tokenImageUrl(row.image);
@@ -57,21 +86,38 @@ function HoldingsTable({ overview }: { overview: Schemas["WalletOverview"] }) {
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
   const searchInput = useRef<HTMLInputElement>(null);
-  const rows: Row[] = overview.assets.map((a) => ({
-    id: a.mint,
-    mint: a.mint,
-    symbol: a.symbol?.trim() ? a.symbol : short(a.mint),
-    name: a.name?.trim() ? a.name : "Unknown token",
-    image: a.image_url,
-    amount: a.ui_amount ?? null,
-    raw: a.amount,
-    price: a.price_usd,
-    value: a.value_usd,
-    estimate: a.estimated_value_usd,
-    priceAt: a.price_updated_at,
-    accountCount: a.account_count,
-    balanceSlot: a.last_slot,
-  }));
+  const rows: Row[] = overview.assets.map((a) => {
+    const row: Row = {
+      id: a.mint,
+      mint: a.mint,
+      symbol: a.symbol?.trim() ? a.symbol : short(a.mint),
+      name: a.name?.trim() ? a.name : "Unknown token",
+      image: a.image_url,
+      amount: a.ui_amount ?? null,
+      raw: a.amount,
+      price: a.price_usd,
+      value: a.value_usd,
+      estimate: a.estimated_value_usd,
+      priceAt: a.price_updated_at,
+      accountCount: a.account_count,
+      balanceSlot: a.last_slot,
+    };
+    const receipt = positionReceipt(a);
+    return receipt
+      ? {
+          ...row,
+          symbol: receipt.label + " position",
+          name: "LP position receipt",
+          image: null,
+          price: null,
+          value: null,
+          estimate: null,
+          priceAt: null,
+          receipt,
+        }
+      : row;
+  });
+  const receiptCount = rows.filter((row) => row.receipt).length;
   if (
     overview.native_sol_lamports !== null &&
     overview.native_sol_lamports !== undefined
@@ -298,6 +344,7 @@ function HoldingsTable({ overview }: { overview: Schemas["WalletOverview"] }) {
                               <dt>Token accounts</dt>
                               <dd>{row.accountCount ?? "Native balance"}</dd>
                             </div>
+                            {row.receipt && <ReceiptDetail receipt={row.receipt} />}
                           </dl>
                         </td>
                       </tr>
@@ -354,6 +401,14 @@ function HoldingsTable({ overview }: { overview: Schemas["WalletOverview"] }) {
             source clocks. Unpriced quantities are retained; unknown value is
             not zero.
           </p>
+          {receiptCount > 0 && (
+            <p>
+              {receiptCount === 1
+                ? "1 LP position receipt overlaps protocol positions and has no price or value here."
+                : receiptCount +
+                  " LP position receipts overlap protocol positions and have no price or value here."}
+            </p>
+          )}
           <p>
             Snapshot status:{" "}
             {overview.coverage.snapshot_status.replaceAll("_", " ")}. Token
@@ -362,5 +417,46 @@ function HoldingsTable({ overview }: { overview: Schemas["WalletOverview"] }) {
         </details>
       </div>
     </section>
+  );
+}
+function ReceiptDetail({ receipt }: { receipt: Receipt }) {
+  const unidentified = receipt.position === null || receipt.pool === null;
+  return (
+    <>
+      <div>
+        <dt>Protocol position</dt>
+        <dd>
+          {receipt.resource ? (
+            <a href={"#protocol-" + receipt.resource}>{receipt.label}</a>
+          ) : (
+            receipt.label
+          )}
+        </dd>
+      </div>
+      <div>
+        <dt>Position account</dt>
+        <dd className="mono break">{receipt.position ?? "Not reported"}</dd>
+      </div>
+      <div>
+        <dt>Pool</dt>
+        <dd className="mono break">{receipt.pool ?? "Not reported"}</dd>
+      </div>
+      <div>
+        <dt>Receipt reference</dt>
+        <dd>
+          This NFT is a receipt for an LP position and overlaps protocol
+          positions. It has no price or value of its own; the position&apos;s
+          principal is reported in its protocol section.
+          {unidentified &&
+            " The source does not identify a single position before the wallet’s first completed position scan, or when one NFT backs several positions."}
+        </dd>
+      </div>
+      {receipt.metadata && (
+        <div>
+          <dt>Token metadata</dt>
+          <dd>{receipt.metadata} (creator-supplied, not verified)</dd>
+        </div>
+      )}
+    </>
   );
 }

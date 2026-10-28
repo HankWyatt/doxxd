@@ -12,7 +12,7 @@ Look up any public Solana wallet and see its holdings, staking, lending, liquidi
 ## Features
 
 - **No sign-up.** Paste a public address. No wallet connection or account is required.
-- **Portfolio.** The headline is DMND's authoritative known net value. Holdings page 20 at a time and are searchable by name, symbol or mint. Expandable protocol views cover native staking, liquid staking, Kamino, Solend, MarginFi, Orca, Raydium, Meteora, Drift and Velocity.
+- **Portfolio.** The headline is DMND's authoritative known net value. Holdings page 20 at a time and are searchable by name, symbol or mint. Expandable protocol views cover native staking, liquid staking, Kamino, Solend, MarginFi, Orca, Raydium, Meteora DLMM, Meteora DAMM v2, Drift and Velocity.
 - **Activity.** Observed executions, transfers, fees and net changes, with UTC date filters and opaque cursor pages kept in the URL.
 - **Watchlist.** Save addresses and optional labels in your browser. The list makes no wallet data requests.
 - **Demo mode.** `/demo` shows an explicitly labeled synthetic portfolio and activity, with scenarios for pending, partial, stale, unpriced, empty and error states. No key is needed.
@@ -44,7 +44,7 @@ Live data comes from the [DMND API](https://docs.dmnd.dev) through a server-side
 | `DMND_ALLOWED_WALLETS` | Optional server allowlist of wallet addresses; omit for public arbitrary-wallet use. |
 | `DMND_REQUEST_BUDGET` | Optional per-runtime upstream request cap, integer 1-34. Omit for normal public operation. |
 
-Protocol IDs: `stake`, `liquid-staking`, `kamino`, `solend`, `marginfi`, `orca`, `raydium-clmm`, `meteora`, `raydium-cpmm`, `raydium-amm-v4`, `raydium-farms`, `drift`, `velocity`. These are supported consumer views, not a claim that every upstream protocol is currently activated. Summary, overview and activity use fixed routes independently.
+Protocol IDs: `stake`, `liquid-staking`, `kamino`, `solend`, `marginfi`, `orca`, `raydium-clmm`, `meteora`, `meteora-damm-v2`, `raydium-cpmm`, `raydium-amm-v4`, `raydium-farms`, `drift`, `velocity`. These are supported consumer views, not a claim that every upstream protocol is currently activated. Summary, overview and activity use fixed routes independently.
 
 The gateway accepts only known resources and validated filters, rejects redirects and mismatched wallets or summary component sources, times out requests, and returns safe errors. Known summary components must identify the correct wallet, resource and protocol; future components retain canonical wallet-scoped provenance and the service's authoritative total. Protocol requests are lazy and limited to four at a time; refresh and retries are manual.
 
@@ -85,7 +85,7 @@ The application uses React, TypeScript and the Sites Vinext runtime.
 
 ## Data principles
 
-The headline uses DMND's authoritative known net value. Doxxd does not sum protocol pages or calculate financial positions. Unknown values remain unknown; missing data does not establish an empty wallet. Receipt references are labeled as overlapping holdings. Source clocks, coverage, debt, raw rewards and page-scoped subtotals retain their upstream meaning.
+The headline uses DMND's authoritative known net value. Doxxd does not sum protocol pages or calculate financial positions. Unknown values remain unknown; missing data does not establish an empty wallet. Receipt references are labeled as overlapping holdings. LP position NFTs in holdings are labeled as position receipts that overlap protocol positions; they are never priced or valued, and their creator-supplied token metadata is not a verification signal. Source clocks, coverage, debt, raw rewards and page-scoped subtotals retain their upstream meaning.
 
 Expanded Marginfi details preserve raw shares, bank amounts, underlying quantities and independent price/bank/position clocks. Expanded spot/perp details preserve raw scaled balances and exact source base/quote amounts. A scaled balance is not a token quantity; base/quote amounts are not USD, equity or profit. Saved protocol snapshots retain their incomplete coverage and disabled-scan reason even when a price observation is newer.
 

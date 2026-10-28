@@ -28,11 +28,12 @@ export const position = (id: string, label: string): PositionView => ({
 });
 export const leg = (row: {
   mint: string;
+  symbol?: string | null;
   ui_amount?: string | null;
   value_usd?: string | null;
   amount_reason?: string | null;
 }): AmountView => ({
-  label: mintName(row.mint),
+  label: row.symbol?.trim() ? row.symbol : mintName(row.mint),
   mint: row.mint,
   amount: row.ui_amount ?? null,
   valueUsd: row.value_usd ?? null,

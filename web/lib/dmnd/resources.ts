@@ -69,6 +69,12 @@ export const resources: Record<ResourceName, ResourceDefinition> = {
     field: "data",
     componentId: "meteora_dlmm",
   },
+  "meteora-damm-v2": {
+    path: "meteora-damm-v2-positions",
+    label: "Meteora DAMM v2",
+    field: "data",
+    componentId: "meteora_damm_v2",
+  },
   "raydium-cpmm": {
     path: "fungible-liquidity-positions",
     protocol: "raydium_cpmm",

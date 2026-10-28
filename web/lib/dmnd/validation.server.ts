@@ -13,6 +13,7 @@ const schemaNames = {
   orca: "WalletLiquidityPositions",
   "raydium-clmm": "WalletLiquidityPositions",
   meteora: "WalletMeteoraPositions",
+  "meteora-damm-v2": "WalletMeteoraDammV2Positions",
   "raydium-cpmm": "WalletFungibleLiquidityPositions",
   "raydium-amm-v4": "WalletFungibleLiquidityPositions",
   "raydium-farms": "WalletFarmPositions",
