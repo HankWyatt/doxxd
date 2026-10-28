@@ -20,12 +20,12 @@ assignees: ""
 2.
 3.
 
-If it involves a wallet, please use a public address you are comfortable sharing, or reproduce it with `/demo?scenario=...`.
+If it involves a wallet, please use a public address you are comfortable sharing, or describe the state you saw without the address.
 
 ## Environment
 
 - Browser and version:
-- Route (for example `/wallet/<address>`, `/demo`, `/watchlist`):
+- Route (for example `/wallet/<address>`, `/wallet/<address>/activity`, `/watchlist`):
 - Commit or version:
 - Node version (if running locally):
 

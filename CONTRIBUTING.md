@@ -13,13 +13,13 @@ npm run install:ci
 
 ## Run it
 
-The demo needs no key and makes no network calls to DMND:
+The development server runs without a key; wallet routes then show a connection state:
 
 ```sh
 npm run dev -- --host 127.0.0.1 --port 4317
 ```
 
-Open `http://127.0.0.1:4317/demo`. `?tab=activity` shows synthetic activity, and `?scenario=` selects `pending`, `partial`, `stale`, `unpriced`, `empty`, `protocol-error`, `activity-continuation` or `truncated`.
+Open `http://127.0.0.1:4317/`. There is no public demo route. To exercise portfolio and activity states without a key, run the browser tests (`npm run test:e2e`); they serve the synthetic fixtures in `web/lib/fixtures/` to an isolated server.
 
 Live routes (`/wallet/<address>`) need a DMND API key supplied as a server environment variable. The names are in [`web/.env.example`](web/.env.example) and the [README](README.md#configuration): `DMND_API_BASE_URL`, `DMND_API_KEY` and `DMND_ENABLED_PROTOCOLS`. Never commit a key, put it in a URL, or expose it with a `NEXT_PUBLIC_` prefix. You do not need a key to contribute; the automated tests never call the live service.
 
@@ -71,7 +71,7 @@ This is a public repository. Never commit:
 - Personal information: names, personal email addresses, home-directory paths or machine names.
 - Real wallet data: real wallet addresses, transaction signatures, account addresses, recorded API responses or screenshots of real wallets. A recording with the addresses swapped can still identify a wallet through its exact amounts, slots and times.
 
-Test fixtures and demo data must be synthetic. Invent values, or derive them deterministically (for example from a hash of a label), and keep them internally consistent so tests still mean something. Well-known public IDs such as the system and token programs, wrapped SOL and USDC are fine. Screenshots come from the synthetic `/demo` pages.
+Test fixtures must be synthetic. Invent values, or derive them deterministically (for example from a hash of a label), and keep them internally consistent so tests still mean something. Well-known public IDs such as the system and token programs, wrapped SOL and USDC are fine. Screenshots must show synthetic fixture data only, for example from a browser test that serves the fixtures.
 
 Secret scanning and push protection are enabled on this repository. If you think a secret was committed, report it privately as described in [SECURITY.md](SECURITY.md) instead of opening an issue.
 
