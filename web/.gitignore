@@ -44,3 +44,6 @@ yarn-error.log*
 
 # Documented key names only, never credentials
 !.env.example
+
+# Local Sites hosting bindings
+.openai/

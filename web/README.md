@@ -4,4 +4,4 @@ See the [repository README](../README.md) for setup and configuration, and [CONT
 
 This application retains the Sites Vinext starter's portable runtime integration. `npm run dev` starts Vinext; `npm run build` builds the Worker; `npm start` previews the built Worker locally through Wrangler. These commands do not deploy. Runtime state in `.sites-runtime/`, `.vinext/`, `.wrangler/` and `dist/` is generated and ignored.
 
-Preserve `scripts/`, `vite.config.ts`, `worker/index.ts`, `.openai/hosting.json`, `cloudflare-env.d.ts` and the package lock when changing framework integration. The starter includes optional D1/connector/auth examples; Doxxd's public wallet views do not require them.
+Preserve `scripts/`, `vite.config.ts`, `worker/index.ts`, `cloudflare-env.d.ts` and the package lock when changing framework integration. An optional local `.openai/hosting.json` (git-ignored) can name D1/R2 bindings for Sites hosting; without it the app runs with none. The starter includes optional D1/connector/auth examples; Doxxd's public wallet views do not require them.
