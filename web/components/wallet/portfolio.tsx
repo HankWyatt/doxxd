@@ -59,6 +59,10 @@ function PortfolioContent({
     setTarget(null);
     if (window.location.hash === "#" + id) element.scrollIntoView?.();
     else window.location.hash = id;
+    // Keep keyboard order at the section, including on a repeated follow.
+    element
+      .querySelector<HTMLButtonElement>(".protocol-toggle")
+      ?.focus({ preventScroll: true });
   }, [target, showAll]);
   function showProtocol(resource: ProtocolResource) {
     if (!featured.includes(resource)) setShowAll(true);

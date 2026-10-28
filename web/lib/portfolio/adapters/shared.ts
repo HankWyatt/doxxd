@@ -42,6 +42,8 @@ export const leg = (row: {
   mint: row.mint,
   amount: row.ui_amount ?? null,
   valueUsd: row.value_usd ?? null,
+  // Symbols are not identity: the expanded row always shows the mint.
+  sourceDetails: [{ label: "Mint", value: row.mint }],
   ...(row.amount_reason
     ? { qualifier: row.amount_reason.replaceAll("_", " ") }
     : {}),

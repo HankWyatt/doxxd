@@ -312,3 +312,86 @@ it.each([
     if (status === "disabled") expect(screen.queryByText(/being prepared/)).toBeNull();
   },
 );
+
+function copycatPage(resource: "orca" | "raydium-clmm" | "meteora") {
+  const copycat = syntheticAddress("copycat/usdc-symbol");
+  const orca = readFixture("orca", "complete");
+  if (!orca.ok) throw new Error("Fixture must succeed");
+  const source = orca.data.data[0];
+  const legB = { ...source.principal_b, mint: copycat, symbol: "USDC" };
+  if (resource === "meteora") {
+    const page = readFixture("meteora", "complete");
+    if (!page.ok) throw new Error("Fixture must succeed");
+    page.data.data = [
+      {
+        position: DAMM.position,
+        pair: DAMM.pool,
+        program: DAMM.program,
+        lower_bin_id: -10,
+        upper_bin_id: 10,
+        principal_x: source.principal_a,
+        principal_y: legB,
+        fee_pending_x_atoms: "1",
+        fee_pending_y_atoms: "2",
+        rewards: [],
+        owner_slot: 410000003,
+        position_slot: 410000002,
+        pair_slot: 410000001,
+        bin_arrays_slot: 410000001,
+        snapshot_slot: 410000004,
+      },
+    ];
+    return { copycat, data: page.data };
+  }
+  orca.data.protocol = resource === "orca" ? "orca_whirlpools" : "raydium_clmm";
+  orca.data.data[0].principal_b = legB;
+  return { copycat, data: orca.data };
+}
+
+it.each([
+  ["orca", "Orca Whirlpools"],
+  ["raydium-clmm", "Raydium CLMM"],
+  ["meteora", "Meteora DLMM"],
+] as const)("keeps a copycat-symbol mint visible in an expanded %s row", async (resource, label) => {
+  const { copycat, data } = copycatPage(resource);
+  expect(validResourcePayload(resource, data)).toBe(true);
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data })));
+  const { DEMO_ADDRESS } = await import("@/lib/fixtures/wallet");
+  render(
+    <ProtocolSection address={DEMO_ADDRESS} resource={resource} mode={{ kind: "live" }} labels={{}} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Expand " + label }));
+  fireEvent.click(await screen.findByRole("button", { name: /WSOL \/ USDC/ }));
+  const detail = document.querySelector(".detail-row") as HTMLElement;
+  expect(within(detail).getByText(copycat)).toBeVisible();
+});
+
+it("moves focus to the protocol section each time a receipt link is followed", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string) => {
+      const url = new URL(input, "http://doxxd.test");
+      const resource = url.pathname.split("/").at(-1) as ResourceName;
+      if (resource === "overview")
+        return Response.json({
+          ok: true,
+          data: receiptOverview({ protocol: "meteora_damm_v2", position: DAMM.position, pool: DAMM.pool }),
+        });
+      return Response.json({ ok: false, kind: "configuration" });
+    }),
+  );
+  window.location.hash = "";
+  const { DEMO_ADDRESS } = await import("@/lib/fixtures/wallet");
+  render(<Portfolio address={DEMO_ADDRESS} />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Inspect Meteora DAMM v2 position holding" }),
+  );
+  const toggle = () => screen.getByRole("button", { name: "Expand Meteora DAMM v2" });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const link = screen.getByRole("link", { name: "Meteora DAMM v2" });
+    link.focus();
+    fireEvent.click(link);
+    await waitFor(() => expect(document.activeElement).toBe(toggle()));
+    expect(window.location.hash).toBe("#protocol-meteora-damm-v2");
+  }
+});
