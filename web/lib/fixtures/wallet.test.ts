@@ -54,3 +54,12 @@ it.each(["pending", "empty"] as const)(
     expect(result.data.position_count).toBe(0);
   },
 );
+it.each([undefined, "total_pnl", "unrealized_pnl", "value", "last_active"] as const)(
+  "echoes the requested positions sort %s like the gateway requires",
+  (sort) => {
+    const result = readFixture("positions", "complete", sort ? { sort } : {});
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.sort).toBe(sort ?? "total_pnl");
+  },
+);

@@ -692,6 +692,8 @@ export function readFixture<K extends ResourceName>(
       c.reason = "not_indexed";
     }
   }
+  // Echo the requested order, as the gateway requires of positions pages.
+  data.positions.sort = query.sort ?? "total_pnl";
   for (const feed of [data.transactions, data.activity])
     feed.data = feed.data.filter(
       (row) =>
