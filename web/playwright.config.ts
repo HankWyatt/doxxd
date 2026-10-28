@@ -5,7 +5,10 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  timeout: 30_000,
+  // The dev server builds each route's client code on first request. Shared CI
+  // runners can take longer than the local defaults to hydrate a cold route.
+  timeout: process.env.CI ? 60_000 : 30_000,
+  expect: { timeout: process.env.CI ? 15_000 : 5_000 },
   use: {
     baseURL: "http://127.0.0.1:4318",
     viewport: { width: 1440, height: 1000 },
