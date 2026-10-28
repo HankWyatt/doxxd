@@ -22,8 +22,10 @@ test("large observed holdings can be paged and searched without more wallet read
   result.data.known_value_usd = "3000";
   result.data.unpriced_asset_count = 45;
   result.data.coverage.complete = false;
-  result.data.coverage.snapshot_status = "queued";
-  result.data.coverage.reason = "snapshot_queued";
+  // Use terminal partial coverage so automatic scan checks do not compete with
+  // this assertion that local paging/search themselves cause no wallet reads.
+  result.data.coverage.snapshot_status = "done";
+  result.data.coverage.reason = "snapshot_partial";
   result.data.coverage.token_snapshot_slot = null;
   let walletReads = 0;
   await page.route("**/api/wallet/**", route => {
@@ -82,6 +84,6 @@ test("large observed holdings can be paged and searched without more wallet read
   await expect(holdings.getByRole("button", { name: "Inspect SOL holding", exact: true })).toBeVisible();
   await expect(holdings.locator(".section-heading")).toContainText("$3,000.00");
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-  expect(walletReads).toBe(2); // Initial overview and unavailable summary only.
+  expect(walletReads).toBe(3); // Overview, unavailable summary and independent trading page only.
   expect(errors).toEqual([]);
 });

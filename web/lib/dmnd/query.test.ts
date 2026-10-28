@@ -1,5 +1,44 @@
 import { expect, it } from "vitest";
 import { parseResourceQuery } from "./query";
+it.each(["total_pnl", "unrealized_pnl", "value", "last_active"])(
+  "accepts positions pagination with sort %s",
+  (sort) => {
+    expect(
+      parseResourceQuery(
+        "positions",
+        new URLSearchParams(`limit=100&cursor=a%2Bb%2F%3D&sort=${sort}`),
+      ),
+    ).toEqual({ limit: 100, cursor: "a+b/=", sort });
+  },
+);
+it.each([
+  "limit=0",
+  "limit=101",
+  "limit=1.5",
+  "limit=1&limit=2",
+  "cursor=",
+  "cursor=a&cursor=b",
+  "sort=",
+  "sort=total_pnl&sort=value",
+  "sort=realized_pnl",
+  "sort=VALUE",
+  "from=2026-10-01T00:00:00Z",
+  "to=2026-10-22T00:00:00Z",
+  "mint=So11111111111111111111111111111111111111112",
+  "window=7d",
+  "protocol=orca",
+])("rejects unsupported positions query %s", (params) =>
+  expect(
+    parseResourceQuery("positions", new URLSearchParams(params)),
+  ).toBeNull(),
+);
+it.each(["summary", "overview", "activity", "transactions", "orca"] as const)(
+  "does not add positions sorting to %s",
+  (resource) =>
+    expect(
+      parseResourceQuery(resource, new URLSearchParams("sort=value")),
+    ).toBeNull(),
+);
 it("preserves opaque cursors and validates supported fields", () => {
   expect(
     parseResourceQuery(

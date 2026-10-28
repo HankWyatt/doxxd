@@ -18,6 +18,7 @@ import { formatUsd } from "@/lib/decimal";
 import { short } from "@/lib/portfolio/adapters/shared";
 import { ResourceState, LoadingRows } from "../resource-state";
 import { Amounts, PositionDetail } from "./position-detail";
+import { RecoveryNotice } from "./recovery-notice";
 export function ProtocolSection({
   address,
   resource,
@@ -104,6 +105,7 @@ function ProtocolBody({
   if (!request.result.ok)
     return (
       <>
+        <RecoveryNotice state={request.recovery} retained={Boolean(request.refreshError)} retry={request.refresh} />
         <ResourceState error={request.result} retry={request.refresh} />
         {cursor && (
           <div className="paging">
@@ -137,6 +139,7 @@ function ProtocolBody({
   }
   return (
     <>
+      <RecoveryNotice state={request.recovery} retained={Boolean(request.refreshError)} retry={request.refresh} />
       {view.positions.length > 0 ? (
         <div className="table-scroll">
           <table>

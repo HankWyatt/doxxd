@@ -334,6 +334,32 @@ const fixtureData: ResourceData = {
     unpriced_asset_count: 0,
     coverage: holdingsCoverage,
   },
+  positions: {
+    ...basePage,
+    data: [
+      {
+        mint: MINTS.jup,
+        symbol: "JUP",
+        name: "Jupiter",
+        amount: "1000000000",
+        decimals: 6,
+        ui_amount: "1000",
+        token_accounts: [wallet],
+        bought: { amount: "625", sol: "2", usd: "250", count: 1 },
+        sold: { amount: "0", sol: "0", usd: "0", count: 0 },
+        realized_pnl_sol: "0",
+        realized_pnl_usd: "0",
+        unpriced_trades: 0,
+        first_trade_at: at,
+        last_trade_at: at,
+      },
+    ],
+    position_count: 1,
+    positions_tracked: true,
+    positions_since: at,
+    last_active_at: at,
+    sort: "total_pnl",
+  },
   stake: {
     ...basePage,
     data: [
@@ -610,6 +636,8 @@ export function readFixture<K extends ResourceName>(
     }
     data.transactions.data = [];
     data.activity.data = [];
+    data.positions.data = [];
+    data.positions.position_count = 0;
   }
   if (scenario === "partial" || scenario === "stale") {
     for (const name of protocolResources) {

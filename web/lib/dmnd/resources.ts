@@ -18,6 +18,7 @@ export const resources: Record<ResourceName, ResourceDefinition> = {
     field: "assets",
     componentId: "tokens_native_sol",
   },
+  positions: { path: "positions", label: "Trading", field: "data" },
   stake: {
     path: "stake-accounts",
     label: "Native staking",
@@ -114,7 +115,7 @@ export const protocolResources = (
   Object.keys(resources) as ResourceName[]
 ).filter(
   (key): key is ProtocolResource =>
-    !["summary", "overview", "transactions", "activity"].includes(key),
+    !["summary", "overview", "positions", "transactions", "activity"].includes(key),
 );
 export function isResource(value: string): value is ResourceName {
   return Object.hasOwn(resources, value);

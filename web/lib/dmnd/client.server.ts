@@ -66,6 +66,7 @@ function validPayload(
   resource: ResourceName,
   value: unknown,
   wallet: string,
+  query: ResourceQuery,
 ): boolean {
   if (!validResourcePayload(resource, value)) return false;
   if (
@@ -87,6 +88,22 @@ function validPayload(
           decimal(row.known_net_value_usd),
       )
     );
+  // Trading positions have their own indexed-trade scope, without coverage.
+  if (resource === "positions") {
+    if (value.sort !== (query.sort ?? "total_pnl")) return false;
+    const mints = new Set<string>();
+    return (value.data as unknown[]).every((row) => {
+      if (
+        !record(row) ||
+        typeof row.mint !== "string" ||
+        normalizeAddress(row.mint) !== row.mint ||
+        mints.has(row.mint)
+      )
+        return false;
+      mints.add(row.mint);
+      return true;
+    });
+  }
   if (!record(value.coverage)) return false;
   const rows = value[resources[resource].field] as unknown[];
   if (!rows.every(record)) return false;
@@ -227,7 +244,7 @@ export function createDmndClient(
         if (!response.ok || response.status >= 300)
           return { ok: false, kind: "upstream" };
         const body: unknown = await bodyJson(response);
-        return validPayload(resource, body, wallet)
+        return validPayload(resource, body, wallet, validQuery)
           ? { ok: true, data: body as ResourceData[K] }
           : { ok: false, kind: "upstream" };
       } catch (error) {

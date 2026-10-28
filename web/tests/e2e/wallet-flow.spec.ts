@@ -1,7 +1,8 @@
 import { test, expect } from "@playwright/test";
 import { DEMO_ADDRESS, readFixture } from "../../lib/fixtures/wallet";
+import { mockWalletResources, waitForWalletHydration } from "./mock-wallet-resources";
 
-test("search, direct entry, tabs, back, and live/demo isolation", async ({
+test("search, direct entry, tabs, back, and no fixture fallback", async ({
   page,
 }) => {
   await page.goto("/");
@@ -36,16 +37,28 @@ test("search, direct entry, tabs, back, and live/demo isolation", async ({
   ).toBeVisible();
 });
 
+test("public demo and sample-data API routes are removed", async ({ page, request }) => {
+  const response = await page.goto("/demo");
+  expect(response?.status()).toBe(404);
+  await expect(page.getByText("$12,345.67", { exact: true })).toHaveCount(0);
+  const api = await request.get("/api/demo/summary");
+  expect(api.status()).toBe(404);
+  await page.goto("/");
+  await expect(page.locator('a[href^="/demo"]')).toHaveCount(0);
+});
+
 test("portfolio expands with keyboard, copies, and refreshes", async ({
   page,
   context,
 }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await mockWalletResources(page);
   let summaries = 0;
   page.on("request", (request) => {
-    if (request.url().includes("/api/demo/summary")) summaries++;
+    if (new URL(request.url()).pathname === `/api/wallet/${DEMO_ADDRESS}/summary`) summaries++;
   });
-  await page.goto("/demo");
+  await page.goto(`/wallet/${DEMO_ADDRESS}`);
+  await waitForWalletHydration(page);
   await expect(page.getByText("$12,345.67", { exact: true })).toBeVisible();
   const holding = page.getByRole("button", {
     name: "Inspect BONK holding",
@@ -80,7 +93,9 @@ test("portfolio expands with keyboard, copies, and refreshes", async ({
 test("activity details, UTC bounds and empty continuation remain navigable", async ({
   page,
 }) => {
-  await page.goto("/demo?tab=activity");
+  const fixtureApi = await mockWalletResources(page);
+  await page.goto(`/wallet/${DEMO_ADDRESS}/activity`);
+  await waitForWalletHydration(page);
   const transaction = page
     .getByRole("button", { name: /^Inspect transaction/ })
     .first();
@@ -103,7 +118,9 @@ test("activity details, UTC bounds and empty continuation remain navigable", asy
   await expect(
     page.getByRole("button", { name: /^Inspect transaction/ }),
   ).toHaveCount(4);
-  await page.goto("/demo?tab=activity&scenario=activity-continuation");
+  fixtureApi.setScenario("activity-continuation");
+  await page.goto(`/wallet/${DEMO_ADDRESS}/activity`);
+  await waitForWalletHydration(page);
   await expect(
     page.getByText("Another page is available", { exact: true }),
   ).toBeVisible();
@@ -115,6 +132,7 @@ test("activity details, UTC bounds and empty continuation remain navigable", asy
     page.getByRole("button", { name: /^Inspect transaction/ }),
   ).toHaveCount(4);
   await page.goBack();
+  await waitForWalletHydration(page);
   await expect(
     page.getByText("Another page is available", { exact: true }),
   ).toBeVisible();
@@ -124,7 +142,9 @@ test("390px portfolio and activity stay within the viewport", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/demo");
+  await mockWalletResources(page);
+  await page.goto(`/wallet/${DEMO_ADDRESS}`);
+  await waitForWalletHydration(page);
   await expect(page.getByText("$12,345.67", { exact: true })).toBeVisible();
   await page.getByText("Full address", { exact: true }).click();
   await page
@@ -134,6 +154,7 @@ test("390px portfolio and activity stay within the viewport", async ({
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBeLessThanOrEqual(390);
   await page.getByRole("link", { name: "Activity", exact: true }).click();
+  await waitForWalletHydration(page);
   await page
     .getByRole("button", { name: /^Inspect transaction/ })
     .first()
@@ -145,11 +166,12 @@ test("390px portfolio and activity stay within the viewport", async ({
 });
 
 test("native staking source details retain raw epochs on desktop and mobile", async ({ page }) => {
-  // Synthetic demo data: the sentinel remains an epoch string, never a date or balance.
+  // Synthetic source data: the sentinel remains an epoch string, never a date or balance.
+  await mockWalletResources(page);
   const fixture = readFixture("stake", "complete");
   if (!fixture.ok) throw Error("Expected synthetic stake fixture");
   fixture.data.data[0].lockup_epoch = "18446744073709551615";
-  await page.route("**/api/demo/stake?**", route =>
+  await page.route(`**/api/wallet/${DEMO_ADDRESS}/stake?**`, route =>
     route.fulfill({ status: 200, json: fixture }),
   );
   const errors: string[] = [];
@@ -157,9 +179,10 @@ test("native staking source details retain raw epochs on desktop and mobile", as
   page.on("console", message => {
     if (/hydrat/i.test(message.text())) errors.push(message.text());
   });
-  await page.goto("/demo");
+  await page.goto(`/wallet/${DEMO_ADDRESS}`);
+  await waitForWalletHydration(page);
   await expect(page.getByText("$12,345.67", { exact: true })).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText("Demo data", { exact: true })).toBeVisible();
+  await expect(page.getByText("Demo data", { exact: true })).toHaveCount(0);
   const section = page.locator("#protocol-stake");
   await section.getByRole("button", { name: "Expand Native staking", exact: true }).click();
   await section.locator(".data-row button").click();

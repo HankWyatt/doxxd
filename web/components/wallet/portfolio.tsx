@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { Layers3 } from "lucide-react";
 import { useWalletResource } from "@/lib/use-wallet-resource";
+import { useWalletPositions } from "@/lib/use-wallet-positions";
 import {
   LIVE_MODE,
   type WalletDataMode,
@@ -14,6 +15,7 @@ import { ResourceState, LoadingRows } from "../resource-state";
 import { WalletFrame, usePortfolioSummary } from "./frame";
 import { Holdings } from "./holdings";
 import { ProtocolSection } from "./protocol-section";
+import { RecoveryNotice } from "./recovery-notice";
 export function Portfolio({
   address,
   mode = LIVE_MODE,
@@ -35,6 +37,7 @@ function PortfolioContent({
   mode: WalletDataMode;
 }) {
   const overview = useWalletResource(address, "overview", {}, mode);
+  const trading = useWalletPositions(address, mode);
   const summary = usePortfolioSummary();
   const [showAll, setShowAll] = useState(false);
   const represented = protocolResources.filter((resource) =>
@@ -112,6 +115,7 @@ function PortfolioContent({
           })}
         </div>
       )}
+      <RecoveryNotice state={overview.recovery} retained={Boolean(overview.refreshError)} retry={overview.refresh} />
       {!overview.result ? (
         <div className="panel">
           <LoadingRows />
@@ -121,6 +125,7 @@ function PortfolioContent({
           key={address}
           overview={overview.result.data}
           showProtocol={showProtocol}
+          trading={trading}
         />
       ) : (
         <div className="panel">

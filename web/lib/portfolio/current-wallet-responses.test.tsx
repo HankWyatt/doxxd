@@ -106,13 +106,14 @@ it("keeps holdings and the independent empty stake scan usable without inventing
   const { container } = render(<Portfolio address={data.wallet} />);
   expect(await screen.findByText("Synthetic Token")).toBeVisible();
   expect(container.querySelector(".summary-value")).toHaveTextContent("—");
-  expect(request).toHaveBeenCalledTimes(2);
+  expect(request).toHaveBeenCalledTimes(3);
+  expect(request.mock.calls.filter(([input]) => new URL(input, "http://test.local").pathname.endsWith("/positions"))).toHaveLength(1);
   fireEvent.click(screen.getByRole("button", { name: "Expand Native staking" }));
   expect(await screen.findByText("No positions were found in this supported scope.")).toBeVisible();
   expect(container.querySelector(".summary-value")).toHaveTextContent("—");
   expect(screen.getByRole("button", { name: "Inspect SYN holding" })).toBeVisible();
   expect(within(container.querySelector("#protocol-stake")!).getByText("—")).toBeVisible();
-  expect(request).toHaveBeenCalledTimes(3);
+  expect(request).toHaveBeenCalledTimes(4);
 });
 
 it("rejects another recorded wallet's stake response rather than reusing its qualified empty scope", async () => {

@@ -1,25 +1,29 @@
 import { test, expect } from "@playwright/test";
 import bs58 from "bs58";
 import { DEMO_ADDRESS, readFixture } from "../../lib/fixtures/wallet";
+import { mockWalletResources, waitForWalletHydration } from "./mock-wallet-resources";
 
 test("pending, stale, unpriced, and protocol failure preserve honest values", async ({
   page,
 }) => {
-  await page.goto("/demo?scenario=pending");
-  // The first development load compiles client modules before fixture reads.
-  await expect(page.getByRole("textbox", { name: "Solana address" }))
-    .toBeEnabled({ timeout: 15_000 });
-  await expect(page.getByText("Demo data", { exact: true })).toBeVisible();
+  const fixtureApi = await mockWalletResources(page, "pending");
+  await page.goto(`/wallet/${DEMO_ADDRESS}`);
+  await waitForWalletHydration(page);
+  await expect(page.getByText("Demo data", { exact: true })).toHaveCount(0);
   await expect(
     page.getByText("Preparing wallet data", { exact: true }),
   ).toBeVisible();
   await expect(page.getByText("$0.00", { exact: true })).toHaveCount(0);
-  await page.goto("/demo?scenario=stale");
+  fixtureApi.setScenario("stale");
+  await page.goto(`/wallet/${DEMO_ADDRESS}`);
+  await waitForWalletHydration(page);
   await expect(
     page.getByText("Saved snapshots", { exact: true }),
   ).toBeVisible();
   await expect(page.getByText("$12,345.67", { exact: true })).toBeVisible();
-  await page.goto("/demo?scenario=unpriced");
+  fixtureApi.setScenario("unpriced");
+  await page.goto(`/wallet/${DEMO_ADDRESS}`);
+  await waitForWalletHydration(page);
   const unpriced = page
     .getByRole("row")
     .filter({
@@ -27,7 +31,9 @@ test("pending, stale, unpriced, and protocol failure preserve honest values", as
     });
   await expect(unpriced).toContainText("—");
   await expect(unpriced).toContainText("500");
-  await page.goto("/demo?scenario=protocol-error");
+  fixtureApi.setScenario("protocol-error");
+  await page.goto(`/wallet/${DEMO_ADDRESS}`);
+  await waitForWalletHydration(page);
   await page
     .getByRole("button", { name: "Expand Orca Whirlpools", exact: true })
     .click();
@@ -40,11 +46,12 @@ test("pending, stale, unpriced, and protocol failure preserve honest values", as
   await expect(page.getByText("$12,345.67", { exact: true })).toBeVisible();
 });
 
-test("429 cooldown prevents automatic or global-refresh retry and hides credentials", async ({
+test("429 cooldown prevents premature refresh and recovers automatically without exposing credentials", async ({
   page,
 }) => {
   const browserUrls: string[] = [];
   const browserBodies: string[] = [];
+  const summaryRequestTimes: number[] = [];
   let summaryCalls = 0;
   page.on("request", (request) => browserUrls.push(request.url()));
   page.on("response", async (response) => {
@@ -53,11 +60,12 @@ test("429 cooldown prevents automatic or global-refresh retry and hides credenti
   });
   await page.route("**/api/wallet/**", async (route) => {
     if (new URL(route.request().url()).pathname.endsWith("/summary")) {
+      summaryRequestTimes.push(performance.now());
       summaryCalls++;
-      await route.fulfill({
+      await route.fulfill(summaryCalls === 1 ? {
         status: 429,
-        json: { ok: false, kind: "rate_limited", retryAfterSeconds: 2 },
-      });
+        json: { ok: false, kind: "rate_limited", retryAfterSeconds: 10 },
+      } : { status: 200, json: readFixture("summary", "complete") });
     } else
       await route.fulfill({
         status: 503,
@@ -65,17 +73,15 @@ test("429 cooldown prevents automatic or global-refresh retry and hides credenti
       });
   });
   await page.goto(`/wallet/${DEMO_ADDRESS}`);
+  await waitForWalletHydration(page);
   const cooldown = page.getByRole("button", { name: /^Retry in / });
   await expect(cooldown).toBeDisabled();
   await page.getByRole("button", { name: "Refresh wallet" }).click();
   expect(summaryCalls).toBe(1);
+  await expect.poll(() => summaryCalls, { timeout: 15_000 }).toBe(2);
+  expect(summaryRequestTimes[1] - summaryRequestTimes[0]).toBeGreaterThanOrEqual(10_000);
+  await expect(page.getByText("$12,345.67", { exact: true })).toBeVisible();
   await expect(cooldown).toHaveCount(0);
-  expect(summaryCalls).toBe(1);
-  await page
-    .locator(".wallet-summary")
-    .getByRole("button", { name: "Retry section" })
-    .click();
-  await expect.poll(() => summaryCalls).toBe(2);
   expect(browserUrls.join("\n")).not.toContain(
     "doxxd-synthetic-browser-secret",
   );
@@ -116,6 +122,7 @@ test("wallet A cannot replace B after navigation while A is delayed", async ({
     await route.fulfill({ json: result }).catch(() => {}); // Navigation may abort the held A request.
   });
   await page.goto(`/wallet/${DEMO_ADDRESS}`);
+  await waitForWalletHydration(page);
   await started;
   await page.getByRole("textbox", { name: "Solana address" }).fill(walletB);
   await page.getByRole("button", { name: "Explore wallet" }).click();

@@ -13,6 +13,7 @@ import {
 import { walletHref } from "@/lib/address";
 import { explorerHref } from "@/lib/safe-url";
 import { WalletSummary } from "./summary";
+import { RecoveryNotice } from "./recovery-notice";
 import { SaveWalletButton } from "../watchlist/watchlist";
 import { CopyButton } from "../copy-button";
 import { short } from "@/lib/portfolio/adapters/shared";
@@ -129,6 +130,7 @@ function FrameContent({
         loading={summary.loading}
         retry={summary.refresh}
       />
+      <RecoveryNotice state={summary.recovery} retained={Boolean(summary.refreshError)} retry={summary.refresh} />
       <nav className="tabs" aria-label="Wallet views">
         <a
           href={href("portfolio")}

@@ -30,7 +30,7 @@ test("local watchlist persists, edits and removes without wallet reads", async (
   expect(hydrationErrors).toEqual([]);
 });
 
-test("save from a public wallet persists without adding requests or changing demo mode", async ({page}) => {
+test("save from a public wallet persists without adding requests", async ({page}) => {
   const walletRequests: string[] = [];
   await page.route("**/api/wallet/**", route => route.fulfill({status:503,json:{ok:false,kind:"unavailable"}}));
   page.on("request",request => {if(new URL(request.url()).pathname.startsWith("/api/wallet/"))walletRequests.push(request.url());});
@@ -45,9 +45,9 @@ test("save from a public wallet persists without adding requests or changing dem
   await page.getByRole("link",{name:"Watchlist",exact:true}).click();
   await expect(page.getByRole("listitem")).toContainText(wallet);
   expect(walletRequests.length).toBe(before);
-  await page.goto("/demo");
-  await expect(page.getByText("Demo data",{exact:true})).toBeVisible();
-  await expect(page.getByRole("button",{name:"Save wallet",exact:true})).toHaveCount(0);
+  await page.goto("/");
+  await expect(page.locator('a[href^="/demo"]')).toHaveCount(0);
+  expect(walletRequests.length).toBe(before);
 });
 
 test("returning to the watchlist reflects changes made on a wallet page", async ({page}) => {

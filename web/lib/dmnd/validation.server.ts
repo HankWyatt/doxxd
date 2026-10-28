@@ -5,6 +5,7 @@ import { validTimestamp } from "./query";
 const schemaNames = {
   summary: "WalletPortfolioSummary",
   overview: "WalletOverview",
+  positions: "WalletPositions",
   stake: "WalletStakeAccounts",
   "liquid-staking": "WalletLiquidStaking",
   kamino: "WalletDefiPositions",

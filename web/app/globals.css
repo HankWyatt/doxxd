@@ -318,12 +318,6 @@ a svg {
   color: var(--faint);
   font-size: 12px;
 }
-.demo-link {
-  color: var(--accent);
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
 .feature-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -476,11 +470,6 @@ a svg {
   background: #332c1d;
   color: var(--warning);
 }
-.badge.demo {
-  background: #21382f;
-  color: var(--accent);
-  border: 1px solid #315b4e;
-}
 .tabs {
   display: flex;
   align-items: center;
@@ -613,9 +602,14 @@ tbody tr.data-row:hover {
 }
 .asset {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 11px;
   min-width: 0;
+}
+.asset.stack {
+  gap: 2px;
+  text-align: left;
+  overflow-wrap: anywhere;
 }
 .asset-icon {
   width: 30px;
@@ -839,6 +833,117 @@ tbody tr.data-row:hover {
 .holdings-page-buttons .button {
   min-height: 40px;
 }
+#holdings {
+  min-width: 0;
+}
+.holdings-table {
+  min-width: 1080px;
+}
+.holdings-table th,
+.holdings-table td {
+  padding: 12px 14px;
+}
+.holdings-table .token-col {
+  min-width: 220px;
+  width: 25%;
+}
+.holdings-table .amount-col,
+.holdings-table .price-col {
+  width: auto;
+}
+.holdings-table td.numeric {
+  white-space: nowrap;
+}
+.holding-trading-col {
+  min-width: 110px;
+}
+.holding-activity-col {
+  min-width: 92px;
+}
+.holdings-value {
+  color: #75efb5;
+  font-size: 13px;
+  font-weight: 650;
+}
+.holding-balance-mobile {
+  display: none;
+}
+.holding-trade-total {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+.holding-trade-total small {
+  color: var(--faint);
+  font-size: 10px;
+}
+.holdings-table .detail-grid .holding-trade-total {
+  align-items: flex-start;
+}
+.holding-trade-buy {
+  color: #75dfae;
+}
+.holding-trade-sell {
+  color: var(--negative);
+}
+.holdings-table .detail-grid dd.positive {
+  color: var(--positive);
+}
+.holdings-table .detail-grid dd.negative {
+  color: var(--negative);
+}
+.holdings-trading-note {
+  margin: 0;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.holdings-trading-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+}
+.holdings-trading-footer > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.holdings-trading-footer p {
+  margin: 0;
+  line-height: 1.8;
+}
+.holdings-trading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.holdings-trading-actions .button {
+  min-height: 40px;
+}
+@media (max-width: 600px) {
+  .holdings-table {
+    min-width: 0;
+    table-layout: fixed;
+  }
+  .holdings-table .token-col {
+    min-width: 0;
+    width: 66%;
+  }
+  .holding-balance-mobile {
+    display: block;
+    color: var(--muted);
+    font-size: 10px;
+    margin-top: 4px;
+  }
+}
 .activity-toolbar {
   display: flex;
   align-items: center;
@@ -917,22 +1022,6 @@ tbody tr.data-row:hover {
   border: 1px solid var(--line);
   border-radius: 5px;
   color: var(--muted);
-}
-.demo-banner {
-  border: 1px solid #315546;
-  background: #13251e;
-  padding: 10px 15px;
-  border-radius: 7px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  font-size: 11px;
-  color: #abc5b9;
-  margin-bottom: 26px;
-}
-.demo-banner a {
-  color: var(--accent);
 }
 .full-address {
   font-size: 11px;
@@ -1139,10 +1228,6 @@ tbody tr.data-row:hover {
     font-size: 11px;
   }
   .footer {
-    font-size: 10px;
-  }
-  .demo-banner {
-    align-items: flex-start;
     font-size: 10px;
   }
   .protocol-toggle {

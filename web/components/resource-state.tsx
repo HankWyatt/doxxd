@@ -13,7 +13,7 @@ const messages: Record<ResourceError["kind"], [string, string]> = {
   ],
   configuration: [
     "Data connection unavailable",
-    "The data service is not configured for this view yet. You can still explore the labeled demo.",
+    "The data service is not configured for this view yet. Wallet data will appear when the connection is restored.",
   ],
   invalid_input: [
     "This request couldn’t be completed",

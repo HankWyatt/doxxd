@@ -1,10 +1,10 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { act, cleanup, render, screen, fireEvent } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { Portfolio } from "./portfolio";
 import { readFixture, DEMO_ADDRESS } from "@/lib/fixtures/wallet";
 import type { ResourceName } from "@/lib/dmnd/contracts";
 import { validResourcePayload } from "@/lib/dmnd/validation.server";
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 function network(summaryError = false) {
   vi.stubGlobal(
     "fetch",
@@ -86,6 +86,142 @@ it("mounts summary navigation targets even when a component is excluded from the
   expect(screen.getByRole("button", { name: "Expand Liquid staking" }))
     .toHaveAttribute("aria-expanded", "false");
   expect(screen.getByText("$12,345.67")).toBeVisible();
-  expect(fetcher.mock.calls).toHaveLength(2);
+  expect(fetcher.mock.calls).toHaveLength(3);
   expect(fetcher.mock.calls.every(([input]) => !input.includes("/liquid-staking"))).toBe(true);
+});
+
+it("keeps a pending zero subtotal separate from positive holdings until the summary includes wallet balances", async () => {
+  vi.useFakeTimers();
+  let summaries = 0;
+  const fetcher = vi.fn(async (input: string) => {
+    const resource = new URL(input, "http://doxxd.test").pathname.split("/").at(-1) as ResourceName;
+    if (resource === "summary") {
+      const result = readFixture("summary", "complete");
+      if (!result.ok) throw Error("fixture");
+      summaries++;
+      result.data.known_component_net_value_usd = summaries === 1 ? "0" : "123.45";
+      Object.assign(result.data.components[0], summaries === 1 ? {
+        included_in_known_total: false,
+        known_net_value_usd: null,
+        coverage_status: "snapshot_queued",
+        coverage_complete: false,
+        coverage_fresh: false,
+      } : { known_net_value_usd: "123.45" });
+      for (const component of result.data.components.slice(1)) {
+        component.known_asset_value_usd = "0";
+        component.known_debt_value_usd = "0";
+        component.known_net_value_usd = "0";
+      }
+      return Response.json(result);
+    }
+    if (resource === "positions") return Response.json(readFixture("positions", "complete"));
+    const result = readFixture("overview", "complete");
+    if (!result.ok) throw Error("fixture");
+    result.data.known_value_usd = "318.47";
+    return Response.json(result);
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const { container } = render(<Portfolio address={DEMO_ADDRESS} />);
+  await act(async () => {});
+  expect(container.querySelector("#holdings .section-heading > .numeric"))
+    .toHaveTextContent("$318.47 known");
+  expect(screen.getByText("Subtotal from available sources")).toBeVisible();
+  expect(screen.getByText("Portfolio still updating")).toBeVisible();
+  expect(screen.getByText("Wallet balances are not included in this subtotal yet.")).toBeVisible();
+  expect(container.querySelector(".summary-value")).toHaveTextContent("$0.00");
+  expect(fetcher).toHaveBeenCalledTimes(3);
+  expect(fetcher.mock.calls.filter(([input]) => input.endsWith("/overview"))).toHaveLength(1);
+
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(container.querySelector(".summary-value")).toHaveTextContent("$123.45");
+  expect(screen.getByText("Known portfolio value")).toBeVisible();
+  expect(screen.queryByText("Portfolio still updating")).not.toBeInTheDocument();
+  expect(screen.queryByText("Subtotal from available sources")).not.toBeInTheDocument();
+  expect(container.querySelector("#holdings .section-heading > .numeric"))
+    .toHaveTextContent("$318.47 known");
+  await act(async () => { await vi.advanceTimersByTimeAsync(150_000); });
+  expect(fetcher).toHaveBeenCalledTimes(4);
+  expect(fetcher.mock.calls.filter(([input]) => input.endsWith("/overview"))).toHaveLength(1);
+});
+
+it("keeps holdings and the subtotal usable after snapshot failure, then stops automatic reads", async () => {
+  vi.useFakeTimers();
+  const counts = new Map<string, number>();
+  const fetcher = vi.fn(async (input: string) => {
+    const resource = new URL(input, "http://doxxd.test").pathname.split("/").at(-1) as ResourceName;
+    const count = (counts.get(resource) ?? 0) + 1;
+    counts.set(resource, count);
+    if (resource === "summary") {
+      const result = readFixture("summary", "complete");
+      if (!result.ok) throw Error("fixture");
+      result.data.known_component_net_value_usd = "0";
+      Object.assign(result.data.components[0], {
+        included_in_known_total: false,
+        known_net_value_usd: null,
+        coverage_status: count === 1 ? "snapshot_queued" : "native_balance_stale_or_unavailable",
+        coverage_complete: false,
+        coverage_fresh: false,
+      });
+      for (const component of result.data.components.slice(1)) {
+        component.known_asset_value_usd = "0";
+        component.known_debt_value_usd = "0";
+        component.known_net_value_usd = "0";
+      }
+      return Response.json(result);
+    }
+    if (resource === "positions") return Response.json(readFixture("positions", "complete"));
+    const result = readFixture("overview", "complete");
+    if (!result.ok) throw Error("fixture");
+    Object.assign(result.data, {
+      known_value_usd: "318.47",
+      native_sol_lamports: null,
+      wrapped_sol_lamports: null,
+    });
+    Object.assign(result.data.coverage, {
+      complete: false,
+      snapshot_status: count === 1 ? "queued" : "failed",
+    });
+    return Response.json(result);
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const { container } = render(<Portfolio address={DEMO_ADDRESS} />);
+  await act(async () => {});
+  expect(screen.getByText("Portfolio still updating")).toBeVisible();
+  expect(fetcher).toHaveBeenCalledTimes(3);
+
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(screen.getByText("Wallet balances unavailable")).toBeVisible();
+  expect(screen.getByText("Subtotal from available sources")).toBeVisible();
+  expect(container.querySelector(".summary-value")).toHaveTextContent("$0.00");
+  expect(container.querySelector("#holdings .section-heading > .numeric"))
+    .toHaveTextContent("$318.47 known");
+  expect(screen.getByText("Wallet refresh failed. Showing available holdings; some balances may be missing or out of date.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Inspect USDC holding" })).toBeVisible();
+  expect(screen.getByText("Native SOL balance: Unknown")).toBeVisible();
+  expect(screen.getByText("Wrapped SOL balance: Unknown")).toBeVisible();
+  expect(screen.queryByText("Portfolio still updating")).not.toBeInTheDocument();
+  expect(screen.queryByText("Checking for wallet data automatically…")).not.toBeInTheDocument();
+  expect(fetcher).toHaveBeenCalledTimes(5);
+  await act(async () => { await vi.advanceTimersByTimeAsync(150_000); });
+  expect(fetcher).toHaveBeenCalledTimes(5);
+  expect(counts.get("overview")).toBe(2);
+  expect(counts.get("summary")).toBe(2);
+  expect(counts.get("positions")).toBe(1);
+});
+
+it("renders holdings without waiting for trading details and isolates their failure", async () => {
+  let finish!: (response: Response) => void;
+  const positions = new Promise<Response>(resolve => { finish = resolve; });
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    const resource = new URL(input, "http://doxxd.test").pathname.split("/").at(-1) as ResourceName;
+    return resource === "positions" ? positions : Response.json(readFixture(resource, "complete"));
+  }));
+  render(<Portfolio address={DEMO_ADDRESS} />);
+  expect(await screen.findByText("USD Coin")).toBeVisible();
+  expect(screen.getByText("Loading indexed trading details…", { exact: false })).toBeVisible();
+  expect(screen.getByText("$12,345.67")).toBeVisible();
+  await act(async () => finish(Response.json({ ok: false, kind: "unavailable" })));
+  expect(screen.getByText("Trading details couldn’t load. Available holdings remain visible.")).toBeVisible();
+  expect(screen.getByText("USD Coin")).toBeVisible();
+  expect(screen.getByText("$12,345.67")).toBeVisible();
 });

@@ -74,6 +74,48 @@ it.each([
       body.data[0].ui_amount = {};
     },
   ],
+  [
+    "positions",
+    (body: any) => {
+      body.data[0].bought.usd = "not-a-decimal";
+    },
+  ],
+  [
+    "positions",
+    (body: any) => {
+      delete body.data[0].sold;
+    },
+  ],
+  [
+    "positions",
+    (body: any) => {
+      body.data[0].bought.count = 1.5;
+    },
+  ],
+  [
+    "positions",
+    (body: any) => {
+      body.data[0].last_trade_at = "2026-02-30T00:00:00Z";
+    },
+  ],
+  [
+    "positions",
+    (body: any) => {
+      body.sort = "unexpected";
+    },
+  ],
+  [
+    "positions",
+    (body: any) => {
+      body.data[0].mint = "not-a-mint";
+    },
+  ],
+  [
+    "positions",
+    (body: any) => {
+      body.data.push(structuredClone(body.data[0]));
+    },
+  ],
 ] as const)(
   "rejects malformed %s structures before presentation",
   async (resource, corrupt) => {

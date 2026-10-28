@@ -16,7 +16,9 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   webServer: {
-    command: "npm run dev -- --host 127.0.0.1 --port 4318",
+    command: process.env.DOXXD_E2E_BUILT === "1"
+      ? "npm run start -- --port 4318 --env-file /dev/null"
+      : "npm run dev -- --host 127.0.0.1 --port 4318",
     url: "http://127.0.0.1:4318",
     reuseExistingServer: false,
     timeout: 60_000,

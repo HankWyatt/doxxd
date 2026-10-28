@@ -3,6 +3,7 @@ export type Schemas = components["schemas"];
 export type ResourceData = {
   summary: Schemas["WalletPortfolioSummary"];
   overview: Schemas["WalletOverview"];
+  positions: Schemas["WalletPositions"];
   stake: Schemas["WalletStakeAccounts"];
   "liquid-staking": Schemas["WalletLiquidStaking"];
   kamino: Schemas["WalletDefiPositions"];
@@ -23,11 +24,12 @@ export type ResourceData = {
 export type ResourceName = keyof ResourceData;
 export type ProtocolResource = Exclude<
   ResourceName,
-  "summary" | "overview" | "transactions" | "activity"
+  "summary" | "overview" | "positions" | "transactions" | "activity"
 >;
 export type ResourceQuery = {
   cursor?: string;
   limit?: number;
+  sort?: Schemas["WalletPositionSort"];
   from?: string;
   to?: string;
 };

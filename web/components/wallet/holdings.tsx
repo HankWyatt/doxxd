@@ -4,14 +4,20 @@ import { ChevronDown, Wallet } from "lucide-react";
 import type { ProtocolResource, Schemas } from "@/lib/dmnd/contracts";
 import { protocolResources, resources } from "@/lib/dmnd/resources";
 import {
-  formatAmount,
+  formatCompactAmount,
   formatUsd,
   formatPrice,
   compareDecimalDesc,
   atomsToUi,
 } from "@/lib/decimal";
-import { tokenImageUrl, explorerHref } from "@/lib/safe-url";
+import { tokenImageCandidates, explorerHref } from "@/lib/safe-url";
 import { short } from "@/lib/portfolio/adapters/shared";
+import {
+  indexedPnl,
+  formatSignedUsd,
+  pnlTone,
+  type HoldingsTradingDetails,
+} from "@/lib/indexed-trading";
 const PAGE_SIZE = 20;
 type Row = {
   id: string;
@@ -57,16 +63,30 @@ function positionReceipt(asset: Schemas["WalletAsset"]): Receipt | null {
   };
 }
 function AssetIcon({ row }: { row: Row }) {
-  const [failed, setFailed] = useState(false);
-  const image = tokenImageUrl(row.image);
+  const candidates = tokenImageCandidates(row.image);
+  const imageKey = candidates.join("\n");
+  const [failed, setFailed] = useState({ key: "", urls: [] as string[] });
+  const failures = failed.key === imageKey ? failed.urls : [];
+  const image = candidates.find((candidate) => !failures.includes(candidate));
   return (
     <span className="asset-icon">
-      {image && !failed ? (
+      {row.id === "native-sol" ? (
+        <svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true">
+          <path fill="#80F5CF" d="M9 6h20l-6 5H3z" />
+          <path fill="#A4A5F8" d="M3 13.5h20l6 5H9z" />
+          <path fill="#B77BF3" d="M9 21h20l-6 5H3z" />
+        </svg>
+      ) : image ? (
         <img
           src={image}
           alt=""
           loading="lazy"
-          onError={() => setFailed(true)}
+          decoding="async"
+          referrerPolicy="no-referrer"
+          onError={() => setFailed((previous) => ({
+            key: imageKey,
+            urls: [...(previous.key === imageKey ? previous.urls : []), image],
+          }))}
         />
       ) : (
         row.symbol.slice(0, 2)
@@ -74,28 +94,94 @@ function AssetIcon({ row }: { row: Row }) {
     </span>
   );
 }
+function TradeTotal({
+  total,
+  side,
+}: {
+  total: Schemas["HolderTradeTotals"];
+  side: "buy" | "sell";
+}) {
+  return (
+    <span className="holding-trade-total">
+      <span className={total.usd == null ? "muted" : "holding-trade-" + side}>
+        {formatUsd(total.usd)}
+      </span>
+      <small>{total.count.toLocaleString()} {total.count === 1 ? "trade" : "trades"}</small>
+    </span>
+  );
+}
+function TradeTime({ value, includeYear = false }: { value: string; includeYear?: boolean }) {
+  const date = new Date(value);
+  return (
+    <time dateTime={value} title={date.toLocaleString()}>
+      {date.toLocaleDateString(undefined, { month: "short", day: "numeric", ...(includeYear ? { year: "numeric" } as const : {}) })}
+    </time>
+  );
+}
+function TradingCoverage({ trading }: { trading: HoldingsTradingDetails }) {
+  return (
+    <div className="holdings-trading-footer" aria-label="Trading data coverage">
+      <div>
+        <p role="status">
+          {trading.loading ? "Loading indexed trading details…" : "Indexed trading details"}
+          {" · "}{trading.loadedCount.toLocaleString()}
+          {trading.positionCount == null ? " tokens loaded" : " of " + trading.positionCount.toLocaleString() + " tokens loaded"}
+        </p>
+        {trading.positionsSince && (
+          <p>Indexed since <TradeTime value={trading.positionsSince} includeYear />.</p>
+        )}
+        {trading.positionsTracked === false && (
+          <p>Trade tracking is unavailable for this wallet. Recorded trading details may be incomplete.</p>
+        )}
+        {trading.error && (
+          <p role="status">Trading details couldn’t load. Available holdings remain visible.</p>
+        )}
+        {trading.continuationUnavailable && (
+          <p>More indexed tokens exist, but continuation is unavailable. Reload trading details to start again.</p>
+        )}
+      </div>
+      <div className="holdings-trading-actions">
+        {trading.hasMore && (
+          <button className="button" type="button" disabled={trading.loading} onClick={trading.loadMore}>
+            Load more trading details
+          </button>
+        )}
+        {(trading.error || trading.continuationUnavailable) && (
+          <button className="button" type="button" disabled={trading.loading} onClick={trading.reload}>
+            Reload trading details
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 export function Holdings({
   overview,
   showProtocol,
+  trading,
 }: {
   overview: Schemas["WalletOverview"];
   /** Reveals and scrolls to a protocol section; without it receipts are not linked. */
   showProtocol?: ShowProtocol;
+  trading?: HoldingsTradingDetails;
 }) {
   return (
     <HoldingsTable
       key={overview.wallet}
       overview={overview}
       showProtocol={showProtocol}
+      trading={trading}
     />
   );
 }
 function HoldingsTable({
   overview,
   showProtocol,
+  trading,
 }: {
   overview: Schemas["WalletOverview"];
   showProtocol?: ShowProtocol;
+  trading?: HoldingsTradingDetails;
 }) {
   const [open, setOpen] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -208,6 +294,11 @@ function HoldingsTable({
         </span>
       </div>
       <div className="panel">
+        {overview.coverage.snapshot_status === "failed" && (
+          <p className="coverage-note" role="status">
+            Wallet refresh failed. Showing available holdings; some balances may be missing or out of date.
+          </p>
+        )}
         {rows.length > 0 && (
           <div className="holdings-search">
             <label>
@@ -234,6 +325,12 @@ function HoldingsTable({
               </button>
             )}
           </div>
+        )}
+        {trading && (
+          <p className="holdings-trading-note">
+            Trading history is partial. P&amp;L is an indexed average-cost estimate and does not account for all opening balances, transfers or fees.
+            {" "}Buy/sell USD totals include priced indexed fills; counts include all indexed trades. Missing trading details are not zero.
+          </p>
         )}
         {(overview.native_sol_lamports == null ||
           overview.wrapped_sol_lamports == null) && (
@@ -267,17 +364,28 @@ function HoldingsTable({
           <div className="empty-state">No observed holdings match this search.</div>
         ) : (
           <div className="table-scroll">
-            <table>
+            <table className="holdings-table">
               <thead>
                 <tr>
                   <th className="token-col">Asset</th>
                   <th className="right hide-mobile price-col">Price</th>
                   <th className="right hide-mobile amount-col">Balance</th>
                   <th className="right">Value</th>
+                  <th className="right hide-mobile holding-trading-col" title="Indexed average-cost estimate; partial history, opening balances, transfers and fees can affect actual results.">P&amp;L estimate</th>
+                  <th className="right hide-mobile holding-trading-col">Buys</th>
+                  <th className="right hide-mobile holding-trading-col">Sells</th>
+                  <th className="right hide-mobile holding-activity-col">Last trade</th>
                 </tr>
               </thead>
               <tbody>
-                {visibleRows.map((row) => (
+                {visibleRows.map((row) => {
+                  const position = row.mint ? trading?.positions.get(row.mint) : undefined;
+                  const pnl = position ? indexedPnl(position) : null;
+                  const unavailable = row.id === "native-sol"
+                    ? "Native SOL has no per-token trading position in this feed."
+                    : "Trading details are unavailable for this mint in the loaded indexed history.";
+                  const fullBalance = row.amount == null ? "Unknown balance" : row.amount + " " + row.symbol;
+                  return (
                   <Fragment key={row.id}>
                     <tr className="data-row">
                       <td>
@@ -293,6 +401,9 @@ function HoldingsTable({
                           <span className="asset stack">
                             <strong>{row.symbol}</strong>
                             <small>{row.name}</small>
+                            <span className="holding-balance-mobile numeric" title={fullBalance}>
+                              Balance {formatCompactAmount(row.amount)}
+                            </span>
                           </span>
                           <ChevronDown size={12} className="expand-icon" />
                         </button>
@@ -301,7 +412,7 @@ function HoldingsTable({
                         {formatPrice(row.price)}
                       </td>
                       <td className="right hide-mobile numeric">
-                        {formatAmount(row.amount)}
+                        <span title={fullBalance}>{formatCompactAmount(row.amount)}</span>
                       </td>
                       <td className="right numeric">
                         {row.value == null && row.estimate != null ? (
@@ -310,13 +421,27 @@ function HoldingsTable({
                             <span className="badge">estimate</span>
                           </span>
                         ) : (
-                          formatUsd(row.value)
+                          <span className={row.value == null ? "muted" : "holdings-value"}>
+                            {formatUsd(row.value)}
+                          </span>
                         )}
+                      </td>
+                      <td className="right hide-mobile numeric" title={pnl?.unavailableReason ?? (!position ? unavailable : undefined)}>
+                        <span className={pnlTone(pnl?.total)}>{formatSignedUsd(pnl?.total)}</span>
+                      </td>
+                      <td className="right hide-mobile numeric">
+                        {position ? <TradeTotal total={position.bought} side="buy" /> : <span className="muted" title={unavailable}>—</span>}
+                      </td>
+                      <td className="right hide-mobile numeric">
+                        {position ? <TradeTotal total={position.sold} side="sell" /> : <span className="muted" title={unavailable}>—</span>}
+                      </td>
+                      <td className="right hide-mobile numeric muted">
+                        {position ? <TradeTime value={position.last_trade_at} /> : <span title={unavailable}>—</span>}
                       </td>
                     </tr>
                     {open === row.id && (
                       <tr className="detail-row">
-                        <td colSpan={4}>
+                        <td colSpan={8}>
                           <dl className="detail-grid">
                             <div>
                               <dt>Token / address</dt>
@@ -372,12 +497,74 @@ function HoldingsTable({
                                 showProtocol={showProtocol}
                               />
                             )}
+                            {position ? (
+                              <>
+                                <div>
+                                  <dt>Indexed total P&amp;L estimate</dt>
+                                  <dd className={pnlTone(pnl?.total)}>{formatSignedUsd(pnl?.total)}</dd>
+                                </div>
+                                <div>
+                                  <dt>Indexed realized P&amp;L estimate</dt>
+                                  <dd className={pnlTone(pnl?.realized)}>{formatSignedUsd(pnl?.realized)}</dd>
+                                </div>
+                                <div>
+                                  <dt>Indexed unrealized P&amp;L estimate</dt>
+                                  <dd className={pnlTone(pnl?.unrealized)}>{formatSignedUsd(pnl?.unrealized)}</dd>
+                                </div>
+                                <div>
+                                  <dt>Average indexed buy price</dt>
+                                  <dd>{formatPrice(position.avg_buy_price_usd)}</dd>
+                                </div>
+                                <div>
+                                  <dt>Average indexed sell price</dt>
+                                  <dd>{formatPrice(position.avg_sell_price_usd)}</dd>
+                                </div>
+                                <div>
+                                  <dt>Recorded buys</dt>
+                                  <dd><TradeTotal total={position.bought} side="buy" /></dd>
+                                </div>
+                                <div>
+                                  <dt>Recorded sells</dt>
+                                  <dd><TradeTotal total={position.sold} side="sell" /></dd>
+                                </div>
+                                <div>
+                                  <dt>Recorded tokens bought</dt>
+                                  <dd>{position.bought.amount ?? "Unknown"} {row.symbol}</dd>
+                                </div>
+                                <div>
+                                  <dt>Recorded tokens sold</dt>
+                                  <dd>{position.sold.amount ?? "Unknown"} {row.symbol}</dd>
+                                </div>
+                                <div>
+                                  <dt>First indexed trade</dt>
+                                  <dd>{new Date(position.first_trade_at).toLocaleString()}</dd>
+                                </div>
+                                <div>
+                                  <dt>Last indexed trade</dt>
+                                  <dd>{new Date(position.last_trade_at).toLocaleString()}</dd>
+                                </div>
+                                <div>
+                                  <dt>Unpriced indexed trades</dt>
+                                  <dd>{position.unpriced_trades.toLocaleString()}</dd>
+                                </div>
+                                <div>
+                                  <dt>P&amp;L estimate basis</dt>
+                                  <dd>{pnl?.unavailableReason ?? "Indexed average cost with partial history; opening balances, transfers and fees are not fully accounted for."}</dd>
+                                </div>
+                              </>
+                            ) : trading ? (
+                              <div>
+                                <dt>Trading details</dt>
+                                <dd>{unavailable}</dd>
+                              </div>
+                            ) : null}
                           </dl>
                         </td>
                       </tr>
                     )}
                   </Fragment>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -414,6 +601,7 @@ function HoldingsTable({
             </div>
           </nav>
         )}
+        {trading && <TradingCoverage trading={trading} />}
         <details className="coverage-note">
           <summary>
             {overview.coverage.complete

@@ -27,9 +27,11 @@ export function parseResourceQuery(
 ): ResourceQuery | null {
   const allowed = ["summary", "overview", "liquid-staking"].includes(resource)
     ? []
-    : ["transactions", "activity"].includes(resource)
-      ? ["limit", "cursor", "from", "to"]
-      : ["limit", "cursor"];
+    : resource === "positions"
+      ? ["limit", "cursor", "sort"]
+      : ["transactions", "activity"].includes(resource)
+        ? ["limit", "cursor", "from", "to"]
+        : ["limit", "cursor"];
   for (const key of params.keys())
     if (!allowed.includes(key) || params.getAll(key).length !== 1) return null;
   const query: ResourceQuery = {};
@@ -44,6 +46,17 @@ export function parseResourceQuery(
   if (cursor !== null) {
     if (!cursor || cursor.length > 8192) return null;
     query.cursor = cursor;
+  }
+  const sort = params.get("sort");
+  if (sort !== null) {
+    if (
+      sort !== "total_pnl" &&
+      sort !== "unrealized_pnl" &&
+      sort !== "value" &&
+      sort !== "last_active"
+    )
+      return null;
+    query.sort = sort;
   }
   for (const key of ["from", "to"] as const) {
     const value = params.get(key);

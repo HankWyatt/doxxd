@@ -3,6 +3,7 @@ import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
 import { DEMO_ADDRESS, readFixture } from "../../lib/fixtures/wallet";
 import type { ResourceName } from "../../lib/dmnd/contracts";
+import { waitForWalletHydration } from "./mock-wallet-resources";
 
 // Playwright loads tests in Node rather than Vite. Bundle the unchanged server
 // validator and its generated JSON so schema assertions use the real validator.
@@ -15,7 +16,7 @@ const { validResourcePayload } = await import(
 ) as typeof import("../../lib/dmnd/validation.server");
 
 // Synthetic source-boundary controls, not evidence of live protocol/history serving.
-test("page boundaries preserve source absence and manual continuation recovery", async ({ page }) => {
+test("page boundaries preserve source absence and manual continuation recovery", async ({ page }, testInfo) => {
   test.setTimeout(45_000);
   expect(validResourcePayload("summary", {})).toBe(false);
   let protocolStage: "positive-total" | "intermediate" | "missing" = "positive-total";
@@ -69,6 +70,7 @@ test("page boundaries preserve source absence and manual continuation recovery",
     return route.fulfill({ status: 200, json: result });
   });
   await page.goto(`/wallet/${DEMO_ADDRESS}`);
+  await waitForWalletHydration(page);
   await expect(page.getByText("$12,345.67", { exact: true })).toBeVisible({ timeout: 15_000 });
   const receipt = page.locator("#protocol-liquid-staking");
   await page.getByRole("link", { name: /Liquid staking/ }).click();
@@ -98,23 +100,24 @@ test("page boundaries preserve source absence and manual continuation recovery",
   await lp.getByRole("button", { name: "Retry positions page" }).click();
   await expect(lp.getByRole("button", { name: "Next positions" })).toBeVisible();
   expect(reads.filter(r => r.resource === "orca")).toHaveLength(5);
-  await page.screenshot({ path: fileURLToPath(new URL("../../test-results/screenshots/page-boundaries-portfolio-desktop.png", import.meta.url)), fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("page-boundaries-portfolio-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-  await page.screenshot({ path: fileURLToPath(new URL("../../test-results/screenshots/page-boundaries-portfolio-mobile.png", import.meta.url)), fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("page-boundaries-portfolio-mobile.png"), fullPage: true });
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole("link", { name: "Activity", exact: true }).click();
+  await waitForWalletHydration(page);
   const unavailable = page.getByRole("status", { name: "Activity continuation" });
   await expect(unavailable).toContainText("Continuation unavailable.");
   await expect(page.getByText("No matches on this page", { exact: true })).toBeVisible();
   await expect(page.getByText("No observed transactions in this window", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Load more →" })).toHaveCount(0);
   expect(reads.filter(r => r.resource === "transactions")).toHaveLength(1);
-  await page.screenshot({ path: fileURLToPath(new URL("../../test-results/screenshots/page-boundaries-activity-desktop.png", import.meta.url)), fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("page-boundaries-activity-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-  await page.screenshot({ path: fileURLToPath(new URL("../../test-results/screenshots/page-boundaries-activity-mobile.png", import.meta.url)), fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("page-boundaries-activity-mobile.png"), fullPage: true });
   activityRecovered = true;
   await page.getByRole("button", { name: "Retry activity page" }).click();
   await page.getByRole("link", { name: "Load more →" }).click();

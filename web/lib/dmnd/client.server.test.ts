@@ -1,7 +1,8 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { createDmndClient } from "./client.server";
-import type { ResourceName } from "./contracts";
+import type { ResourceName, Schemas } from "./contracts";
 import { resourceResponse } from "./http";
+import { protocolResources, resources } from "./resources";
 const wallet = "11111111111111111111111111111111";
 const env = {
   DMND_API_BASE_URL: "https://api.example.test/api/v1",
@@ -16,12 +17,85 @@ const summary = {
   whole_wallet_complete: false,
   unsupported_scopes: [],
 };
+const positions: Schemas["WalletPositions"] = {
+  wallet,
+  data: [],
+  has_more: false,
+  position_count: 0,
+  positions_tracked: true,
+  sort: "total_pnl",
+};
 const reply = (
   body: unknown,
   status = 200,
   headers: Record<string, string> = {},
 ) => new Response(JSON.stringify(body), { status, headers });
 afterEach(() => vi.useRealTimers());
+it("uses the fixed positions route without protocol activation or summary inclusion", async () => {
+  const network = vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    expect(url.pathname).toBe(`/api/v1/wallets/${wallet}/positions`);
+    expect(url.searchParams.get("limit")).toBe("100");
+    expect(url.searchParams.get("cursor")).toBe("a+b/=");
+    expect(url.searchParams.get("sort")).toBe("last_active");
+    expect(url.searchParams.has("protocol")).toBe(false);
+    return reply({ ...positions, sort: "last_active" });
+  });
+  expect(protocolResources).not.toContain("positions");
+  expect(resources.positions.componentId).toBeUndefined();
+  const result = await createDmndClient(
+    { ...env, DMND_ENABLED_PROTOCOLS: "" },
+    network,
+  ).read(wallet, "positions", {
+    limit: 100,
+    cursor: "a+b/=",
+    sort: "last_active",
+  });
+  expect(result).toEqual({
+    ok: true,
+    data: { ...positions, sort: "last_active" },
+  });
+  expect(network).toHaveBeenCalledTimes(1);
+});
+it.each([
+  { limit: 101 },
+  { sort: "unexpected" },
+  { from: "2026-10-22T00:00:00Z" },
+  { to: "2026-10-22T00:00:00Z" },
+  { mint: wallet },
+  { window: "7d" },
+])("rejects unsupported positions filters before fetching %j", async (query) => {
+  const network = vi.fn();
+  expect(
+    await createDmndClient(env, network).read(wallet, "positions", query as never),
+  ).toEqual({ ok: false, kind: "invalid_input" });
+  expect(network).not.toHaveBeenCalled();
+});
+it("rejects a positions response for another wallet", async () => {
+  expect(
+    await createDmndClient(env, async () =>
+      reply({ ...positions, wallet: "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx" }),
+    ).read(wallet, "positions"),
+  ).toEqual({ ok: false, kind: "upstream" });
+});
+it.each([undefined, "value"] as const)(
+  "rejects a positions page whose sort differs from requested %s",
+  async (sort) => {
+    const body = {
+      ...positions,
+      sort: "last_active",
+      has_more: true,
+      cursor: "wrong-sort-next-page",
+    };
+    expect(
+      await createDmndClient(env, async () => reply(body)).read(
+        wallet,
+        "positions",
+        { cursor: "requested-page", sort },
+      ),
+    ).toEqual({ ok: false, kind: "upstream" });
+  },
+);
 it("refuses an oversized successful payload without reading it as a wallet result", async () => {
   expect(
     await createDmndClient(env, async () =>

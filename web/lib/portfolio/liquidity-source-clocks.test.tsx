@@ -164,6 +164,7 @@ it.each([
     expect(view.coverage.snapshotSlot).toBeUndefined();
     vi.mocked(useWalletResource).mockReturnValue({
       loading: false, result: { ok: true, data }, refresh: vi.fn(),
+      recovery: "idle", refreshError: null,
     });
     const { container } = render(<ProtocolSection address={DEMO_ADDRESS}
       resource="raydium-farms" mode={{ kind: "demo", scenario: "complete" }} labels={{}} />);

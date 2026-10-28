@@ -1,11 +1,27 @@
 import { chromium, expect } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { build } from 'esbuild';
 
 // Run against a synthetic Worker with an invalid upstream, never private custody.
-export async function verifyBuiltNavigation(baseURL) {
+export async function verifyBuiltNavigation(baseURL, options = {}) {
   const base = new URL(baseURL);
   if (base.protocol !== 'http:' || base.hostname !== '127.0.0.1')
     throw new Error('Built navigation requires a loopback preview');
+  // Load the shared test fixture transport in memory. No generated fixture
+  // file or sample-data endpoint is shipped in the application.
+  const bundle = await build({
+    entryPoints: [fileURLToPath(new URL('../tests/e2e/mock-wallet-resources.ts', import.meta.url))],
+    bundle: true, platform: 'node', format: 'esm', write: false,
+  });
+  const { mockWalletResources, waitForWalletHydration } = await import(
+    `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].contents).toString('base64')}`
+  );
+  const outputDirectory = resolve(options.outputDirectory ?? fileURLToPath(
+    new URL(`../.sites-runtime/navigation-proof-${Date.now()}/`, import.meta.url),
+  ));
+  mkdirSync(outputDirectory, { recursive: true });
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors = [];
@@ -20,8 +36,17 @@ export async function verifyBuiltNavigation(baseURL) {
   await page.route('**/api/wallet/**', route => route.fulfill({
     status: 503, json: { ok: false, kind: 'unavailable' },
   }));
+  const fixtureApi = await mockWalletResources(page);
+  const fixturePortfolio = '/wallet/' + fixtureApi.wallet;
+  const fixtureActivity = fixturePortfolio + '/activity';
   try {
-    await page.goto(new URL('/demo', base).href);
+    const removed = await page.goto(new URL('/demo', base).href);
+    expect(removed?.status()).toBe(404);
+    expect((await page.request.get(new URL('/api/demo/summary', base).href)).status()).toBe(404);
+    await page.goto(new URL('/', base).href);
+    await expect(page.locator('a[href^="/demo"]')).toHaveCount(0);
+    await page.goto(new URL(fixturePortfolio, base).href);
+    await waitForWalletHydration(page);
     await expect(page.getByText('$12,345.67', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Inspect BONK holding', exact: true }).click();
     await expect(page.locator('#holdings .detail-row')).toBeVisible();
@@ -44,25 +69,30 @@ export async function verifyBuiltNavigation(baseURL) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
       await stakeDetail.scrollIntoViewIfNeeded();
-      await page.screenshot({ path: fileURLToPath(new URL(`../test-results/screenshots/stake-${view}.png`, import.meta.url)), fullPage: true });
+      await page.screenshot({ path: resolve(outputDirectory, `stake-${view}.png`), fullPage: true });
     }
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.getByRole('link', { name: 'Activity', exact: true }).click();
-    await expect(page).toHaveURL(new URL('/demo?tab=activity', base).href, { timeout: 10000 });
+    await waitForWalletHydration(page);
+    await expect(page).toHaveURL(new URL(fixtureActivity, base).href, { timeout: 10000 });
     await expect(page.getByRole('button', { name: /^Inspect transaction/ }).first()).toBeVisible();
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole('button', { name: /^Inspect transaction/ }).first().click();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     await page.getByRole('link', { name: 'Portfolio', exact: true }).click();
-    await expect(page).toHaveURL(new URL('/demo?tab=portfolio', base).href);
+    await waitForWalletHydration(page);
+    await expect(page).toHaveURL(new URL(fixturePortfolio, base).href);
     await page.goBack();
-    await expect(page).toHaveURL(new URL('/demo?tab=activity', base).href);
+    await waitForWalletHydration(page);
+    await expect(page).toHaveURL(new URL(fixtureActivity, base).href);
     await page.getByLabel('From (UTC)', { exact: true }).fill('2026-10-22T00:00');
     await page.getByLabel('To (UTC)', { exact: true }).fill('2026-10-23T00:00');
     await page.getByRole('button', { name: 'Apply', exact: true }).click();
     await expect.poll(() => new URL(page.url()).searchParams.get('from')).toBe('2026-10-22T00:00:00.000Z');
     await expect(page.getByRole('button', { name: /^Inspect transaction/ })).toHaveCount(2);
-    await page.goto(new URL('/demo?tab=activity&scenario=activity-continuation', base).href);
+    fixtureApi.setScenario('activity-continuation');
+    await page.goto(new URL(fixtureActivity, base).href);
+    await waitForWalletHydration(page);
     await expect(page.getByText('Another page is available', { exact: true })).toBeVisible();
     await page.getByRole('link', { name: 'Load more →' }).click();
     await expect.poll(() => new URL(page.url()).searchParams.get('cursor')).toBe('demo-next');
@@ -92,10 +122,10 @@ export async function verifyBuiltNavigation(baseURL) {
     await page.getByLabel('Label', { exact: true }).fill('Saved wallet');
     await page.getByRole('button', { name: 'Save label', exact: true }).click();
     await expect(page.getByText('Saved wallet', { exact: true })).toBeVisible();
-    await page.screenshot({ path: fileURLToPath(new URL('../test-results/screenshots/watchlist-desktop.png', import.meta.url)) });
+    await page.screenshot({ path: resolve(outputDirectory, 'watchlist-desktop.png') });
     await page.setViewportSize({ width: 390, height: 844 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    await page.screenshot({ path: fileURLToPath(new URL('../test-results/screenshots/watchlist-mobile.png', import.meta.url)) });
+    await page.screenshot({ path: resolve(outputDirectory, 'watchlist-mobile.png') });
     await page.getByRole('button', { name: 'Remove ' + wallet, exact: true }).click();
     await expect(page.getByText('No saved wallets yet', { exact: true })).toBeVisible();
     expect(walletRequests).toBe(beforeWatchlist);
@@ -113,7 +143,7 @@ export async function verifyBuiltNavigation(baseURL) {
     await expect(page.getByText('No saved wallets yet', { exact: true })).toBeVisible();
     expect(walletRequests).toBe(afterReopen);
     if (errors.length) throw new Error('Built navigation produced browser errors: ' + errors.join('; '));
-    return { navigated: true, mobileWidth: 390, pageErrors: 0 };
+    return { navigated: true, mobileWidth: 390, pageErrors: 0, outputDirectory };
   } catch (error) {
     if (errors.length) throw new Error('Built navigation produced browser errors: ' + errors.join('; '), { cause: error });
     throw error;

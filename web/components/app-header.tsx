@@ -16,9 +16,6 @@ export function AppHeader({ search = false }: { search?: boolean }) {
       )}
       <nav className="header-meta" aria-label="Site">
         <a href="/watchlist" className="header-watchlist"><Bookmark size={13} /><span>Watchlist</span></a>
-        <a href="/demo" className="header-link">
-          Explore demo
-        </a>
         <span className="network">
           <i />
           Solana

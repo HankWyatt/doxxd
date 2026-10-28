@@ -10,6 +10,11 @@ import {
   type WalletDataMode,
 } from "./dmnd/contracts";
 import { protocolResources } from "./dmnd/resources";
+import {
+  needsRecovery, recoverableResource, transientError,
+  RECOVERY_INTERVAL_MS, RECOVERY_WINDOW_MS, RECOVERY_MAX_RETRIES,
+  type RecoveryState,
+} from "./wallet-recovery";
 export const WalletRefreshContext = createContext(0);
 let activeDetails = 0;
 const queue: (() => void)[] = [];
@@ -52,6 +57,8 @@ export function useWalletResource<K extends ResourceName>(
   loading: boolean;
   result: ResourceResult<ResourceData[K]> | null;
   refresh: () => void;
+  recovery: RecoveryState;
+  refreshError: ResourceError | null;
 } {
   const epoch = useContext(WalletRefreshContext);
   const [nonce, setNonce] = useState(0);
@@ -59,15 +66,60 @@ export function useWalletResource<K extends ResourceName>(
   const [saved, setSaved] = useState<{
     key: string;
     result: ResourceResult<ResourceData[K]>;
+    refreshError: ResourceError | null;
   } | null>(null);
+  const [recovery, setRecovery] = useState<{ key: string; state: RecoveryState }>({ key: "", state: "idle" });
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const cooldown = useRef({ key: "", until: 0 });
   useEffect(() => {
-    if (cooldown.current.key === key && Date.now() < cooldown.current.until)
-      return;
-    const controller = new AbortController();
     let current = true;
-    setLoadingKey(key);
+    let controller: AbortController | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    let deadline = 0;
+    let retries = 0;
+    let inFlight = false;
+    let automaticRequest = false;
+    let latest: ResourceResult<ResourceData[K]> | null = null;
+    let lastSuccess = saved?.key === key && saved.result.ok ? saved.result : null;
+    const eligible = mode.kind === "live" && recoverableResource(resource, query.cursor);
+    const visible = () => document.visibilityState !== "hidden";
+    const status = (state: RecoveryState) => {
+      if (current) setRecovery({ key, state });
+    };
+    const stop = () => {
+      clearTimeout(timer);
+      clearTimeout(deadlineTimer);
+      if (automaticRequest) controller?.abort();
+      if (current) setLoadingKey(null);
+      status("stopped");
+    };
+    const schedule = () => {
+      clearTimeout(timer);
+      if (!current) return;
+      if (!eligible || !latest || !needsRecovery(latest)) {
+        clearTimeout(deadlineTimer);
+        status("idle");
+        return;
+      }
+      if (!deadline) {
+        deadline = Date.now() + RECOVERY_WINDOW_MS;
+        deadlineTimer = setTimeout(stop, RECOVERY_WINDOW_MS);
+      }
+      if (Date.now() >= deadline || retries >= RECOVERY_MAX_RETRIES) {
+        stop();
+        return;
+      }
+      if (!visible()) {
+        status("paused");
+        return;
+      }
+      const delay = Math.max(RECOVERY_INTERVAL_MS,
+        cooldown.current.key === key ? cooldown.current.until - Date.now() : 0);
+      status("waiting");
+      if (Date.now() + delay < deadline)
+        timer = setTimeout(() => void run(true), delay);
+    };
     const params = new URLSearchParams();
     for (const [k, v] of Object.entries(query))
       if (v !== undefined) params.set(k, String(v));
@@ -77,13 +129,44 @@ export function useWalletResource<K extends ResourceName>(
         ? "/api/demo/" + resource
         : "/api/wallet/" + encodeURIComponent(wallet) + "/" + resource;
     const url = path + (params.size ? "?" + params.toString() : "");
-    void (async () => {
+    const run = async (automatic: boolean) => {
+      if (!current || inFlight) return;
+      if (automatic && (!visible() || Date.now() >= deadline || retries >= RECOVERY_MAX_RETRIES)) {
+        schedule();
+        return;
+      }
+      // Manual refresh also respects an existing Retry-After boundary.
+      if (cooldown.current.key === key && Date.now() < cooldown.current.until) {
+        latest = { ok: false, kind: "rate_limited" };
+        schedule();
+        return;
+      }
+      if (automatic) retries++;
+      automaticRequest = automatic;
+      inFlight = true;
+      controller = new AbortController();
+      const signal = controller.signal;
+      setLoadingKey(key);
+      status(automatic ? "refreshing" : "idle");
       let release: (() => void) | undefined;
+      const save = (result: ResourceResult<ResourceData[K]>) => {
+        if (!current || signal.aborted) return;
+        latest = result;
+        if (!result.ok && result.kind === "rate_limited")
+          cooldown.current = {
+            key,
+            until: Date.now() + (result.retryAfterSeconds ?? 15) * 1000,
+          };
+        if (result.ok) lastSuccess = result;
+        const retained = eligible && lastSuccess && transientError(result);
+        setSaved({ key, result: retained ? lastSuccess! : result,
+          refreshError: retained && !result.ok ? result : null });
+      };
       try {
         if (protocolResources.includes(resource as never))
-          release = await detailSlot(controller.signal);
+          release = await detailSlot(signal);
         const response = await fetch(url, {
-          signal: controller.signal,
+          signal,
           cache: "no-store",
         });
         const body: unknown = await response.json();
@@ -127,24 +210,34 @@ export function useWalletResource<K extends ResourceName>(
             };
           }
         }
-        if (current) {
-          if (!result.ok && result.kind === "rate_limited")
-            cooldown.current = {
-              key,
-              until: Date.now() + (result.retryAfterSeconds ?? 15) * 1000,
-            };
-          setSaved({ key, result });
-        }
+        save(result);
       } catch {
-        if (current) setSaved({ key, result: { ok: false, kind: "upstream" } });
+        save({ ok: false, kind: "upstream" });
       } finally {
         release?.();
+        inFlight = false;
         if (current) setLoadingKey(null);
+        // A hidden-tab cancellation keeps the last response and resumes only
+        // within the original window. It is never recorded as a server error.
+        schedule();
       }
-    })();
+    };
+    const visibilityChanged = () => {
+      if (!visible()) {
+        clearTimeout(timer);
+        if (automaticRequest && inFlight) controller?.abort();
+        if (latest && eligible && needsRecovery(latest) && recoveryStateActive()) status("paused");
+      } else if (!inFlight && latest && recoveryStateActive()) schedule();
+    };
+    const recoveryStateActive = () => deadline > 0 && Date.now() < deadline && retries < RECOVERY_MAX_RETRIES;
+    document.addEventListener("visibilitychange", visibilityChanged);
+    void run(false);
     return () => {
       current = false;
-      controller.abort();
+      clearTimeout(timer);
+      clearTimeout(deadlineTimer);
+      controller?.abort();
+      document.removeEventListener("visibilitychange", visibilityChanged);
     };
     // The serialized key contains all request inputs. Context epoch/local nonce are explicit refreshes.
   }, [key, nonce, epoch]);
@@ -152,5 +245,7 @@ export function useWalletResource<K extends ResourceName>(
     loading: loadingKey === key || saved?.key !== key,
     result: saved?.key === key ? saved.result : null,
     refresh: () => setNonce((n) => n + 1),
+    recovery: recovery.key === key ? recovery.state : "idle",
+    refreshError: saved?.key === key ? saved.refreshError : null,
   };
 }
