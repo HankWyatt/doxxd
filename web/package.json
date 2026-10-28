@@ -95,13 +95,9 @@
       "sharp": "0.35.5",
       "undici": "7.30.1"
     },
-    "@vercel/og": {
-      "satori": "0.33.5"
-    },
     "@esbuild-kit/core-utils": {
       "esbuild": "0.25.12"
     },
-    "fflate": "0.7.5",
     "vinext": {
       "image-size": "2.0.3"
     }
