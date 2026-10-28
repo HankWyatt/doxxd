@@ -46,10 +46,12 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 1000 }, { name: 
     if (viewport.name === "desktop") {
       await expect(row.getByText("1.25M", { exact: true })).toBeVisible();
       await expect(row.getByText("+$250.00", { exact: true })).toBeVisible();
-      await expect(holdings.getByRole("columnheader", { name: "P&L", exact: true })).toBeVisible();
+      await expect(holdings.getByRole("columnheader", { name: /^P&L/ })).toBeVisible();
+      await holdings.getByRole("button", { name: "estimate", exact: true }).focus();
+      await expect(holdings.getByText(/Indexed average-cost estimate; partial history/)).toBeVisible();
     } else {
       await expect(jupButton.getByText("Balance 1.25M", { exact: true })).toBeVisible();
-      await expect(holdings.getByRole("columnheader", { name: "P&L", exact: true })).toBeHidden();
+      await expect(holdings.getByRole("columnheader", { name: /^P&L/ })).toBeHidden();
     }
     // Buys, sells and the last trade live in the row details, not the table.
     await expect(holdings.getByRole("columnheader", { name: "Buys", exact: true })).toHaveCount(0);

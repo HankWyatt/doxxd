@@ -1,5 +1,5 @@
 "use client";
-import { Fragment, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { ChevronDown, Layers3 } from "lucide-react";
 import type { ProtocolResource, Schemas } from "@/lib/dmnd/contracts";
 import { protocolResources, resources } from "@/lib/dmnd/resources";
@@ -9,6 +9,7 @@ import {
   formatPrice,
   compareDecimalDesc,
   atomsToUi,
+  isAtLeast,
 } from "@/lib/decimal";
 import { tokenImageCandidates, explorerHref } from "@/lib/safe-url";
 import { short } from "@/lib/portfolio/adapters/shared";
@@ -21,7 +22,7 @@ import {
 // Priced tokens listed before the "Show all" control; the rest stay one click away.
 const TOP_TOKENS = 10;
 // Balances worth less than a cent collapse with the unpriced ones.
-const TINY_VALUE = 0.01;
+const TINY_VALUE = "0.01";
 export type Row = {
   id: string;
   mint?: string;
@@ -65,20 +66,26 @@ function positionReceipt(asset: Schemas["WalletAsset"]): Receipt | null {
     tokenName: asset.name?.trim() || null,
   };
 }
+// A priced token ranks and collapses by its known value, else its estimate.
+function effectiveValue(row: Row) {
+  return row.value ?? row.estimate;
+}
 /**
  * Splits the card's rows. Receipts (LP position NFTs) never list as rows; a
- * null or sub-cent value collapses a token; the rest sort by value descending.
+ * token with no value or estimate, or one below a cent, collapses; the rest
+ * sort by value (or estimate) descending.
  */
 export function splitRows(rows: Row[]): {
   shown: Row[];
   collapsed: Row[];
   receipts: Row[];
 } {
-  const sorted = [...rows].sort((a, b) => compareDecimalDesc(a.value, b.value));
+  const sorted = [...rows].sort((a, b) =>
+    compareDecimalDesc(effectiveValue(a), effectiveValue(b)),
+  );
   const receipts = sorted.filter((row) => row.receipt);
   const tokens = sorted.filter((row) => !row.receipt);
-  const priced = (row: Row) =>
-    row.value != null && Number(row.value) >= TINY_VALUE;
+  const priced = (row: Row) => isAtLeast(effectiveValue(row), TINY_VALUE);
   return {
     shown: tokens.filter(priced),
     collapsed: tokens.filter((row) => !priced(row)),
@@ -233,6 +240,8 @@ function HoldingsTable({
   const [open, setOpen] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
+  // Search results page separately so clearing a search restores the list.
+  const [showAllMatches, setShowAllMatches] = useState(false);
   const [showCollapsed, setShowCollapsed] = useState(false);
   const searchInput = useRef<HTMLInputElement>(null);
   const rows: Row[] = overview.assets.map((a) => {
@@ -295,7 +304,9 @@ function HoldingsTable({
       priceAt: overview.sol_price_updated_at,
       balanceSlot: overview.wrapped_sol_slot,
     });
-  rows.sort((a, b) => compareDecimalDesc(a.value, b.value));
+  rows.sort((a, b) =>
+    compareDecimalDesc(effectiveValue(a), effectiveValue(b)),
+  );
   const search = query.trim().toLowerCase();
   const matches = search
     ? rows.filter((row) =>
@@ -315,7 +326,8 @@ function HoldingsTable({
   // A search lists every match, collapsed or not; otherwise only the top
   // priced tokens show until the reader asks for more.
   const pool = search ? matches : shown;
-  const listed = showAll ? pool : pool.slice(0, TOP_TOKENS);
+  const expanded = search ? showAllMatches : showAll;
+  const listed = expanded ? pool : pool.slice(0, TOP_TOKENS);
   const visibleRows = search
     ? listed
     : showCollapsed
@@ -324,7 +336,7 @@ function HoldingsTable({
   const receiptLines = receiptGroups(receipts);
   function changeQuery(value: string) {
     setQuery(value);
-    setShowAll(false);
+    setShowAllMatches(false);
     setOpen(null);
   }
   return (
@@ -370,11 +382,11 @@ function HoldingsTable({
             Wallet refresh failed. Showing available holdings; some balances may be missing or out of date.
           </p>
         )}
-        {search && rows.length > 0 && (
-          <p className="holdings-search-status" role="status">
-            {matches.length} of {rows.length} observed holdings match
-          </p>
-        )}
+        <p className="holdings-search-status" role="status">
+          {search
+            ? matches.length + " of " + rows.length + " observed holdings match"
+            : ""}
+        </p>
         {(overview.native_sol_lamports == null ||
           overview.wrapped_sol_lamports == null) && (
           <p
@@ -415,8 +427,21 @@ function HoldingsTable({
                       <th className="token-col">Token</th>
                       <th className="right hide-mobile price-col">Price</th>
                       <th className="right hide-mobile amount-col">Amount</th>
-                      <th className="right hide-mobile holding-trading-col" title="Indexed average-cost estimate; partial history, opening balances, transfers and fees can affect actual results.">
-                        P&amp;L <span aria-hidden="true">ⓘ</span>
+                      <th className="right hide-mobile holding-trading-col">
+                        P&amp;L{" "}
+                        <span className="info-tip">
+                          <button
+                            type="button"
+                            className="info-button"
+                            aria-label="estimate"
+                            aria-describedby="holdings-pnl-note"
+                          >
+                            <span aria-hidden="true">ⓘ</span>
+                          </button>
+                          <span role="tooltip" id="holdings-pnl-note" aria-hidden="true">
+                            Indexed average-cost estimate; partial history, opening balances, transfers and fees can affect actual results.
+                          </span>
+                        </span>
                       </th>
                       <th className="right">USD Value</th>
                     </tr>
@@ -441,10 +466,14 @@ function HoldingsTable({
                 <button
                   type="button"
                   className="holdings-toggle"
-                  aria-expanded={showAll}
-                  onClick={() => setShowAll(!showAll)}
+                  aria-expanded={expanded}
+                  onClick={() => {
+                    if (search) setShowAllMatches(!showAllMatches);
+                    else setShowAll(!showAll);
+                    setOpen(null);
+                  }}
                 >
-                  {showAll
+                  {expanded
                     ? "Show fewer"
                     : search
                       ? "Show all " + pool.length + " matches"
@@ -456,7 +485,10 @@ function HoldingsTable({
                   type="button"
                   className="holdings-toggle"
                   aria-expanded={showCollapsed}
-                  onClick={() => setShowCollapsed(!showCollapsed)}
+                  onClick={() => {
+                    setShowCollapsed(!showCollapsed);
+                    setOpen(null);
+                  }}
                 >
                   {showCollapsed
                     ? "Hide " + plural(collapsed.length, "token") + " with no price or tiny balances"
@@ -720,7 +752,7 @@ function HoldingRow({
                   <dd>{unavailable}</dd>
                 </div>
               ) : null}
-                        </dl>
+            </dl>
           </td>
         </tr>
       )}

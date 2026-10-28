@@ -206,7 +206,7 @@ it("searches every loaded observed symbol, name and mint with null or empty meta
   searchFor("wrapped-sol");
   expect(screen.getByRole("button", { name: "Inspect WSOL holding" })).toBeVisible();
   searchFor("   ");
-  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  expect(screen.getByRole("status")).toBeEmptyDOMElement();
   expect(screen.getByRole("button", { name: "+47 tokens with no price or tiny balances · show" })).toBeVisible();
 });
 
@@ -302,7 +302,7 @@ it("resets expansion for search changes and distinguishes no matches from an emp
   fireEvent.click(screen.getByRole("button", { name: "Clear holdings search" }));
   expect(screen.getByRole("searchbox", { name: "Search observed holdings" })).toHaveValue("");
   expect(screen.getByRole("searchbox", { name: "Search observed holdings" })).toHaveFocus();
-  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  expect(screen.getByRole("status")).toBeEmptyDOMElement();
   // Clearing the search returns to the list as the reader left it.
   expect(screen.getByRole("button", { name: "Hide 47 tokens with no price or tiny balances" })).toBeVisible();
 });
@@ -504,11 +504,12 @@ it("keeps estimated and missing holdings values distinct from highlighted known 
   data.assets[0].estimated_value_usd = "12.34";
   data.assets[1].value_usd = null;
   render(<Holdings overview={data} />);
-  showCollapsed();
+  // An estimate of at least a cent counts as priced: listed without expanding.
   const estimated = holdingRow("USDC");
   expect(estimated.querySelector(".holdings-value")).not.toBeInTheDocument();
   expect(within(estimated).getByText("estimate")).toBeVisible();
   expect(within(estimated).getByText("$12.34")).toBeVisible();
+  showCollapsed();
   const unknown = holdingRow("JitoSOL");
   expect(unknown.querySelector(".holdings-value")).not.toBeInTheDocument();
   expect(within(unknown).getAllByRole("cell")[4]).toHaveTextContent("—");
@@ -524,7 +525,7 @@ it("joins indexed trading details by mint while preserving holdings valuations a
     total_pnl_usd: "-25",
   });
   render(<Holdings overview={data} trading={tradingDetails([positive, negative])} />);
-  expect(screen.getByRole("columnheader", { name: "P&L" })).toHaveAttribute("title", expect.stringContaining("estimate"));
+  expect(screen.getByRole("columnheader", { name: /^P&L/ })).toBeVisible();
   expect(screen.queryByRole("columnheader", { name: "Buys" })).not.toBeInTheDocument();
   // The partial-history caveat lives in the card's details, not above the table.
   const note = screen.getByText(/Trading history is partial/);
@@ -599,7 +600,8 @@ it("withholds P&L without a priced buy basis or with unpriced fills while retain
   expect(buys()).toHaveTextContent("4 trades");
   expect(sells).toHaveTextContent("$0.00");
   expect(sells).toHaveTextContent("3 trades");
-  expect(screen.getByText(/Buy\/sell USD totals include priced indexed fills/)).toBeInTheDocument();
+  openDetails();
+  expect(screen.getByText(/Buy\/sell USD totals include priced indexed fills/)).toBeVisible();
   expect(screen.queryByText("+$999.00")).not.toBeInTheDocument();
   const noBasis = indexedPosition({
     total_pnl_usd: "0",
@@ -824,6 +826,76 @@ it("search still finds collapsed tokens and receipts", () => {
   expect(bodyRows()).toHaveLength(1);
   searchFor("");
   expect(bodyRows()).toHaveLength(1);
-  expect(screen.queryByRole("status")).toBeNull();
+  expect(screen.getByRole("status")).toBeEmptyDOMElement();
   expect(screen.getByText(/1 LP position NFT/)).toBeVisible();
+});
+
+it("splitRows lists an estimate of at least a cent as priced and ranks by it", () => {
+  const { shown, collapsed } = splitRows([
+    row("known", "50"),
+    row("est-big", null, { estimate: "120.5" }),
+    row("est-edge", undefined, { estimate: "0.01" }),
+    row("est-tiny", null, { estimate: "0.009" }),
+    row("known-wins", "0.001", { estimate: "999" }),
+    row("nothing", null),
+  ]);
+  expect(shown.map((r) => r.id)).toEqual(["est-big", "known", "est-edge"]);
+  expect(collapsed.map((r) => r.id)).toEqual(["est-tiny", "known-wins", "nothing"]);
+});
+
+it("makes the P&L estimate note reachable by keyboard and screen readers", () => {
+  render(<Holdings overview={overview()} trading={tradingDetails()} />);
+  const header = screen.getByRole("columnheader", { name: /^P&L/ });
+  const button = within(header).getByRole("button", { name: "estimate" });
+  button.focus();
+  expect(button).toHaveFocus();
+  const note = document.getElementById(button.getAttribute("aria-describedby")!)!;
+  expect(note).toHaveAttribute("role", "tooltip");
+  expect(note).toHaveTextContent("Indexed average-cost estimate");
+  expect(note).toHaveTextContent("opening balances, transfers and fees");
+});
+
+it("closes an open row when show lines hide it", () => {
+  const priced = Array.from({ length: 12 }, (_, index) => tokenAsset(index));
+  const unpriced = tokenAsset(13, { price_usd: null, value_usd: null });
+  render(<Holdings overview={cardOverview([unpriced, ...priced])} />);
+  showCollapsed();
+  fireEvent.click(screen.getByRole("button", { name: "Inspect SYN13 holding" }));
+  expect(screen.getByText("Raw atoms")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Hide 1 token with no price or tiny balances" }));
+  expect(screen.queryByText("Raw atoms")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Show all 12 tokens" }));
+  fireEvent.click(screen.getByRole("button", { name: "Inspect SYN11 holding" }));
+  expect(screen.getByText("Raw atoms")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Show fewer" }));
+  expect(screen.queryByText("Raw atoms")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "+1 token with no price or tiny balances · show" }));
+  fireEvent.click(screen.getByRole("button", { name: "Inspect SYN13 holding" }));
+  fireEvent.click(screen.getByRole("button", { name: "Show all 12 tokens" }));
+  expect(screen.queryByText("Raw atoms")).not.toBeInTheDocument();
+});
+
+it("restores the list, including Show all, after a search is cleared", () => {
+  const priced = Array.from({ length: 12 }, (_, index) => tokenAsset(index));
+  render(<Holdings overview={cardOverview(priced)} />);
+  fireEvent.click(screen.getByRole("button", { name: "Show all 12 tokens" }));
+  expect(bodyRows()).toHaveLength(12);
+  searchFor("SYN");
+  expect(bodyRows()).toHaveLength(10);
+  expect(screen.getByRole("button", { name: "Show all 12 matches" })).toBeVisible();
+  searchFor("");
+  expect(bodyRows()).toHaveLength(12);
+  expect(screen.getByRole("button", { name: "Show fewer" })).toBeVisible();
+});
+
+it("keeps the search status live region mounted and announces matches in it", () => {
+  render(<Holdings overview={cardOverview([tokenAsset(1), tokenAsset(2)])} />);
+  const status = screen.getByRole("status");
+  expect(status).toBeEmptyDOMElement();
+  searchFor("SYN1");
+  expect(screen.getByRole("status")).toBe(status);
+  expect(status).toHaveTextContent("1 of 2 observed holdings match");
+  searchFor("");
+  expect(screen.getByRole("status")).toBe(status);
+  expect(status).toBeEmptyDOMElement();
 });

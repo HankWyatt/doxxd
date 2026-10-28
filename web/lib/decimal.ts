@@ -86,6 +86,14 @@ export function compareDecimalDesc(
     y = read(b);
   return x && y ? y.comparedTo(x) : x ? -1 : y ? 1 : 0;
 }
+/** True when the decimal string parses and is at least `min`; unparseable values are not. */
+export function isAtLeast(
+  value: string | null | undefined,
+  min: string,
+): boolean {
+  const n = read(value);
+  return n !== null && n.greaterThanOrEqualTo(min);
+}
 export function atomsToUi(
   value: string | null | undefined,
   decimals: number,
