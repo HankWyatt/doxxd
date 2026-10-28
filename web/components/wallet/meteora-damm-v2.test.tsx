@@ -6,6 +6,7 @@ import { Portfolio } from "./portfolio";
 import { readFixture } from "@/lib/fixtures/wallet";
 import { validResourcePayload } from "@/lib/dmnd/validation.server";
 import type { ResourceName, Schemas } from "@/lib/dmnd/contracts";
+import type { HoldingsTradingDetails } from "@/lib/indexed-trading";
 import { short } from "@/lib/portfolio/adapters/shared";
 import {
   DAMM,
@@ -157,6 +158,58 @@ it("labels an LP position NFT as an unvalued receipt overlapping the protocol se
   expect(within(detail).getByText(/not verified/i)).toBeVisible();
   expect(within(detail).queryByText(/\$999/)).toBeNull();
   expect(screen.getByText(/1 LP position receipt overlaps/)).toBeInTheDocument();
+});
+
+it("never joins indexed trading results to an LP receipt's NFT mint", () => {
+  const positions = readFixture("positions", "complete");
+  if (!positions.ok) throw new Error("Fixture must succeed");
+  const traded = {
+    ...positions.data.data[0],
+    mint: DAMM.positionMint,
+    bought: { amount: "1", sol: "1", usd: "100", count: 2 },
+    sold: { amount: "1", sol: "1", usd: "175", count: 1 },
+    avg_buy_price_usd: "100",
+    realized_pnl_usd: "75",
+    unrealized_pnl_usd: "0",
+    total_pnl_usd: "75",
+  };
+  const trading: HoldingsTradingDetails = {
+    positions: new Map([[traded.mint, traded]]),
+    loading: false,
+    error: null,
+    positionsTracked: true,
+    positionsSince: positions.data.positions_since ?? null,
+    loadedCount: 1,
+    positionCount: 1,
+    hasMore: false,
+    continuationUnavailable: false,
+    loadMore: vi.fn(),
+    reload: vi.fn(),
+  };
+  render(
+    <Holdings
+      overview={receiptOverview({
+        protocol: "meteora_damm_v2",
+        position: DAMM.position,
+        pool: DAMM.pool,
+      })}
+      trading={trading}
+    />,
+  );
+  const button = screen.getByRole("button", {
+    name: "Inspect Meteora DAMM v2 position holding",
+  });
+  const row = button.closest("tr")!;
+  const cells = within(row).getAllByRole("cell");
+  for (const index of [4, 5, 6, 7]) expect(cells[index]).toHaveTextContent("—");
+  expect(within(row).queryByText("+$75.00")).toBeNull();
+  expect(within(row).queryByText(/trades?$/)).toBeNull();
+  fireEvent.click(button);
+  const detail = row.nextElementSibling as HTMLElement;
+  expect(within(detail).getByText("LP position receipts have no per-token trading position here.")).toBeVisible();
+  expect(within(detail).queryByText("Indexed total P&L estimate")).toBeNull();
+  expect(within(detail).queryByText("Recorded buys")).toBeNull();
+  expect(within(detail).getByText(DAMM.position)).toBeVisible();
 });
 
 it("labels a receipt whose position and pool are not yet identified", () => {

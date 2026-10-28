@@ -379,11 +379,15 @@ function HoldingsTable({
               </thead>
               <tbody>
                 {visibleRows.map((row) => {
-                  const position = row.mint ? trading?.positions.get(row.mint) : undefined;
+                  // An LP receipt overlaps a protocol position; its NFT mint never
+                  // carries per-token trading results here.
+                  const position = row.mint && !row.receipt ? trading?.positions.get(row.mint) : undefined;
                   const pnl = position ? indexedPnl(position) : null;
                   const unavailable = row.id === "native-sol"
                     ? "Native SOL has no per-token trading position in this feed."
-                    : "Trading details are unavailable for this mint in the loaded indexed history.";
+                    : row.receipt
+                      ? "LP position receipts have no per-token trading position here."
+                      : "Trading details are unavailable for this mint in the loaded indexed history.";
                   const fullBalance = row.amount == null ? "Unknown balance" : row.amount + " " + row.symbol;
                   return (
                   <Fragment key={row.id}>
