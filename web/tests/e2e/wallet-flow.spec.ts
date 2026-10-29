@@ -146,7 +146,7 @@ test("390px portfolio and activity stay within the viewport", async ({
   await page.goto(`/wallet/${DEMO_ADDRESS}`);
   await waitForWalletHydration(page);
   await expect(page.getByText("$12,345.67", { exact: true })).toBeVisible();
-  await page.getByText("Full address", { exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: DEMO_ADDRESS })).toBeVisible();
   await page
     .getByRole("button", { name: "Inspect SOL holding", exact: true })
     .click();

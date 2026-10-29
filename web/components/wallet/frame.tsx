@@ -16,7 +16,6 @@ import { WalletSummary } from "./summary";
 import { RecoveryNotice } from "./recovery-notice";
 import { SaveWalletButton } from "../watchlist/watchlist";
 import { CopyButton } from "../copy-button";
-import { short } from "@/lib/portfolio/adapters/shared";
 import { avatarStyle } from "@/lib/portfolio/headline";
 const SummaryContext = createContext<ResourceData["summary"] | null>(null);
 export const usePortfolioSummary = () => useContext(SummaryContext);
@@ -80,7 +79,7 @@ function FrameContent({
           <div className="wallet-id">
             <span className="wallet-avatar" style={avatarStyle(address)} aria-hidden="true" />
             <div>
-              <h1>{short(address)}</h1>
+              <h1 className="wallet-address">{address}</h1>
               <div className="inline small muted">
                 <CopyButton
                   key={address}
@@ -116,10 +115,6 @@ function FrameContent({
           </div>
         }
       />
-      <details className="full-address">
-        <summary>Full address</summary>
-        <p className="mono break">{address}</p>
-      </details>
       <RecoveryNotice state={summary.recovery} retained={Boolean(summary.refreshError)} retry={summary.refresh} />
       <nav className="tabs" aria-label="Wallet views">
         <a

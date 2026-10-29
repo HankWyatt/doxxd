@@ -447,6 +447,15 @@ a svg {
   margin: 0 0 4px;
   letter-spacing: -0.3px;
 }
+.wallet-id > div {
+  min-width: 0;
+}
+.wallet-id h1.wallet-address {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 15px;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
 .icon-button {
   border: 0;
   background: none;
@@ -1327,11 +1336,6 @@ tbody tr.data-row:hover {
   border-radius: 5px;
   color: var(--muted);
 }
-.full-address {
-  font-size: 11px;
-  margin-top: 12px;
-  color: var(--muted);
-}
 @keyframes pulse {
   50% {
     opacity: 0.45;
@@ -1469,6 +1473,9 @@ tbody tr.data-row:hover {
   }
   .wallet-id h1 {
     font-size: 15px;
+  }
+  .wallet-id h1.wallet-address {
+    font-size: 12px;
   }
   .wallet-avatar {
     width: 44px;
