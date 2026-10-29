@@ -11,6 +11,8 @@ cd web
 npm run install:ci
 ```
 
+CI installs with `npm ci --ignore-scripts`, and so should you when you install by hand. Nothing in the dependency tree needs an install script: the native addons that have one (`bigint-buffer`, `bufferutil`, `utf-8-validate`) all fall back to pure JavaScript.
+
 ## Run it
 
 The development server runs without a key; wallet routes then show a connection state:
