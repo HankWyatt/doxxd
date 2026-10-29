@@ -12,7 +12,7 @@ import {
 } from "@solana/web3.js";
 import { describe, expect, it } from "vitest";
 import { MOCK_BLOCKHASH } from "@/tests/fixtures/mock-action-rpc";
-import { GroupTooLargeError, packGroups, withComputeUnitLimit, type InstructionGroup } from "./pack";
+import { GroupTooLargeError, packGroups, partitionGroups, withComputeUnitLimit, type InstructionGroup } from "./pack";
 import { CP_AMM_PROGRAM } from "./programs";
 
 const seededKey = (byte: number) => Keypair.fromSeed(new Uint8Array(32).fill(byte)).publicKey;
@@ -94,6 +94,15 @@ describe("packGroups", () => {
   it("throws GroupTooLargeError for a single group that does not fit", () => {
     const huge = claimGroup(1, 40);
     expect(() => packGroups([claimGroup(2), huge], OWNER, MOCK_BLOCKHASH, 25_000)).toThrow(GroupTooLargeError);
+  });
+
+  it("partitionGroups splits like packGroups, and each part packs into one message", () => {
+    const groups = Array.from({ length: 12 }, (_, n) => claimGroup(n + 1));
+    const parts = partitionGroups(groups, OWNER);
+    const packed = packGroups(groups, OWNER, MOCK_BLOCKHASH, 200_000);
+    expect(parts.map((part) => part.flatMap((g) => g.positionIds))).toEqual(packed.map((p) => p.positionIds));
+    for (const part of parts) expect(packGroups(part, OWNER, MOCK_BLOCKHASH, 200_000)).toHaveLength(1);
+    expect(() => partitionGroups([claimGroup(1, 40)], OWNER)).toThrow(GroupTooLargeError);
   });
 
   it("returns nothing for no groups", () => {

@@ -26,7 +26,7 @@ import {
   type VersionedMessage,
 } from "@solana/web3.js";
 import bs58 from "bs58";
-import { GroupTooLargeError, packGroups, withComputeUnitLimit, type InstructionGroup } from "./pack";
+import { GroupTooLargeError, packGroups, partitionGroups, withComputeUnitLimit, type InstructionGroup } from "./pack";
 import { recordPending } from "./pending";
 import { MAX_COMPUTE_UNIT_LIMIT, WSOL_MINT, type ActionKind } from "./programs";
 import { isRpcBusy, type ActionRpc, type SimulatedAccount } from "./rpc";
@@ -145,6 +145,11 @@ function refused(error: unknown): boolean {
   return error instanceof SendTransactionError || /^4\d\d /.test(errorText(error));
 }
 
+// Preflight's answer for a blockhash the node no longer (or not yet) knows.
+function blockhashNotFound(error: unknown): boolean {
+  return /blockhash not found/i.test(errorText(error));
+}
+
 // Watched balances for one message: the owner, then the owner's ATA of each
 // expected mint that the message references (tokens can reach the wallet
 // only through those; see ./verify.ts).
@@ -203,14 +208,20 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
   const now = options.now ?? Date.now;
   let steps: ActionStep[] = [];
 
-  const publish = () =>
-    onUpdate(
-      steps.map((step) => ({
-        ...step,
-        positionIds: [...step.positionIds],
-        ...(step.expected ? { expected: step.expected.map((e) => ({ ...e })) } : {}),
-      })),
-    );
+  // A throwing progress callback must never stop the run part-way.
+  const publish = () => {
+    try {
+      onUpdate(
+        steps.map((step) => ({
+          ...step,
+          positionIds: [...step.positionIds],
+          ...(step.expected ? { expected: step.expected.map((e) => ({ ...e })) } : {}),
+        })),
+      );
+    } catch {
+      // The UI missed one update; the next one carries the full state.
+    }
+  };
   const set = (i: number, patch: Partial<ActionStep>) => {
     steps[i] = { ...steps[i], ...patch };
     publish();
@@ -242,20 +253,24 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
   if (expectation.kind !== intent) return finishAll("failed", REASONS.mismatch);
   if (expectation.owner !== wallet.address || walletChanged()) return finishAll("stopped", REASONS.walletChanged);
 
-  // 1-2. Blockhash and priority fee, then pack.
-  let packed: ReturnType<typeof packGroups>;
-  let lastValidBlockHeight: number;
+  // How the groups split into transactions. Sizes don't depend on the
+  // blockhash or the price, so this holds for every prompt's fresh values.
+  let parts: InstructionGroup[][];
   try {
-    const [latest, fees] = await Promise.all([rpc.latestBlockhash(), rpc.priorityFees(writableAccounts(groups))]);
-    lastValidBlockHeight = latest.lastValidBlockHeight;
-    packed = packGroups(groups, new PublicKey(wallet.address), latest.blockhash, computeUnitPrice(fees));
+    parts = partitionGroups(groups, new PublicKey(wallet.address));
   } catch (error) {
     return finishAll("failed", error instanceof GroupTooLargeError ? REASONS.tooLarge : plainReason(error));
   }
-  steps = packed.map((p, i) => ({ index: i + 1, label: p.label, positionIds: [...p.positionIds], status: "queued" }));
+  steps = parts.map((part, i) => ({
+    index: i + 1,
+    label: part.map((g) => g.label).join(", "),
+    positionIds: part.flatMap((g) => g.positionIds),
+    status: "queued",
+  }));
   publish();
 
-  // 3. Check and simulate every message before the wallet sees any.
+  // Check and simulate one message: verify; simulate; lower the compute-unit
+  // limit; verify and simulate again, watching the wallet's balances.
   const prepare = async (message: VersionedMessage): Promise<Prepared> => {
     const fail = (reason: string): Prepared => ({ ok: false, status: "failed", reason });
     let check = verifyMessage(message, expectation);
@@ -286,19 +301,19 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
       return fail(plainReason(error));
     }
   };
-  const ready: { step: number; message: VersionedMessage; bytes: Uint8Array }[] = [];
-  for (const [i, p] of packed.entries()) {
-    const prepared = await prepare(p.message);
-    if (prepared.ok) {
-      set(i, { expected: prepared.expected });
-      ready.push({ step: i, message: prepared.message, bytes: prepared.bytes });
-    } else set(i, { status: prepared.status, reason: prepared.reason });
-  }
+
+  const heightPast = async (lastValidBlockHeight: number): Promise<boolean> => {
+    try {
+      return (await rpc.blockHeight()) > lastValidBlockHeight;
+    } catch {
+      return false;
+    }
+  };
 
   // Sends `raw` until the RPC accepts it, re-sending only these bytes after a
-  // busy error. "rejected" means it certainly never left; "unknown" means it
-  // may have reached the network.
-  const send = async (raw: Uint8Array): Promise<"sent" | "unknown" | "rejected"> => {
+  // busy error. "rejected" and "expired" mean it certainly never left;
+  // "unknown" means it may have reached the network.
+  const send = async (raw: Uint8Array, lastValidBlockHeight: number): Promise<"sent" | "unknown" | "rejected" | "expired"> => {
     let mayHaveReached = false;
     for (let attempt = 0; ; attempt++) {
       try {
@@ -306,7 +321,13 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
         return "sent";
       } catch (error) {
         if (alreadyProcessed(error)) return "sent";
-        if (!isRpcBusy(error)) return refused(error) && !mayHaveReached ? "rejected" : "unknown";
+        if (!isRpcBusy(error)) {
+          if (!refused(error) || mayHaveReached) return "unknown";
+          // Preflight refuses an expired blockhash; so is any refusal once
+          // the height has passed the blockhash's last valid height.
+          if (blockhashNotFound(error) || (await heightPast(lastValidBlockHeight))) return "expired";
+          return "rejected";
+        }
         mayHaveReached = true;
         if (attempt >= SEND_RETRY_DELAYS_MS.length) return "unknown";
         await sleep(SEND_RETRY_DELAYS_MS[attempt]);
@@ -314,10 +335,21 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
     }
   };
 
+  const confirmed = (step: number, signature: string, slot: number) => {
+    // Recorded before the progress update, so a failing UI callback can never
+    // drop a pending record.
+    for (const positionId of steps[step].positionIds)
+      recordPending({ wallet: wallet.address, positionId, kind: expectation.kind, signature, slot, at: now() });
+    set(step, { status: "confirmed", slot });
+  };
+
   // Polls until each signature is confirmed or failed, the blockhash has
-  // expired without it, or 90 s pass.
-  const confirm = async (inFlight: Map<string, number>) => {
+  // expired without it, or 90 s pass. Expiry needs no status on two rounds
+  // after the height first passes the last valid height, in case one answer
+  // came from a node that lags.
+  const confirm = async (inFlight: Map<string, number>, lastValidBlockHeight: number) => {
     const start = now();
+    const missingAfterExpiry = new Set<string>();
     while (inFlight.size > 0) {
       // Height first: a signature with no status at a height past the
       // blockhash's last valid height can no longer land.
@@ -342,13 +374,15 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
             set(step, { status: "failed", reason: REASONS.failedOnChain, slot: status.slot });
             inFlight.delete(signature);
           } else if (status && (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized")) {
-            set(step, { status: "confirmed", slot: status.slot });
-            for (const positionId of steps[step].positionIds)
-              recordPending({ wallet: wallet.address, positionId, kind: expectation.kind, signature, slot: status.slot, at: now() });
+            confirmed(step, signature, status.slot);
             inFlight.delete(signature);
-          } else if (!status && height !== null && height > lastValidBlockHeight) {
-            set(step, { status: "failed", reason: REASONS.expired });
-            inFlight.delete(signature);
+          } else if (status) {
+            missingAfterExpiry.delete(signature);
+          } else if (height !== null && height > lastValidBlockHeight) {
+            if (missingAfterExpiry.has(signature)) {
+              set(step, { status: "failed", reason: REASONS.expired });
+              inFlight.delete(signature);
+            } else missingAfterExpiry.add(signature);
           }
         });
       }
@@ -361,9 +395,11 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
     }
   };
 
-  // 4-8. Sign in prompts of up to 10; re-check; send; confirm.
-  for (let c = 0; c < ready.length; c += MAX_PER_PROMPT) {
-    const chunk = ready.slice(c, c + MAX_PER_PROMPT);
+  // Ruling R-T7d: each prompt of up to 10 transactions is prepared just
+  // before it opens, with its own blockhash and priority fee, so nothing the
+  // wallet is shown has waited behind an earlier prompt.
+  for (let c = 0; c < parts.length; c += MAX_PER_PROMPT) {
+    const chunk = parts.slice(c, c + MAX_PER_PROMPT).map((part, k) => ({ step: c + k, part }));
     if (shouldStop()) {
       stopRemaining();
       break;
@@ -372,16 +408,61 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
       stopRemaining(REASONS.walletChanged);
       break;
     }
-    for (const { step } of chunk) set(step, { status: "awaiting-approval" });
+
+    // 1-3. Blockhash and fee for this prompt, then pack, check, simulate.
+    let blockhash: string;
+    let lastValidBlockHeight: number;
+    let cuPrice: number;
+    try {
+      const [latest, fees] = await Promise.all([
+        rpc.latestBlockhash(),
+        rpc.priorityFees(writableAccounts(chunk.flatMap(({ part }) => part))),
+      ]);
+      ({ blockhash, lastValidBlockHeight } = latest);
+      cuPrice = computeUnitPrice(fees);
+    } catch (error) {
+      for (const { step } of chunk) set(step, { status: "failed", reason: plainReason(error) });
+      continue;
+    }
+    const ready: { step: number; message: VersionedMessage; bytes: Uint8Array }[] = [];
+    for (const { step, part } of chunk) {
+      let packed: ReturnType<typeof packGroups>;
+      try {
+        packed = packGroups(part, new PublicKey(wallet.address), blockhash, cuPrice);
+      } catch {
+        packed = [];
+      }
+      if (packed.length !== 1) {
+        set(step, { status: "failed", reason: REASONS.tooLarge });
+        continue;
+      }
+      const prepared = await prepare(packed[0].message);
+      if (prepared.ok) {
+        set(step, { expected: prepared.expected });
+        ready.push({ step, message: prepared.message, bytes: prepared.bytes });
+      } else set(step, { status: prepared.status, reason: prepared.reason });
+    }
+    if (ready.length === 0) continue;
+
+    // 4. One wallet prompt for the chunk, checked for a stop right before.
+    if (shouldStop()) {
+      stopRemaining();
+      break;
+    }
+    if (walletChanged()) {
+      stopRemaining(REASONS.walletChanged);
+      break;
+    }
+    for (const { step } of ready) set(step, { status: "awaiting-approval" });
 
     let signed: Uint8Array[];
     try {
-      signed = await wallet.signTransactions(chunk.map(({ bytes }) => Uint8Array.from(bytes)));
+      signed = await wallet.signTransactions(ready.map(({ bytes }) => Uint8Array.from(bytes)));
     } catch (error) {
       if (walletChanged()) stopRemaining(REASONS.walletChanged);
       else {
         const reason = declinedByVisitor(error) ? REASONS.declined : REASONS.walletError;
-        for (const { step } of chunk) set(step, { status: "stopped", reason });
+        for (const { step } of ready) set(step, { status: "stopped", reason });
         stopRemaining();
       }
       break;
@@ -389,8 +470,8 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
 
     // 5. Only the exact checked message, still passing the check, is sent.
     const toSend: { step: number; raw: Uint8Array; signature: string }[] = [];
-    chunk.forEach(({ step, message }, k) => {
-      const raw = signed.length === chunk.length ? signed[k] : undefined;
+    ready.forEach(({ step, message }, k) => {
+      const raw = signed.length === ready.length ? signed[k] : undefined;
       let tx: VersionedTransaction | null = null;
       try {
         if (raw) tx = VersionedTransaction.deserialize(raw);
@@ -410,6 +491,13 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
       set(step, { status: "queued" });
     });
 
+    // The visitor may have left the prompt open past the blockhash's life:
+    // nothing was sent, so nothing changed. The next prompt starts afresh.
+    if (toSend.length > 0 && (await heightPast(lastValidBlockHeight))) {
+      for (const { step } of toSend) set(step, { status: "failed", reason: REASONS.expired });
+      continue;
+    }
+
     // 6-7. Send one at a time, checking for a stop before each.
     const inFlight = new Map<string, number>();
     let halted = false;
@@ -425,11 +513,12 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
         break;
       }
       set(step, { status: "sending", signature });
-      const outcome = await send(raw);
+      const outcome = await send(raw, lastValidBlockHeight);
       if (outcome === "rejected") set(step, { status: "failed", reason: REASONS.rejected });
+      else if (outcome === "expired") set(step, { status: "failed", reason: REASONS.expired });
       else inFlight.set(signature, step);
     }
-    await confirm(inFlight);
+    await confirm(inFlight, lastValidBlockHeight);
     if (halted) break;
   }
   return steps;

@@ -60,12 +60,24 @@ function fit(owner: PublicKey, blockhash: string, cuPrice: number, groups: Instr
   }
 }
 
-function packed(message: VersionedMessage, groups: InstructionGroup[]): PackedMessage {
-  return {
-    message,
-    positionIds: groups.flatMap((g) => g.positionIds),
-    label: groups.map((g) => g.label).join(", "),
-  };
+type Packing = { groups: InstructionGroup[]; message: VersionedMessage };
+
+function partition(groups: InstructionGroup[], owner: PublicKey, blockhash: string, cuPrice: number): Packing[] {
+  const out: Packing[] = [];
+  let current: Packing | null = null;
+  for (const group of groups) {
+    const together: VersionedMessage | null = current && fit(owner, blockhash, cuPrice, [...current.groups, group]);
+    if (current && together) {
+      current = { groups: [...current.groups, group], message: together };
+      continue;
+    }
+    if (current) out.push(current);
+    const alone = fit(owner, blockhash, cuPrice, [group]);
+    if (!alone) throw new GroupTooLargeError(group);
+    current = { groups: [group], message: alone };
+  }
+  if (current) out.push(current);
+  return out;
 }
 
 /**
@@ -81,24 +93,26 @@ export function packGroups(
   blockhash: string,
   cuPrice: number,
 ): PackedMessage[] {
-  const out: PackedMessage[] = [];
-  let current: InstructionGroup[] = [];
-  let currentMessage: VersionedMessage | null = null;
-  for (const group of groups) {
-    const together: VersionedMessage | null = currentMessage && fit(owner, blockhash, cuPrice, [...current, group]);
-    if (together) {
-      current.push(group);
-      currentMessage = together;
-      continue;
-    }
-    if (currentMessage) out.push(packed(currentMessage, current));
-    const alone = fit(owner, blockhash, cuPrice, [group]);
-    if (!alone) throw new GroupTooLargeError(group);
-    current = [group];
-    currentMessage = alone;
-  }
-  if (currentMessage) out.push(packed(currentMessage, current));
-  return out;
+  return partition(groups, owner, blockhash, cuPrice).map(({ groups: packed, message }) => ({
+    message,
+    positionIds: packed.flatMap((g) => g.positionIds),
+    label: packed.map((g) => g.label).join(", "),
+  }));
+}
+
+// The blockhash and the compute-unit price are fixed-width fields, so their
+// values never change a message's size: any blockhash and price give the
+// same packing.
+const PLACEHOLDER_BLOCKHASH = PublicKey.default.toBase58();
+
+/**
+ * How packGroups splits `groups` into transactions, without a real blockhash
+ * or price: the groups of each transaction, in order. Packing one entry with
+ * any blockhash and price gives exactly one message. Throws
+ * GroupTooLargeError like packGroups.
+ */
+export function partitionGroups(groups: InstructionGroup[], owner: PublicKey): InstructionGroup[][] {
+  return partition(groups, owner, PLACEHOLDER_BLOCKHASH, 0).map((p) => p.groups);
 }
 
 /**

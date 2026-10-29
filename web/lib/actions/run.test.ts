@@ -127,7 +127,7 @@ async function run(
     rpc?: MockActionRpcOverrides;
     wallet?: FakeWallet;
     expectation?: Expectation;
-  } & Partial<Pick<RunOptions, "intent" | "shouldStop" | "currentAddress">>,
+  } & Partial<Pick<RunOptions, "intent" | "shouldStop" | "currentAddress" | "onUpdate">>,
 ): Promise<Run> {
   const rpc = mockActionRpc(ctx.chain, opts.rpc);
   const wallet = opts.wallet ?? fakeWallet(ctx);
@@ -141,7 +141,10 @@ async function run(
     wallet,
     currentAddress: opts.currentAddress ?? (() => wallet.address),
     rpc,
-    onUpdate: (s) => updates.push(s),
+    onUpdate: (s) => {
+      updates.push(s);
+      opts.onUpdate?.(s);
+    },
     shouldStop: opts.shouldStop ?? (() => false),
     sleep: clock.sleep,
     now: clock.now,
@@ -152,6 +155,10 @@ async function run(
 const claimed = (ctx: Ctx, atoms = 1_000_000) => ({ postStates: postStatesFrom(credited(ctx, ctx.chain.mints.syna, atoms)) });
 const statuses = (steps: ActionStep[]) => steps.map((s) => s.status);
 const signatureOf = (raw: Uint8Array) => bs58.encode(VersionedTransaction.deserialize(raw).signatures[0]);
+const blockhashOf = (raw: Uint8Array) => VersionedTransaction.deserialize(raw).message.recentBlockhash;
+const { lastValidBlockHeight: LAST_VALID, blockHeight: HEIGHT } = SYNTHETIC.clock;
+const expiredRefusal = () =>
+  new SendTransactionError({ action: "send", signature: "", transactionMessage: "Transaction simulation failed: Blockhash not found" });
 
 beforeEach(() => {
   vi.mocked(recordPending).mockClear();
@@ -270,12 +277,14 @@ describe("runAction", () => {
 
   it("reports an expired blockhash as \"Didn't land · nothing changed\" (Review Focus 2)", async () => {
     const ctx = setup();
+    let heights = 0;
     const { steps, rpc } = await run(ctx, {
       groups: groups(ctx, 2),
       rpc: {
         ...claimed(ctx),
         statuses: async (sigs) => sigs.map(() => null),
-        blockHeight: async () => SYNTHETIC.clock.lastValidBlockHeight + 1,
+        // Still valid when the prompt returns; expired while confirming.
+        blockHeight: async () => (heights++ === 0 ? HEIGHT : LAST_VALID + 1),
       },
     });
     expect(statuses(steps)).toEqual(["failed", "failed"]);
@@ -349,7 +358,7 @@ describe("runAction", () => {
           throw new SendTransactionError({
             action: "send",
             signature: "",
-            transactionMessage: "Transaction simulation failed: Blockhash not found",
+            transactionMessage: "Transaction simulation failed: Error processing Instruction 2: custom program error: 0x1771",
           });
         },
       },
@@ -540,6 +549,149 @@ describe("runAction", () => {
       ["failed", "Network busy · try again"],
       ["failed", "Network busy · try again"],
     ]);
+  });
+
+  it("reports a preflight \"Blockhash not found\" refusal as \"Didn't land · nothing changed\" (R-001)", async () => {
+    const ctx = setup();
+    const { steps, rpc } = await run(ctx, {
+      groups: groups(ctx, 1),
+      rpc: {
+        ...claimed(ctx),
+        send: async () => {
+          throw expiredRefusal();
+        },
+      },
+    });
+    expect(rpc.sent).toHaveLength(1);
+    expect(steps[0]).toMatchObject({ status: "failed", reason: "Didn't land · nothing changed" });
+  });
+
+  it("reports any refusal once the blockhash has expired as \"Didn't land · nothing changed\" (R-001)", async () => {
+    const ctx = setup();
+    let heights = 0;
+    const { steps, rpc } = await run(ctx, {
+      groups: groups(ctx, 1),
+      rpc: {
+        ...claimed(ctx),
+        // Valid when the prompt returns, expired by the time the send is refused.
+        blockHeight: async () => (heights++ === 0 ? HEIGHT : LAST_VALID + 1),
+        send: async () => {
+          throw new SendTransactionError({ action: "send", signature: "", transactionMessage: "Transaction simulation failed" });
+        },
+      },
+    });
+    expect(rpc.sent).toHaveLength(1);
+    expect(steps[0]).toMatchObject({ status: "failed", reason: "Didn't land · nothing changed" });
+  });
+
+  it("prepares each prompt with its own fresh blockhash and priority fee (R-T7d)", async () => {
+    const ctx = setup();
+    let blockhashes = 0;
+    const feeReads: string[][] = [];
+    const { steps, wallet } = await run(ctx, {
+      groups: groups(ctx, 25),
+      rpc: {
+        ...claimed(ctx),
+        latestBlockhash: async () => ({
+          blockhash: bs58.encode(new Uint8Array(32).fill(20 + ++blockhashes)),
+          lastValidBlockHeight: LAST_VALID,
+        }),
+        priorityFees: async (writable) => (feeReads.push(writable), [50_000]),
+      },
+    });
+    expect(wallet.calls.map((c) => c.length)).toEqual([10, 10, 5]);
+    const perPrompt = wallet.calls.map((c) => [...new Set(c.map(blockhashOf))]);
+    expect(perPrompt.map((hashes) => hashes.length)).toEqual([1, 1, 1]);
+    expect(new Set(perPrompt.flat()).size).toBe(3);
+    expect(blockhashes).toBe(3);
+    expect(feeReads).toHaveLength(3);
+    expect(steps.every((s) => s.status === "confirmed")).toBe(true);
+  });
+
+  it("fails a prompt whose blockhash expired while the wallet was open, then prepares the next one afresh (R-T7d)", async () => {
+    const ctx = setup();
+    let height = HEIGHT;
+    const wallet = fakeWallet(ctx);
+    const sign = wallet.signTransactions;
+    wallet.signTransactions = async (txs) => {
+      const signed = await sign(txs);
+      if (wallet.calls.length === 1) height += 1_000; // the visitor left the first prompt open
+      return signed;
+    };
+    const { steps, rpc } = await run(ctx, {
+      groups: groups(ctx, 12),
+      wallet,
+      rpc: {
+        ...claimed(ctx),
+        blockHeight: async () => height,
+        latestBlockhash: async () => ({
+          blockhash: bs58.encode(new Uint8Array(32).fill(height % 200)),
+          lastValidBlockHeight: height + 150,
+        }),
+      },
+    });
+    expect(wallet.calls.map((c) => c.length)).toEqual([10, 2]);
+    expect(rpc.sent).toHaveLength(2);
+    expect(steps.slice(0, 10).every((s) => s.status === "failed" && s.reason === "Didn't land · nothing changed")).toBe(true);
+    expect(statuses(steps.slice(10))).toEqual(["confirmed", "confirmed"]);
+  });
+
+  it("waits one more round after expiry before saying it didn't land (R-T7e)", async () => {
+    const ctx = setup();
+    let heights = 0;
+    let rounds = 0;
+    const { steps } = await run(ctx, {
+      groups: groups(ctx, 1),
+      rpc: {
+        ...claimed(ctx),
+        blockHeight: async () => (heights++ === 0 ? HEIGHT : LAST_VALID + 1),
+        // A lagging node misses the status once; the next round finds it.
+        statuses: async (sigs) =>
+          rounds++ === 0 ? sigs.map(() => null) : sigs.map(() => ({ slot: 1_001, confirmationStatus: "confirmed", err: null })),
+      },
+    });
+    expect(steps[0]).toMatchObject({ status: "confirmed", slot: 1_001 });
+  });
+
+  it("needs two status-less rounds after expiry to report \"Didn't land\" (R-T7e)", async () => {
+    const ctx = setup();
+    let heights = 0;
+    let rounds = 0;
+    const { steps } = await run(ctx, {
+      groups: groups(ctx, 1),
+      rpc: {
+        ...claimed(ctx),
+        blockHeight: async () => (heights++ === 0 ? HEIGHT : LAST_VALID + 1),
+        statuses: async (sigs) => (rounds++, sigs.map(() => null)),
+      },
+    });
+    expect(rounds).toBe(2);
+    expect(steps[0]).toMatchObject({ status: "failed", reason: "Didn't land · nothing changed" });
+  });
+
+  it("records a confirmed step as pending before reporting it (R-T7e)", async () => {
+    const ctx = setup();
+    const seen: number[][] = [];
+    await run(ctx, {
+      groups: groups(ctx, 2),
+      rpc: claimed(ctx),
+      onUpdate: (s) => seen.push([s.filter((step) => step.status === "confirmed").length, vi.mocked(recordPending).mock.calls.length]),
+    });
+    expect(seen.at(-1)).toEqual([2, 2]);
+    for (const [confirmedSteps, records] of seen) expect(records).toBeGreaterThanOrEqual(confirmedSteps);
+  });
+
+  it("records pending results even when the progress callback throws (R-T7e)", async () => {
+    const ctx = setup();
+    const { steps } = await run(ctx, {
+      groups: groups(ctx, 2),
+      rpc: claimed(ctx),
+      onUpdate: () => {
+        throw new Error("UI went away");
+      },
+    });
+    expect(statuses(steps)).toEqual(["confirmed", "confirmed"]);
+    expect(vi.mocked(recordPending)).toHaveBeenCalledTimes(2);
   });
 
   it("returns no steps for no groups", async () => {
