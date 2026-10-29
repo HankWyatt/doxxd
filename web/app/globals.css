@@ -1659,3 +1659,131 @@ tbody tr.data-row:hover {
   }
   .wallet-picker { right: auto; left: 0; }
 }
+
+/* On-site LP actions on your own wallet's LP cards */
+.lp-actions-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+.lp-actions-buttons,
+.selection-actions { gap: 6px; }
+.action-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  padding: 2px 10px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.action-pill:hover:not(:disabled) {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+}
+.action-pill:disabled { opacity: 0.45; cursor: default; }
+.action-pill[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+.action-pill.claim {
+  color: var(--violet);
+  border-color: color-mix(in srgb, var(--violet) 60%, transparent);
+}
+.action-pill.claim:hover:not(:disabled) { color: var(--violet); border-color: var(--violet); }
+.action-pill.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0b211b;
+  font-weight: 700;
+}
+.action-pill.primary:hover:not(:disabled) { color: #0b211b; border-color: var(--accent); filter: brightness(1.06); }
+/* Under the balance at every width, so the row never outgrows a phone. */
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.row-pending {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--warning);
+  font-size: 11px;
+}
+.manage-link.secondary {
+  display: block;
+  width: fit-content;
+  border-color: transparent;
+  padding: 0;
+  color: var(--faint);
+  font-size: 10px;
+}
+.manage-link.secondary:hover { color: var(--accent); border-color: transparent; }
+.select-cell { width: 18px; }
+.select-cell input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+.selection-bar,
+.claim-progress {
+  margin: 10px 18px 12px;
+  border-radius: 12px;
+  background: var(--raised);
+  padding: 10px 12px;
+  font-size: 12px;
+}
+.selection-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.selection-actions { margin-left: auto; }
+.claim-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--line);
+}
+.progress-steps { list-style: none; margin: 6px 0 0; padding: 0; }
+.progress-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.progress-mark { flex: none; width: 12px; text-align: center; color: var(--faint); }
+.progress-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 11px;
+  text-align: right;
+}
+.progress-status a { color: inherit; text-decoration: underline; }
+.progress-reason { color: var(--muted); }
+.progress-step.ok .progress-mark,
+.progress-step.ok .progress-status { color: var(--positive); }
+.progress-step.wait .progress-mark,
+.progress-step.wait .progress-status { color: var(--warning); }
+.progress-step.bad .progress-mark,
+.progress-step.bad .progress-status { color: var(--negative); }
+.progress-error { margin: 6px 0 0; color: var(--negative); }
+.claim-progress p { margin: 6px 0 0; }
+.claim-progress .inline { margin-top: 6px; }
+@media (max-width: 600px) {
+  .selection-bar,
+  .claim-progress { margin: 10px 13px 12px; }
+  .progress-step { flex-wrap: wrap; }
+  .progress-status { align-items: flex-start; margin-left: 22px; text-align: left; }
+}

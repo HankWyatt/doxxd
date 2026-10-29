@@ -172,4 +172,11 @@ describe("CPMM and AMM v4 capabilities", () => {
       vestingBps: 0,
     });
   });
+
+  it.each(["raydium-cpmm", "raydium-amm-v4"] as const)(
+    "%s withdraw is no when DMND names no pool",
+    (protocol) => {
+      expect(capabilities(fungible({ protocol, pool: null })).withdraw).toBe("no");
+    },
+  );
 });

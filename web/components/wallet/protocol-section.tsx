@@ -3,6 +3,7 @@ import { Fragment, useCallback, useLayoutEffect, useRef, useState } from "react"
 import { ChevronDown, ChevronUp, Info } from "lucide-react";
 import type {
   ProtocolResource,
+  ResourceData,
   ResourceError,
   WalletDataMode,
   Schemas,
@@ -20,9 +21,21 @@ import { chipValue, componentState } from "@/lib/portfolio/chips";
 import { kindTag, manageLink } from "@/lib/portfolio/links";
 import { compareDecimalDesc, formatAmount, formatUsd } from "@/lib/decimal";
 import { short } from "@/lib/portfolio/adapters/shared";
+import { loadAllPages } from "@/lib/actions/load-all-pages";
+import type { ActionTarget } from "@/lib/actions/types";
 import { ResourceState, LoadingRows } from "../resource-state";
 import { Amounts, PositionDetail } from "./position-detail";
 import { RecoveryNotice } from "./recovery-notice";
+import { mintLookup, positionName, type MintLookup } from "./lp-actions/amounts";
+import { ClaimProgress } from "./lp-actions/claim-progress";
+import { RowActions, RowFees } from "./lp-actions/row-actions";
+import { SelectionBar } from "./lp-actions/selection-bar";
+import {
+  isActionResource,
+  useLpActions,
+  type LpActions,
+  type LpRun,
+} from "./lp-actions/use-lp-actions";
 
 /**
  * Reports a card's transient failure with a way to retry it, or null once it
@@ -100,6 +113,8 @@ export function ProtocolSection({
   }
   // A failure outlives a collapse: it clears only when the card loads again.
   const [failed, setFailed] = useState(false);
+  // The position whose Withdraw was clicked; the withdraw dialog reads it.
+  const [, setWithdrawTarget] = useState<ActionTarget | null>(null);
   const definition = resources[resource];
   // DMND reports "0" for sources it has not finished: only a chip or a
   // confirmed-complete source has a total worth showing.
@@ -175,6 +190,7 @@ export function ProtocolSection({
             labels={labels}
             limit={limit}
             report={report}
+            onWithdraw={setWithdrawTarget}
           />
         </div>
       )}
@@ -189,6 +205,7 @@ function ProtocolBody({
   labels,
   limit,
   report,
+  onWithdraw,
 }: {
   address: string;
   resource: ProtocolResource;
@@ -196,6 +213,7 @@ function ProtocolBody({
   labels: Record<string, string>;
   limit: number;
   report: (retry: (() => void) | null) => void;
+  onWithdraw: (target: ActionTarget) => void;
 }) {
   const [cursor, setCursor] = useState<string | undefined>();
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -234,6 +252,11 @@ function ProtocolBody({
   useLayoutEffect(() => {
     if (failed !== null) report(failed ? () => refresh.current() : null);
   }, [failed, report]);
+  const refreshNow = useCallback(() => refresh.current(), []);
+  const actions = useLpActions(resource, view?.positions ?? [], {
+    address,
+    refresh: refreshNow,
+  });
   function page(next: string | undefined) {
     setCursor(next);
     setExpanded(null);
@@ -292,16 +315,81 @@ function ProtocolBody({
     expanded,
     toggle,
   };
+  // Names and decimals for amounts in the action UI, from DMND's rows.
+  const lookup = mintLookup(
+    [
+      ...view.positions.flatMap((p) => (p.action ? [p.action] : [])),
+      ...(actions.run?.targets ?? []),
+    ],
+    labels,
+  );
+  const claimable = view.positions.flatMap((p) =>
+    actions.row(p)?.claim ? [p.action!] : [],
+  );
+  const firstPage = request.result.data;
+  const claimAll = () => {
+    if (!view || !isActionResource(resource)) return;
+    // The card holds every row only on an unpaged first page.
+    if (!cursor && !view.hasMore) actions.start("claim", claimable);
+    else
+      actions.start("claim", async () =>
+        (
+          await loadAllPages(
+            address,
+            resource,
+            cursor ? null : (firstPage as ResourceData[typeof resource]),
+          )
+        ).filter(actions.canClaim),
+      );
+  };
   return (
     <>
       <RecoveryNotice state={request.recovery} retained={Boolean(request.refreshError)} retry={request.refresh} />
-      {kind === "liquidity" && view.totalPositions !== null && (
-        <p className="card-summary">{plural(view.totalPositions, "position")}</p>
+      {kind === "liquidity" && actions.active && actions.claimSupported ? (
+        <div className="card-summary lp-actions-head">
+          <span>
+            {plural(view.totalPositions ?? view.positions.length, "position") +
+              " · fees to claim on " +
+              claimable.length}
+          </span>
+          {claimable.length > 0 && (
+            <span className="inline lp-actions-buttons">
+              <button
+                type="button"
+                className="action-pill"
+                aria-pressed={actions.selecting}
+                onClick={() => actions.setSelecting(!actions.selecting)}
+              >
+                Select
+              </button>
+              <button
+                type="button"
+                className="action-pill primary"
+                disabled={actions.busy}
+                onClick={claimAll}
+              >
+                {!cursor && !view.hasMore
+                  ? `Claim all fees (${claimable.length})`
+                  : "Claim all fees"}
+              </button>
+            </span>
+          )}
+        </div>
+      ) : (
+        kind === "liquidity" &&
+        view.totalPositions !== null && (
+          <p className="card-summary">{plural(view.totalPositions, "position")}</p>
+        )
       )}
       {view.positions.length > 0 ? (
         <div className="table-scroll">
           {kind === "liquidity" ? (
-            <LiquidityTable {...table} />
+            <LiquidityTable
+              {...table}
+              actions={actions.tracksPending ? actions : null}
+              lookup={lookup}
+              onWithdraw={onWithdraw}
+            />
           ) : kind === "lending" ? (
             <LegTable
               {...table}
@@ -350,6 +438,20 @@ function ProtocolBody({
         >
           Show all {sorted.length}
         </button>
+      )}
+      {actions.run ? (
+        <RunProgress run={actions.run} actions={actions} lookup={lookup} />
+      ) : (
+        actions.active &&
+        actions.selecting && (
+          <SelectionBar
+            selected={actions.selected}
+            lookup={lookup}
+            busy={actions.busy}
+            onClear={actions.clear}
+            onClaim={() => actions.start("claim", actions.selected)}
+          />
+        )
       )}
       <details className="coverage-note">
         <summary>
@@ -417,6 +519,46 @@ function ProtocolBody({
         </div>
       )}
     </>
+  );
+}
+
+function RunProgress({
+  run,
+  actions,
+  lookup,
+}: {
+  run: LpRun;
+  actions: LpActions;
+  lookup: MintLookup;
+}) {
+  const names = Object.fromEntries(
+    run.targets.map((t) => [t.id, positionName(t, lookup)]),
+  );
+  return (
+    <ClaimProgress
+      title={
+        run.count === null
+          ? "Claiming fees from all positions"
+          : `Claiming fees from ${plural(run.count, "position")}`
+      }
+      walletName={run.walletName}
+      steps={run.steps}
+      skipped={run.skipped}
+      names={names}
+      lookup={lookup}
+      waiting={
+        run.phase === "loading"
+          ? "Loading every position…"
+          : run.phase === "building"
+            ? "Checking live pool data…"
+            : null
+      }
+      error={run.error}
+      done={run.phase === "done"}
+      stopping={run.stopping}
+      onStop={actions.stop}
+      onDone={actions.dismiss}
+    />
   );
 }
 
@@ -491,11 +633,31 @@ function Claimable({
   );
 }
 
-function LiquidityTable({ rows, resource, labels, expanded, toggle }: TableProps) {
+function LiquidityTable({
+  rows,
+  resource,
+  labels,
+  expanded,
+  toggle,
+  actions = null,
+  lookup,
+  onWithdraw,
+}: TableProps & {
+  /** On-site actions, when this card offers them (see useLpActions). */
+  actions?: LpActions | null;
+  lookup?: MintLookup;
+  onWithdraw?: (target: ActionTarget) => void;
+}) {
+  const selecting = Boolean(actions?.active && actions.selecting);
   return (
     <table>
       <thead>
         <tr>
+          {selecting && (
+            <th>
+              <span className="sr-only">Select</span>
+            </th>
+          )}
           <th>Pool</th>
           <th>Balance</th>
           <th className="hide-mobile">Claimable fees</th>
@@ -506,9 +668,23 @@ function LiquidityTable({ rows, resource, labels, expanded, toggle }: TableProps
         {rows.map((row) => {
           const legs = row.assets.map((a) => legName(a, labels));
           const manage = manageLink(resource, row.links);
+          const state = actions?.row(row) ?? null;
           return (
             <Fragment key={row.id}>
               <tr className="data-row">
+                {selecting && (
+                  <td className="select-cell">
+                    {state?.claim && (
+                      <input
+                        type="checkbox"
+                        aria-label={"Select " + (legs.length ? legs.join(" + ") : row.label)}
+                        checked={actions!.isSelected(state.target.id)}
+                        disabled={actions!.busy}
+                        onChange={() => actions!.toggle(state.target)}
+                      />
+                    )}
+                  </td>
+                )}
                 <td>
                   <div className="pool-cell">
                     <span className="pair-icons" aria-hidden="true">
@@ -536,9 +712,19 @@ function LiquidityTable({ rows, resource, labels, expanded, toggle }: TableProps
                 </td>
                 <td>
                   <Amounts values={row.assets} labels={labels} />
+                  {state && actions && (
+                    <RowActions
+                      state={state}
+                      interactive={actions.active}
+                      busy={actions.busy}
+                      onClaim={(target) => actions.start("claim", [target])}
+                      onWithdraw={(target) => onWithdraw?.(target)}
+                      onRefresh={actions.refresh}
+                    />
+                  )}
                   {manage && (
                     <a
-                      className="manage-link"
+                      className={"manage-link" + (actions?.active ? " secondary" : "")}
                       href={manage.href}
                       target="_blank"
                       rel="noopener noreferrer"
@@ -549,11 +735,20 @@ function LiquidityTable({ rows, resource, labels, expanded, toggle }: TableProps
                 </td>
                 <td className="hide-mobile">
                   {/* Fees only: rewards and raw counters stay under details. */}
-                  <Claimable values={row.fees ?? []} labels={labels} />
+                  {/* Action wording on your own wallet; "—" wherever a row is pending. */}
+                  {state && lookup && (actions?.active || state.pending) ? (
+                    <RowFees state={state} lookup={lookup}>
+                      <Claimable values={row.fees ?? []} labels={labels} />
+                    </RowFees>
+                  ) : (
+                    <Claimable values={row.fees ?? []} labels={labels} />
+                  )}
                 </td>
                 <td className="right numeric">{formatUsd(row.valueUsd)}</td>
               </tr>
-              {expanded === row.id && <DetailRow row={row} labels={labels} span={4} />}
+              {expanded === row.id && (
+                <DetailRow row={row} labels={labels} span={selecting ? 5 : 4} />
+              )}
             </Fragment>
           );
         })}

@@ -54,8 +54,11 @@ export function capabilities(t: ActionTarget): Capabilities {
     case "raydium-amm-v4":
       return {
         claim: "no",
+        // Without DMND's pool the builder cannot match the LP mint to a pool.
         withdraw:
-          big(t.lpAtoms) > ZERO && t.withdrawalAvailable !== false ? "yes" : "no",
+          t.pool !== null && big(t.lpAtoms) > ZERO && t.withdrawalAvailable !== false
+            ? "yes"
+            : "no",
         withdrawableBps: 10000,
         vestingBps: 0,
       };
