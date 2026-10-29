@@ -124,6 +124,7 @@ describe("quoteWithdraw / buildWithdrawGroups (Raydium CPMM)", () => {
     expect(quote.depositRefundLamports).toBeNull();
     expect(quote.withdrawableBps).toBe(10_000);
     expect(quote.vestingBps).toBe(0);
+    expect(quote.lockedBps).toBe(0);
     // SYNB's ATA exists and the wSOL ATA is closed again: no rent kept.
     expect(quote.rentLamports).toBe("0");
 

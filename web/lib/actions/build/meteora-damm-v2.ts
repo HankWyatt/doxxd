@@ -621,6 +621,9 @@ async function planWithdraw(
       rentLamports: String(rents.reduce((a, b) => a + b, 0)),
       withdrawableBps: toBps(withdrawable, total),
       vestingBps: toBps(stillVesting, total),
+      // Floored: a sliver of permanent lock may read 0, but 0 never stands
+      // for floored rounding of the other two shares (ruling R-F1).
+      lockedBps: toBps(position.permanentLockedLiquidity, total),
     },
     live,
     vestings,

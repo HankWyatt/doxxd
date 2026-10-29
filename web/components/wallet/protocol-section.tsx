@@ -39,6 +39,7 @@ import { RecoveryNotice } from "./recovery-notice";
 import { mintLookup, positionName, type MintLookup } from "./lp-actions/amounts";
 import { ClaimProgress } from "./lp-actions/claim-progress";
 import { RowActions, RowFees } from "./lp-actions/row-actions";
+import { WITHDRAW_FOOTNOTE } from "./lp-actions/run-store";
 import { SelectionBar } from "./lp-actions/selection-bar";
 import {
   isActionResource,
@@ -642,11 +643,7 @@ function RunProgress({
       stopping={run.stopping}
       autoFocus={actions.focusRun}
       nothingLine={run.kind === "withdraw" ? "Nothing was withdrawn" : undefined}
-      footnote={
-        run.kind === "withdraw"
-          ? "If you stop or reject, nothing is lost: your position stays as it is."
-          : undefined
-      }
+      footnote={run.kind === "withdraw" ? WITHDRAW_FOOTNOTE : undefined}
       onStop={actions.stop}
       onDone={onDone}
     />

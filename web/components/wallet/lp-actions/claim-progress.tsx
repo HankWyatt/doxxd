@@ -130,7 +130,11 @@ export function ClaimProgress({
           </li>
         ))}
       </ol>
-      {error && <p className="progress-error">{error}</p>}
+      {error && (
+        <p className="progress-error" role="alert">
+          {error}
+        </p>
+      )}
       {nothing && <p>{nothingLine}</p>}
       <p className="faint small">{footnote}</p>
       <div className="inline">

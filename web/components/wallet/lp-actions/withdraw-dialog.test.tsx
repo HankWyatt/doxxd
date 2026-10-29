@@ -13,7 +13,7 @@ import { HeaderWallet } from "@/components/wallet-connect/header-wallet";
 import { WalletConnectProvider } from "@/components/wallet-connect/provider";
 import { DAMM, dammV2Page, dammV2Position, syntheticAddress } from "@/tests/fixtures/synthetic-meteora-damm-v2";
 import { ProtocolSection } from "../protocol-section";
-import { resetLpRunStore } from "./run-store";
+import { resetLpRunStore, startWithdrawRun } from "./run-store";
 import { WithdrawDialog } from "./withdraw-dialog";
 
 // The lazy action chunk (web3.js and the SDKs) is replaced wholesale.
@@ -79,6 +79,7 @@ function quote(bps: number, over: Partial<WithdrawQuote> = {}): WithdrawQuote {
     rentLamports: "0",
     withdrawableBps: 10_000,
     vestingBps: 0,
+    lockedBps: 0,
     ...over,
   };
 }
@@ -277,9 +278,22 @@ describe("withdraw dialog quote", () => {
     ).toBeInTheDocument();
   });
 
+  it("never calls floored shares locked: 3333 + 6666 with lockedBps 0 is copy (a)", async () => {
+    build.quoteWithdraw.mockImplementation(async (_r, _o, _t, bps: number) =>
+      quote(bps, { vestingBps: 6_666, withdrawableBps: 3_333, lockedBps: 0 }),
+    );
+    open();
+    expect(
+      await screen.findByText(
+        "66.66% is still vesting. You can withdraw up to 33.33% now; the rest unlocks over time.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/locked for good/)).toBeNull();
+  });
+
   it("says how much is vesting and how much is locked for good", async () => {
     build.quoteWithdraw.mockImplementation(async (_r, _o, _t, bps: number) =>
-      quote(bps, { vestingBps: 2_000, withdrawableBps: 5_000 }),
+      quote(bps, { vestingBps: 2_000, withdrawableBps: 5_000, lockedBps: 3_000 }),
     );
     open();
     expect(
@@ -290,7 +304,7 @@ describe("withdraw dialog quote", () => {
 
   it("says how much is locked for good when nothing is vesting", async () => {
     build.quoteWithdraw.mockImplementation(async (_r, _o, _t, bps: number) =>
-      quote(bps, { vestingBps: 0, withdrawableBps: 7_000 }),
+      quote(bps, { vestingBps: 0, withdrawableBps: 7_000, lockedBps: 3_000 }),
     );
     open();
     expect(
@@ -497,11 +511,41 @@ describe("Review in wallet", () => {
     open();
     await ready();
     const button = review();
-    fireEvent.click(button);
-    fireEvent.click(button);
-    await waitFor(() => expect(build.runAction).toHaveBeenCalled());
+    // Both clicks land before React re-renders, so the second one reaches the
+    // still-mounted, still-enabled button.
+    act(() => {
+      fireEvent.click(button);
+      expect(button.isConnected).toBe(true);
+      fireEvent.click(button);
+    });
+    await waitFor(() => expect(build.buildWithdrawGroups).toHaveBeenCalled());
+    await act(async () => {});
     expect(build.buildWithdrawGroups).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(build.runAction).toHaveBeenCalled());
     expect(build.runAction).toHaveBeenCalledTimes(1);
+    await run.finish([step({ status: "stopped" })]);
+  });
+
+  it("the store starts one withdraw run at a time", async () => {
+    builds();
+    const run = heldRun();
+    const start = () =>
+      startWithdrawRun({
+        wallet: wallet(),
+        resource: "meteora-damm-v2",
+        target: target(),
+        bps: 10_000,
+        slippageBps: 100,
+        closes: true,
+        currentAddress: () => OWNER,
+        onChanged: () => true,
+      });
+    const first = start();
+    const second = start();
+    expect(first).not.toBeNull();
+    expect(second).toBeNull();
+    await waitFor(() => expect(build.runAction).toHaveBeenCalledTimes(1));
+    expect(build.buildWithdrawGroups).toHaveBeenCalledTimes(1);
     await run.finish([step({ status: "stopped" })]);
   });
 

@@ -13,8 +13,10 @@ export type TokenAmount = { mint: string; symbol: string | null; decimals: numbe
  * - `closes`: the position closes and its deposit comes back;
  * - `depositRefundLamports`: lamports returned by closing, or null;
  * - `rentLamports`: rent for token accounts the transaction creates and keeps;
- * - `withdrawableBps` / `vestingBps`: live shares of the position's total
- *   liquidity that can be withdrawn now / are still vesting.
+ * - `withdrawableBps` / `vestingBps` / `lockedBps`: live shares of the
+ *   position's total liquidity that can be withdrawn now / are still vesting /
+ *   are permanently locked, each floored on its own (so they need not sum to
+ *   10,000); `lockedBps` is 0 exactly when nothing is permanently locked.
  */
 export type WithdrawQuote = {
   receive: TokenAmount[];
@@ -25,6 +27,7 @@ export type WithdrawQuote = {
   rentLamports: string;
   withdrawableBps: number;
   vestingBps: number;
+  lockedBps: number;
 };
 
 /** Why a position gets no claim transaction. */

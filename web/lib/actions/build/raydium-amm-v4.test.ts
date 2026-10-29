@@ -108,6 +108,7 @@ describe("quoteWithdraw / buildWithdrawGroups (Raydium AMM v4)", () => {
     expect(quote.depositRefundLamports).toBeNull();
     expect(quote.withdrawableBps).toBe(10_000);
     expect(quote.vestingBps).toBe(0);
+    expect(quote.lockedBps).toBe(0);
     // SYNC's ATA is created and kept; wSOL's is closed again.
     expect(quote.rentLamports).toBe(String(rent(165)));
 

@@ -552,6 +552,7 @@ async function planWithdraw(
       rentLamports: String(rents.reduce((a, b) => a + b, 0)),
       withdrawableBps: hasLiquidity ? BPS : 0,
       vestingBps: 0,
+      lockedBps: 0,
     },
     live,
     liquidity,

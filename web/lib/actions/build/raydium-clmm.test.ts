@@ -475,6 +475,7 @@ describe("quoteWithdraw / buildWithdrawGroups (Raydium CLMM)", () => {
     const quote = await quoteWithdraw(rpc, owner, t, 2_500, 100);
     expect(quote.withdrawableBps).toBe(10_000);
     expect(quote.vestingBps).toBe(0);
+    expect(quote.lockedBps).toBe(0);
     expect(quote.closes).toBe(false);
     expect(quote.depositRefundLamports).toBeNull();
     expect(quote.minimums.map((m) => [m.mint, m.atoms])).toEqual([

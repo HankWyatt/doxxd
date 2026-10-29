@@ -154,6 +154,7 @@ export async function planWithdraw(
       rentLamports: String(rents.reduce((a, b) => a + b, 0)),
       withdrawableBps: BPS,
       vestingBps: 0,
+      lockedBps: 0,
     },
     minimums,
     existing,

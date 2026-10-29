@@ -385,6 +385,7 @@ describe("quoteWithdraw / buildWithdrawGroups (Meteora DAMM v2)", () => {
     const quote = await quoteWithdraw(rpc, owner, t, 5_000, 100);
     expect(quote.withdrawableBps).toBe(7_500);
     expect(quote.vestingBps).toBe(2_500);
+    expect(quote.lockedBps).toBe(0);
     expect(quote.closes).toBe(false);
     expect(quote.depositRefundLamports).toBeNull();
 
@@ -456,6 +457,7 @@ describe("quoteWithdraw / buildWithdrawGroups (Meteora DAMM v2)", () => {
     expect(quote.closes).toBe(false);
     expect(quote.withdrawableBps).toBe(5_000);
     expect(quote.vestingBps).toBe(0);
+    expect(quote.lockedBps).toBe(5_000);
 
     const { groups, expectation } = await buildWithdrawGroups(rpc, owner, t, 10_000, 100);
     const ixs = groups[0].instructions;
@@ -632,6 +634,21 @@ describe("quoteWithdraw / buildWithdrawGroups (Meteora DAMM v2)", () => {
     const { groups, expectation } = await buildWithdrawGroups(rpc, owner, t, 10_000, 100);
     expect(cpAmmNames(groups[0].instructions)).toContain("close_position");
     expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
+  });
+
+  it("quotes lockedBps 0 with nothing permanently locked, even when the shares are not whole bps", async () => {
+    const chain = chainFixture();
+    const owner = chain.owner.publicKey.toBase58();
+    const t = target(chain, "innerBeforeCliff");
+    // A third unlocked, two thirds still vesting (before the cliff), nothing
+    // locked: 3333 + 6666 = 9999 bps, yet lockedBps must be 0.
+    const third = D.halfLiquidity.divn(3);
+    patchCpAmm(chain, t.position, "Position", (state) => {
+      state.unlocked_liquidity = third;
+      state.vested_liquidity = third.muln(2);
+    });
+    const live = await quoteWithdraw(mockActionRpc(chain), owner, t, 10_000, 100);
+    expect([live.withdrawableBps, live.vestingBps, live.lockedBps]).toEqual([3_333, 6_666, 0]);
   });
 
   it("releases nothing from inner vesting before its cliff", async () => {

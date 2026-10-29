@@ -20,6 +20,8 @@ export const RUN_ERRORS = {
 } as const;
 
 export const WITHDRAW_POOL_CHANGED = "The pool changed · review the new amounts";
+/** The progress panel's footnote for a withdraw run. */
+export const WITHDRAW_FOOTNOTE = "If you stop or reject, nothing is lost: your position stays as it is.";
 
 // The builders' typed refusals, shown as they are (lib/actions/build/quote.ts,
 // fungible.ts and the per-protocol builders).

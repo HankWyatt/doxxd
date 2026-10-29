@@ -23,6 +23,7 @@ import {
   stopRun,
   useLpRunStore,
   withdrawErrorText,
+  WITHDRAW_FOOTNOTE,
   WITHDRAW_POOL_CHANGED,
 } from "./run-store";
 
@@ -45,7 +46,6 @@ const SHARE_ERROR = "Enter a whole percent from 1 to 100";
 const SLIPPAGE_ERROR = "Enter a price move above 0% and up to 5%";
 const NOTHING_YET = "Nothing to withdraw yet";
 const TOO_SMALL = "Amount too small to withdraw";
-const FOOTNOTE = "If you stop or reject, nothing is lost: your position stays as it is.";
 
 type Choice = { preset: number } | { custom: string };
 
@@ -75,7 +75,8 @@ const percent = (bps: number) => String(Number((bps / 100).toFixed(2)));
  */
 function lockNote(quote: WithdrawQuote): string | null {
   const y = percent(quote.withdrawableBps);
-  const lockedBps = Math.max(0, 10_000 - quote.withdrawableBps - quote.vestingBps);
+  // From the quote, never by subtraction: the floored shares need not sum to 10,000.
+  const lockedBps = quote.lockedBps;
   const x = percent(quote.vestingBps);
   const z = percent(lockedBps);
   if (quote.vestingBps > 0 && lockedBps === 0)
@@ -310,7 +311,7 @@ export function WithdrawDialog({
               stopping={run.stopping}
               autoFocus
               nothingLine="Nothing was withdrawn"
-              footnote={FOOTNOTE}
+              footnote={WITHDRAW_FOOTNOTE}
               onStop={stopRun}
               onDone={() => {
                 dismissRun(run.id);
