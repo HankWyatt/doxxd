@@ -5,6 +5,7 @@ export const SOLANA_MAINNET = "solana:mainnet";
 export const SIGN_TRANSACTION = "solana:signTransaction";
 export const STANDARD_CONNECT = "standard:connect";
 export const STANDARD_DISCONNECT = "standard:disconnect";
+export const STANDARD_EVENTS = "standard:events";
 export const WALLET_STORAGE_KEY = "doxxd.wallet.v1";
 
 export type ConnectedWallet = {

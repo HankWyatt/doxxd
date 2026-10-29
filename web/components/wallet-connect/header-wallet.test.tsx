@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ActionsAvailabilityProvider } from "@/lib/actions/availability";
 import { createFakeWallet } from "./fake-wallet.test-util";
 import { HeaderWallet } from "./header-wallet";
-import { useConnectedWallet, WalletConnectProvider } from "./provider";
+import { useConnectedWallet, useCurrentAddress, WalletConnectProvider } from "./provider";
 
 const VIEWED = bs58.encode(new Uint8Array(32).fill(7));
 const OTHER = bs58.encode(new Uint8Array(32).fill(8));
@@ -116,6 +116,27 @@ describe("HeaderWallet", () => {
     expect(fake.connectCalls.every((c) => c?.silent === true)).toBe(true);
   });
 
+  it("does nothing, not even a silent connect, when actions are disabled", async () => {
+    const fake = track(
+      createFakeWallet({
+        name: "Phantom",
+        address: VIEWED,
+        authorized: true,
+        accountsOnLoad: false,
+      }),
+    );
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ name: "Phantom" }));
+    const { result } = renderHook(() => useConnectedWallet(), {
+      wrapper: ({ children }) => <Shell enabled={false}>{children}</Shell>,
+    });
+    // Give any (wrongly) mounted wallet logic time to run its effects.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(fake.connectCalls).toEqual([]);
+    expect(result.current).toBeNull();
+  });
+
   it("works when localStorage throws", async () => {
     track(createFakeWallet({ name: "Phantom", address: VIEWED }));
     const original = Storage.prototype.getItem;
@@ -157,6 +178,26 @@ describe("useConnectedWallet", () => {
       wrapper: ({ children }) => <Shell enabled={false}>{children}</Shell>,
     });
     expect(result.current).toBeNull();
+  });
+
+  it("reports the wallet's current account immediately, before React re-renders", async () => {
+    const fake = track(
+      createFakeWallet({ name: "Phantom", address: VIEWED, authorized: true }),
+    );
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ name: "Phantom" }));
+    const { result } = renderHook(
+      () => ({ wallet: useConnectedWallet(), current: useCurrentAddress() }),
+      { wrapper: Shell },
+    );
+    await waitFor(() => expect(result.current.wallet?.address).toBe(VIEWED));
+    const current = result.current.current;
+    expect(current()).toBe(VIEWED);
+    // No act(), no awaiting effects: the getter must already see the new account.
+    fake.switchAccount(OTHER);
+    expect(current()).toBe(OTHER);
+    fake.switchAccount(null);
+    expect(current()).toBeNull();
+    await waitFor(() => expect(result.current.wallet).toBeNull());
   });
 
   it("signs all transactions in one wallet call", async () => {

@@ -11,6 +11,8 @@ export type FakeWalletOptions = {
   features?: string[];
   // Whether a `silent` connect already returns the account.
   authorized?: boolean;
+  // With `authorized`, whether accounts are already listed before any connect (default true).
+  accountsOnLoad?: boolean;
   signs?: boolean;
 };
 
@@ -32,7 +34,7 @@ export function createFakeWallet(options: FakeWalletOptions = {}) {
     accounts = address ? [accountFor(address)] : [];
     emit();
   };
-  if (authorized && options.address) accounts = [accountFor(options.address)];
+  if (authorized && options.address && options.accountsOnLoad !== false) accounts = [accountFor(options.address)];
   const features: Record<string, unknown> = {
     "standard:connect": {
       version: "1.0.0",

@@ -23,6 +23,7 @@ import {
   SOLANA_MAINNET,
   STANDARD_CONNECT,
   STANDARD_DISCONNECT,
+  STANDARD_EVENTS,
   forgetWallet,
   isSolanaSigner,
   readRememberedWallet,
@@ -105,7 +106,12 @@ export function WalletConnectProvider({ children }: { children: ReactNode }) {
     <WalletConnectContext.Provider value={value}>
       {children}
       {ready && (
-        <WalletRuntime chosen={chosen} onConnected={setConnected} onForget={forget} />
+        <WalletRuntime
+          chosen={chosen}
+          liveAddress={addressRef}
+          onConnected={setConnected}
+          onForget={forget}
+        />
       )}
     </WalletConnectContext.Provider>
   );
@@ -116,12 +122,21 @@ type ConnectFeature = {
 };
 type DisconnectFeature = { disconnect(): Promise<void> };
 
+type EventsFeature = {
+  on(
+    event: "change",
+    listener: (properties: { accounts?: ReadonlyArray<{ address: string }> }) => void,
+  ): () => void;
+};
+
 function WalletRuntime({
   chosen,
+  liveAddress,
   onConnected,
   onForget,
 }: {
   chosen: string | null;
+  liveAddress: { current: string | null };
   onConnected(wallet: ConnectedWallet | null): void;
   onForget(): void;
 }) {
@@ -129,6 +144,16 @@ function WalletRuntime({
   const uiWallet = chosen
     ? wallets.find((w) => w.name === chosen && isSolanaSigner(w))
     : undefined;
+  // The wallet's own `change` event updates the address synchronously, so a
+  // caller right after a wallet prompt never sees a stale account while React
+  // is still catching up (see useCurrentAddress).
+  useEffect(() => {
+    if (!uiWallet || !uiWallet.features.includes(STANDARD_EVENTS)) return;
+    const events = getWalletFeature(uiWallet, STANDARD_EVENTS) as EventsFeature;
+    return events.on("change", ({ accounts }) => {
+      if (accounts) liveAddress.current = accounts[0]?.address ?? null;
+    });
+  }, [uiWallet?.name, liveAddress]); // eslint-disable-line react-hooks/exhaustive-deps
   const silentTried = useRef(new Set<string>());
   useEffect(() => {
     if (!uiWallet || uiWallet.accounts.length > 0) return;
