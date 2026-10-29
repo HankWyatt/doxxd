@@ -27,10 +27,12 @@ if (readExecutionProfile() === "managed-linux") {
 }
 
 // Invoke npm's JavaScript entrypoint, avoiding platform-specific shell shims.
+// --ignore-scripts, as CONTRIBUTING.md asks: no dependency needs an install
+// script, so none runs.
 const installed = await runNpmInstall([
   process.execPath,
     process.env.npm_execpath, "ci", "--prefix", projectRoot, "--workspaces=false",
-    "--include=dev", "--include=optional", "--prefer-offline", "--no-audit", "--no-fund",
+    "--include=dev", "--include=optional", "--ignore-scripts", "--prefer-offline", "--no-audit", "--no-fund",
 ]);
 if (installed.signal) process.kill(process.pid, installed.signal);
 if (installed.code !== 0 || installed.signal) process.exit(installed.code || 1);

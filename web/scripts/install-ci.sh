@@ -162,7 +162,8 @@ echo "[sites] running exactly one bounded npm ci"
 export NPM_CONFIG_MAXSOCKETS=1
 export NPM_CONFIG_FETCH_RETRIES=0
 export NPM_CONFIG_FETCH_TIMEOUT=30000
-npm_ci_args=(ci --prefix "${SITES_PROJECT_ROOT}" --workspaces=false --include=dev --include=optional --cache "${expected_cache}")
+# --ignore-scripts, as CONTRIBUTING.md asks: no dependency needs an install script.
+npm_ci_args=(ci --prefix "${SITES_PROJECT_ROOT}" --workspaces=false --include=dev --include=optional --ignore-scripts --cache "${expected_cache}")
 if [[ "${use_seeded_cache}" == "1" ]]; then
   npm_ci_args+=(--prefer-offline)
 fi
