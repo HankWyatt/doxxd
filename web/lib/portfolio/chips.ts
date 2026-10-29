@@ -24,6 +24,15 @@ const sign = (value: string | null | undefined): -1 | 0 | 1 =>
     ? 0
     : (-compareDecimalDesc(value, "0") as -1 | 0 | 1);
 
+/** The value a chip or card shows: an unpriced source with no net value says nothing, so it is unknown. */
+export function chipValue(
+  c: Pick<Component, "known_net_value_usd" | "unpriced_count">,
+): string | null {
+  return (c.unpriced_count ?? 0) > 0 && sign(c.known_net_value_usd) === 0
+    ? null
+    : (c.known_net_value_usd ?? null);
+}
+
 function chipFor(c: Component): Chip {
   const resource = (Object.keys(resources) as (keyof typeof resources)[]).find(
     (r) => resources[r].componentId === c.id,
@@ -33,11 +42,7 @@ function chipFor(c: Component): Chip {
     resource: resource as Chip["resource"],
     label: resource ? resources[resource].label : c.id.replaceAll("_", " "),
     initials: resource ? resources[resource].label.slice(0, 2) : "·",
-    // An unpriced source with no net value says nothing: show it as unknown.
-    valueUsd:
-      (c.unpriced_count ?? 0) > 0 && sign(c.known_net_value_usd) === 0
-        ? null
-        : (c.known_net_value_usd ?? null),
+    valueUsd: chipValue(c),
     href:
       resource === "overview"
         ? "#holdings"

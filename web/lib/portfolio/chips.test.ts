@@ -166,3 +166,12 @@ it("classifies each component the same way the chip counts do", () => {
   expect(componentState(component("marginfi", { coverage_complete: false }))).toBe("unavailable");
   expect(componentState(component("tokens_native_sol", { known_net_value_usd: null }))).toBeNull();
 });
+
+it("chipValue hides a zero net when positions are unpriced", async () => {
+  const { chipValue } = await import("./chips");
+  const base = { known_net_value_usd: "0", unpriced_count: 2 } as Parameters<typeof chipValue>[0];
+  expect(chipValue(base)).toBeNull();
+  expect(chipValue({ ...base, unpriced_count: 0 })).toBe("0");
+  expect(chipValue({ ...base, known_net_value_usd: "12.5" })).toBe("12.5");
+  expect(chipValue({ ...base, known_net_value_usd: null })).toBeNull();
+});

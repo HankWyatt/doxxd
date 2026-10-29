@@ -288,6 +288,19 @@ it("an incomplete, unchecked card shows an unknown total, never $0.00", () => {
   expect(value).not.toHaveTextContent("$");
 });
 
+it("a chip card with unpriced positions and a zero net shows —, like its chip", () => {
+  serve("kamino", fixture("kamino"));
+  const unpriced: Schemas["WalletPortfolioComponent"] = {
+    ...component("kamino_lend", "0"),
+    known_asset_value_usd: "0",
+    unpriced_count: 3,
+  };
+  const { container } = card("kamino", { component: unpriced, defaultOpen: false });
+  const value = container.querySelector(".protocol-value")!;
+  expect(value).toHaveTextContent("—");
+  expect(value).not.toHaveTextContent("$");
+});
+
 it("a confirmed complete card with nothing found keeps its checked $0.00", () => {
   serve("kamino", fixture("kamino"));
   const { container } = card("kamino", {

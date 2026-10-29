@@ -16,7 +16,7 @@ import {
   type ProtocolPayload,
   type ProtocolView,
 } from "@/lib/portfolio/model";
-import { componentState } from "@/lib/portfolio/chips";
+import { chipValue, componentState } from "@/lib/portfolio/chips";
 import { kindTag, manageLink } from "@/lib/portfolio/links";
 import { compareDecimalDesc, formatAmount, formatUsd } from "@/lib/decimal";
 import { short } from "@/lib/portfolio/adapters/shared";
@@ -162,7 +162,7 @@ export function ProtocolSection({
         )}
         <span className="protocol-value">
           {/* A failed load, or a source not yet checked, never shows a total. */}
-          {failed || !totalKnown ? "—" : formatUsd(component?.known_net_value_usd)}
+          {failed || !totalKnown || !component ? "—" : formatUsd(chipValue(component))}
         </span>
         {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
       </button>
