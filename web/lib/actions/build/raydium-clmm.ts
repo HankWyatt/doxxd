@@ -8,7 +8,8 @@
 // Instructions come from the SDK's low-level ClmmInstrument builders, which
 // take the NFT account as given (the high-level ones assume the wallet's ATA
 // of the NFT, which DMND's NFT account need not be). One group per position:
-//   idempotent ATA creates (token A, token B, every reward mint),
+//   idempotent ATA creates (token A, token B and every reward mint whose
+//   ATA does not exist yet),
 //   decrease_liquidity_v2, [close_position], then the wSOL unwrap (Token
 //   CloseAccount of the wallet's wSOL ATA, to the wallet).
 // A claim is decrease_liquidity_v2(liquidity 0, minimums 0): the program
@@ -16,7 +17,7 @@
 //
 // RPC methods used (all allowed by lib/rpc/policy.ts):
 // - getMultipleAccounts: pools, positions, NFT accounts and mints, then tick
-//   arrays and token mints, then the wallet's ATAs (withdraw quotes only);
+//   arrays and token mints, then the wallet's ATAs of those mints;
 // - getEpochInfo: the epoch that picks a Token-2022 transfer fee (withdraws);
 // - getMinimumBalanceForRentExemption: rent of ATAs a withdraw creates.
 // The SDK helpers used make no RPC or HTTP calls: ClmmInstrument's
@@ -53,7 +54,7 @@ import {
 } from "@solana/spl-token";
 import { PublicKey, type AccountInfo, type TransactionInstruction } from "@solana/web3.js";
 import BN from "bn.js";
-import type { InstructionGroup } from "../pack";
+import { GroupTooLargeError, partitionGroups, type InstructionGroup } from "../pack";
 import type { ActionRpc } from "../rpc";
 import { ACTION_PROGRAM_IDS, type ClmmTarget } from "../types";
 import type { Expectation } from "../verify";
@@ -303,14 +304,43 @@ function paidMints(live: Live): LiveMint[] {
 const ataOf = (wallet: PublicKey, mint: LiveMint) =>
   getAssociatedTokenAddressSync(mint.address, wallet, false, mint.program);
 
+/** The wallet's ATA addresses (of `lives`' paid mints) that already hold an initialized token account. */
+async function existingAtas(rpc: ActionRpc, wallet: PublicKey, lives: Live[]): Promise<Set<string>> {
+  const mints = new Map<string, LiveMint>();
+  for (const mint of lives.flatMap(paidMints)) mints.set(ataOf(wallet, mint).toBase58(), mint);
+  const accounts = await readAccounts(rpc, [...mints.keys()]);
+  const out = new Set<string>();
+  for (const [ata, mint] of mints) {
+    const info = accounts.get(ata);
+    // Lamports sent to an ATA address do not make it a token account: only
+    // an account the token program owns and has initialized counts.
+    if (info && info.owner.equals(mint.program) && attempt(() => unpackAccount(new PublicKey(ata), info, mint.program)))
+      out.add(ata);
+  }
+  return out;
+}
+
+/** True when `group` fits one transaction, sized exactly as packGroups sizes it. */
+function fitsAlone(wallet: PublicKey, group: InstructionGroup): boolean {
+  try {
+    partitionGroups([group], wallet);
+    return true;
+  } catch (error) {
+    if (error instanceof GroupTooLargeError) return false;
+    throw error;
+  }
+}
+
 /**
- * One position's group: idempotent ATA creates for every paid mint, the
- * decrease (liquidity 0 and minimums 0 collect fees and rewards), the close
- * when asked, then the wSOL unwrap.
+ * One position's group: idempotent ATA creates for the paid mints whose ATA
+ * is not in `existing` (ruling R-T9a: creates for existing ATAs cost bytes
+ * the largest groups do not have), the decrease (liquidity 0 and minimums 0
+ * collect fees and rewards), the close when asked, then the wSOL unwrap.
  */
 function positionInstructions(
   wallet: PublicKey,
   live: Live,
+  existing: Set<string>,
   liquidity: BN,
   minimums: [BN, BN],
   close: boolean,
@@ -320,9 +350,11 @@ function positionInstructions(
   const nftAccount = new PublicKey(target.positionNftAccount);
   const personalPosition = new PublicKey(target.position);
   const mints = paidMints(live);
-  const creates = mints.map((mint) =>
-    createAssociatedTokenAccountIdempotentInstruction(wallet, ataOf(wallet, mint), wallet, mint.address, mint.program),
-  );
+  const creates = mints
+    .filter((mint) => !existing.has(ataOf(wallet, mint).toBase58()))
+    .map((mint) =>
+      createAssociatedTokenAccountIdempotentInstruction(wallet, ataOf(wallet, mint), wallet, mint.address, mint.program),
+    );
   const decrease = ClmmInstrument.decreaseLiquidityV2Instruction(
     CLMM,
     wallet,
@@ -399,6 +431,11 @@ export async function buildClmmClaimGroups(
   const targets = requested.filter((t) => !seen.has(t.id) && seen.add(t.id));
   const wallet = new PublicKey(owner);
   const loaded = await loadPositions(rpc, wallet, targets);
+  const existing = await existingAtas(
+    rpc,
+    wallet,
+    loaded.flatMap((r) => (r.ok ? [r.live] : [])),
+  );
 
   const groups: InstructionGroup[] = [];
   const skipped: ClaimBuild["skipped"] = [];
@@ -412,7 +449,7 @@ export async function buildClmmClaimGroups(
     }
     groups.push({
       positionIds: [target.id],
-      instructions: positionInstructions(wallet, result.live, zero, [zero, zero], false),
+      instructions: positionInstructions(wallet, result.live, existing, zero, [zero, zero], false),
       label: `Claim ${pair(target)}`,
     });
     built.push(result.live);
@@ -431,7 +468,14 @@ export async function buildClmmClaimGroups(
 
 // --- Withdraw --------------------------------------------------------------
 
-type WithdrawPlan = { quote: WithdrawQuote; live: Live; liquidity: BN; minimums: [BN, BN] };
+type WithdrawPlan = {
+  quote: WithdrawQuote;
+  live: Live;
+  liquidity: BN;
+  minimums: [BN, BN];
+  /** The wallet's ATAs that already exist (no create is built for them). */
+  existing: Set<string>;
+};
 
 /**
  * Live withdraw state for `bps` of the position's liquidity (CLMM positions
@@ -516,19 +560,29 @@ async function planWithdraw(
   };
   const list = (m: ReturnType<typeof amounts>) => [...m.values()].map((e) => amount(e.mint, e.atoms));
 
-  // Rent for ATAs the transaction creates and keeps (a wSOL ATA is closed again).
-  const kept = paidMints(live).filter((m) => !m.address.equals(NATIVE_MINT));
-  const atas = await readAccounts(
-    rpc,
-    kept.map((m) => ataOf(wallet, m).toBase58()),
+  // Rent for ATAs the transaction creates and keeps (a wSOL ATA is closed
+  // again): exactly the creates the group will carry.
+  const existing = await existingAtas(rpc, wallet, [live]);
+  const missing = paidMints(live).filter(
+    (m) => !m.address.equals(NATIVE_MINT) && !existing.has(ataOf(wallet, m).toBase58()),
   );
-  const missing = kept.filter((m) => !atas.get(ataOf(wallet, m).toBase58()));
   const rents = await Promise.all(
     missing.map((m) => rpc.connection.getMinimumBalanceForRentExemption(ataSize(m), "confirmed")),
   );
 
+  // At 100% the group also closes the position, unless that no longer fits
+  // one transaction (bitmap extension plus three new reward ATAs, ruling
+  // R-T9a): then it withdraws everything and collects, and the empty
+  // position stays open. Quote and build share this decision.
   const hasLiquidity = !position.liquidity.isZero();
-  const closes = bps === BPS && hasLiquidity;
+  const closes =
+    bps === BPS &&
+    hasLiquidity &&
+    fitsAlone(wallet, {
+      positionIds: [target.id],
+      instructions: positionInstructions(wallet, live, existing, liquidity, minimums, true),
+      label: "",
+    });
   return {
     quote: {
       receive: list(receive),
@@ -543,6 +597,7 @@ async function planWithdraw(
     live,
     liquidity,
     minimums,
+    existing,
   };
 }
 
@@ -562,7 +617,8 @@ export async function quoteClmmWithdraw(
  * One group that withdraws `bps` (1–10,000) of the position's liquidity:
  * decrease_liquidity_v2(floor(L × bps / 10,000), the quote's minimums),
  * which also pays out the fees and rewards; at 100%, close_position then
- * burns the NFT and returns the position's rent.
+ * burns the NFT and returns the position's rent, when the group still fits
+ * one transaction (the quote's `closes`).
  * Throws NothingToWithdrawError, AmountTooSmallError or PositionGoneError.
  */
 export async function buildClmmWithdrawGroups(
@@ -583,7 +639,7 @@ export async function buildClmmWithdrawGroups(
     groups: [
       {
         positionIds: [target.id],
-        instructions: positionInstructions(wallet, plan.live, plan.liquidity, plan.minimums, plan.quote.closes),
+        instructions: positionInstructions(wallet, plan.live, plan.existing, plan.liquidity, plan.minimums, plan.quote.closes),
         label: `Withdraw ${pair(target)}`,
       },
     ],

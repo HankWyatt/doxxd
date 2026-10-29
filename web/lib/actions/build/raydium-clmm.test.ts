@@ -11,7 +11,7 @@ import {
   TickUtil,
 } from "@raydium-io/raydium-sdk-v2";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
-import { Keypair, PublicKey, type TransactionInstruction } from "@solana/web3.js";
+import { Keypair, PublicKey, VersionedTransaction, type TransactionInstruction } from "@solana/web3.js";
 import BN from "bn.js";
 import { describe, expect, it } from "vitest";
 import {
@@ -26,7 +26,6 @@ import type { ClmmTarget, DammV2Target } from "../types";
 import {
   AmountTooSmallError,
   buildClaimGroups,
-  GroupTooLargeError,
   buildWithdrawGroups,
   NothingToWithdrawError,
   packGroups,
@@ -116,6 +115,18 @@ function addMainPoolRewards(chain: SyntheticChain) {
   });
 }
 
+/** Gives the owner an empty, initialized ATA of each of `mints` (under the mint's live token program). */
+function giveAtas(chain: SyntheticChain, mints: string[]) {
+  for (const mint of mints) {
+    const program = chain.accounts.get(mint)!.owner;
+    chain.accounts.set(ownerAta(chain, mint, program), {
+      data: tokenAccountData({ mint: pk(mint), owner: chain.owner.publicKey, amount: new BN(0) }),
+      owner: program,
+      lamports: rent(165),
+    });
+  }
+}
+
 const isClmm = (ix: TransactionInstruction, disc: Buffer) =>
   ix.programId.toBase58() === CLMM && ix.data.subarray(0, 8).equals(disc);
 const clmmNames = (ixs: TransactionInstruction[]) =>
@@ -167,10 +178,12 @@ describe("buildClaimGroups (Raydium CLMM)", () => {
     expect(groups[0].positionIds).toEqual([t.id]);
     const ixs = groups[0].instructions;
     expect(clmmNames(ixs)).toEqual(["decrease_liquidity_v2"]);
-    // ATA creates for both mints first, then the collect, then the wSOL unwrap.
-    expect(ixs.slice(0, 2).every((ix) => ix.programId.toBase58() === ATA_PROGRAM)).toBe(true);
+    // The missing wSOL ATA's create first (SYNT's ATA exists), then the
+    // collect, then the wSOL unwrap.
+    expect(ixs[0].programId.toBase58()).toBe(ATA_PROGRAM);
+    expect(keysOf(ixs[0])[3]).toBe(chain.mints.wsol);
     expect(isUnwrap(ixs.at(-1)!)).toBe(true);
-    expect(ixs).toHaveLength(4);
+    expect(ixs).toHaveLength(3);
 
     const decrease = ixs.find((ix) => isClmm(ix, DECREASE))!;
     expect(decrease.data).toHaveLength(40);
@@ -224,9 +237,10 @@ describe("buildClaimGroups (Raydium CLMM)", () => {
     const chain = chainFixture();
     const owner = chain.owner.publicKey.toBase58();
     const t = target(chain);
+    const syntAta = ownerAta(chain, chain.mints.synt, PROGRAM_IDS.token2022);
+    chain.accounts.delete(syntAta);
     const { groups } = await buildClaimGroups(mockActionRpc(chain), owner, [t]);
     const ixs = groups[0].instructions;
-    const syntAta = ownerAta(chain, chain.mints.synt, PROGRAM_IDS.token2022);
     const create = ixs.find((ix) => ix.programId.toBase58() === ATA_PROGRAM && keysOf(ix)[3] === chain.mints.synt)!;
     expect(keysOf(create)).toEqual([owner, syntAta, owner, chain.mints.synt, SYSTEM, PROGRAM_IDS.token2022]);
     expect([...create.data]).toEqual([1]); // idempotent
@@ -274,7 +288,7 @@ describe("buildClaimGroups (Raydium CLMM)", () => {
     expect(expectation.mints).toEqual([]);
   });
 
-  it("packs its largest group (bitmap extension, three reward triples, five ATAs, wSOL unwrap) into one transaction", async () => {
+  it("packs its largest group (bitmap extension, three reward triples, four ATAs, wSOL unwrap) into one transaction", async () => {
     const chain = chainFixture();
     const owner = chain.owner.publicKey.toBase58();
     const t = target(chain, "wide");
@@ -291,8 +305,9 @@ describe("buildClaimGroups (Raydium CLMM)", () => {
       wide.rewardMints.flatMap((mint, i) => [wide.rewardVaults[i], ownerAta(chain, mint, rewardProgram(mint)), mint]),
     );
     const creates = ixs.filter((ix) => ix.programId.toBase58() === ATA_PROGRAM);
+    // SYNA's ATA exists already.
     expect(creates.map((ix) => keysOf(ix)[3]).sort()).toEqual(
-      [chain.mints.syna, chain.mints.wsol, ...wide.rewardMints].sort(),
+      [chain.mints.wsol, ...wide.rewardMints].sort(),
     );
     expect(isUnwrap(ixs.at(-1)!)).toBe(true);
     expect([...expectation.mints].sort((a, b) => a.mint.localeCompare(b.mint))).toEqual(
@@ -530,18 +545,20 @@ describe("quoteWithdraw / buildWithdrawGroups (Raydium CLMM)", () => {
     expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
   });
 
-  it("withdraws all of a Token-NFT position with rewards and the bitmap extension, then closes it", async () => {
+  it("withdraws all of the worst case without closing it, so the group still fits one transaction", async () => {
+    // Bitmap extension, three reward triples, four new ATAs (wSOL and the
+    // three rewards; SYNA's exists) and the unwrap: with close_position the
+    // group would not fit (ruling R-T9a), so it withdraws and collects only.
     const chain = chainFixture();
     const owner = chain.owner.publicKey.toBase58();
     const rpc = mockActionRpc(chain);
     const t = target(chain, "wide");
     const wide = chain.clmm.wide;
-    const lamports = (a: string) => chain.accounts.get(a)!.lamports;
 
     const quote = await quoteWithdraw(rpc, owner, t, 10_000, 100);
-    expect(quote.closes).toBe(true);
-    // A Token NFT's mint cannot be closed: only the position and NFT account come back.
-    expect(quote.depositRefundLamports).toBe(String(lamports(t.position) + lamports(t.positionNftAccount)));
+    expect(quote.closes).toBe(false);
+    expect(quote.depositRefundLamports).toBeNull();
+    expect(quote.withdrawableBps).toBe(10_000);
     // Rewards owed are paid with every decrease.
     expect(quote.fees.slice(2).map((f) => [f.mint, f.atoms])).toEqual(
       wide.rewardMints.map((mint, i) => [mint, W.rewardsOwed[i].toString()]),
@@ -551,34 +568,92 @@ describe("quoteWithdraw / buildWithdrawGroups (Raydium CLMM)", () => {
 
     const { groups, expectation } = await buildWithdrawGroups(rpc, owner, t, 10_000, 100);
     const ixs = groups[0].instructions;
-    expect(clmmNames(ixs)).toEqual(["decrease_liquidity_v2", "close_position"]);
-    expect(keysOf(ixs.find((ix) => isClmm(ix, DECREASE))!)[16]).toBe(wide.bitmapExtension);
-    expect(keysOf(ixs.find((ix) => isClmm(ix, CLOSE))!)[5]).toBe(PROGRAM_IDS.token);
-    expect(ixs.filter((ix) => ix.programId.toBase58() === ATA_PROGRAM)).toHaveLength(5);
+    expect(clmmNames(ixs)).toEqual(["decrease_liquidity_v2"]);
+    const decrease = ixs.find((ix) => isClmm(ix, DECREASE))!;
+    expect(u128(decrease.data, 8).toString()).toBe(W.liquidity.toString());
+    expect(keysOf(decrease)[16]).toBe(wide.bitmapExtension);
+    expect(keysOf(decrease)).toHaveLength(16 + 1 + 9);
+    expect(ixs.filter((ix) => ix.programId.toBase58() === ATA_PROGRAM).map((ix) => keysOf(ix)[3]).sort()).toEqual(
+      [chain.mints.wsol, ...wide.rewardMints].sort(),
+    );
     expect(isUnwrap(ixs.at(-1)!)).toBe(true);
-    expect(expectation.mints.map((m) => m.mint)).toEqual(expect.arrayContaining(wide.rewardMints));
-  });
-
-  it("packs a 100% withdraw with three reward triples, five ATAs, close and unwrap into one transaction", async () => {
-    const chain = chainFixture();
-    const owner = chain.owner.publicKey.toBase58();
-    addMainPoolRewards(chain);
-    const { groups, expectation } = await buildWithdrawGroups(mockActionRpc(chain), owner, target(chain), 10_000, 100);
-    const ixs = groups[0].instructions;
-    expect(clmmNames(ixs)).toEqual(["decrease_liquidity_v2", "close_position"]);
-    expect(keysOf(ixs.find((ix) => isClmm(ix, DECREASE))!)).toHaveLength(16 + 9);
-    expect(ixs.filter((ix) => ix.programId.toBase58() === ATA_PROGRAM)).toHaveLength(5);
+    const messages = packGroups(groups, chain.owner.publicKey, MOCK_BLOCKHASH, 10_000);
+    expect(messages).toHaveLength(1);
+    expect(new VersionedTransaction(messages[0].message).serialize().length).toBeLessThanOrEqual(1_232);
     expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
   });
 
-  // Open question (Task 9 report): with the bitmap extension as well, the
-  // 100% withdraw compiles to 1,260 bytes, over the 1,232-byte limit. The
-  // packer refuses it; nothing oversized is ever built into a transaction.
-  it("cannot pack the worst case (bitmap extension, three reward triples, five ATAs, close, unwrap)", async () => {
+  it("closes the same position at 100% once its ATAs exist, refunding a Token NFT without its mint", async () => {
     const chain = chainFixture();
     const owner = chain.owner.publicKey.toBase58();
-    const { groups } = await buildWithdrawGroups(mockActionRpc(chain), owner, target(chain, "wide"), 10_000, 100);
-    expect(() => packGroups(groups, chain.owner.publicKey, MOCK_BLOCKHASH, 10_000)).toThrow(GroupTooLargeError);
+    const rpc = mockActionRpc(chain);
+    const t = target(chain, "wide");
+    const lamports = (a: string) => chain.accounts.get(a)!.lamports;
+    giveAtas(chain, chain.clmm.wide.rewardMints);
+
+    const quote = await quoteWithdraw(rpc, owner, t, 10_000, 100);
+    expect(quote.closes).toBe(true);
+    // A Token NFT's mint cannot be closed: only the position and NFT account come back.
+    expect(quote.depositRefundLamports).toBe(String(lamports(t.position) + lamports(t.positionNftAccount)));
+    expect(quote.rentLamports).toBe("0");
+
+    const { groups, expectation } = await buildWithdrawGroups(rpc, owner, t, 10_000, 100);
+    const ixs = groups[0].instructions;
+    expect(clmmNames(ixs)).toEqual(["decrease_liquidity_v2", "close_position"]);
+    expect(keysOf(ixs.find((ix) => isClmm(ix, CLOSE))!)[5]).toBe(PROGRAM_IDS.token);
+    // Only the wSOL ATA is missing.
+    expect(ixs.filter((ix) => ix.programId.toBase58() === ATA_PROGRAM).map((ix) => keysOf(ix)[3])).toEqual([
+      chain.mints.wsol,
+    ]);
+    expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
+  });
+
+  it("closes a 100% withdraw with three reward triples and no bitmap extension", async () => {
+    const chain = chainFixture();
+    const owner = chain.owner.publicKey.toBase58();
+    addMainPoolRewards(chain);
+    const rpc = mockActionRpc(chain);
+    const quote = await quoteWithdraw(rpc, owner, target(chain), 10_000, 100);
+    expect(quote.closes).toBe(true);
+    const { groups, expectation } = await buildWithdrawGroups(rpc, owner, target(chain), 10_000, 100);
+    const ixs = groups[0].instructions;
+    expect(clmmNames(ixs)).toEqual(["decrease_liquidity_v2", "close_position"]);
+    expect(keysOf(ixs.find((ix) => isClmm(ix, DECREASE))!)).toHaveLength(16 + 9);
+    // SYNT's ATA exists; wSOL and the three rewards are created.
+    expect(ixs.filter((ix) => ix.programId.toBase58() === ATA_PROGRAM)).toHaveLength(4);
+    expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
+  });
+
+  it("creates only the ATAs that are missing, in claims and withdrawals", async () => {
+    const chain = chainFixture();
+    const owner = chain.owner.publicKey.toBase58();
+    const rpc = mockActionRpc(chain);
+    const wide = chain.clmm.wide;
+    // REWARD's ATA exists; SYNR1's address only holds lamports (not a token
+    // account), so it still needs its create.
+    giveAtas(chain, [wide.rewardMints[0]]);
+    const synr1Ata = ownerAta(chain, wide.rewardMints[1], PROGRAM_IDS.token);
+    chain.accounts.set(synr1Ata, { data: Buffer.alloc(0), owner: SYSTEM, lamports: 1_000 });
+    const created = (ixs: TransactionInstruction[]) =>
+      ixs.filter((ix) => ix.programId.toBase58() === ATA_PROGRAM).map((ix) => keysOf(ix)[3]).sort();
+    const missing = [chain.mints.wsol, wide.rewardMints[1], wide.rewardMints[2]].sort();
+
+    const claim = await buildClaimGroups(rpc, owner, [target(chain, "wide")]);
+    expect(created(claim.groups[0].instructions)).toEqual(missing);
+    expect(packAndVerify(chain, claim.groups, claim.expectation)).toEqual([{ ok: true }]);
+    const withdraw = await buildWithdrawGroups(rpc, owner, target(chain, "wide"), 5_000, 100);
+    expect(created(withdraw.groups[0].instructions)).toEqual(missing);
+    // The quote's rent counts exactly those creates (wSOL's is closed again).
+    const quote = await quoteWithdraw(rpc, owner, target(chain, "wide"), 5_000, 100);
+    expect(quote.rentLamports).toBe(String(rent(165) + rent(170)));
+
+    // With every ATA in place (the wSOL one too), nothing is created; the
+    // existing wSOL ATA is still unwrapped.
+    giveAtas(chain, [chain.mints.wsol, ...wide.rewardMints]);
+    const none = await buildClaimGroups(rpc, owner, [target(chain, "wide")]);
+    expect(created(none.groups[0].instructions)).toEqual([]);
+    expect(isUnwrap(none.groups[0].instructions.at(-1)!)).toBe(true);
+    expect(packAndVerify(chain, none.groups, none.expectation)).toEqual([{ ok: true }]);
   });
 
   it("quotes fees accrued since the position's checkpoint from the pool and tick fee growth", async () => {
