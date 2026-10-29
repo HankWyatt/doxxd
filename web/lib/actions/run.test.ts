@@ -706,6 +706,91 @@ describe("runAction", () => {
     expect(wallet.calls[0].map(blockhashOf)).toEqual([bs58.encode(new Uint8Array(32).fill(52))]);
   });
 
+  it("prompts with a blockhash that has 11 blocks of validity left", async () => {
+    const ctx = setup();
+    let reads = 0;
+    const { wallet, steps } = await run(ctx, {
+      groups: groups(ctx, 1),
+      rpc: {
+        ...claimed(ctx),
+        latestBlockhash: async () => ({
+          blockhash: bs58.encode(new Uint8Array(32).fill(50 + ++reads)),
+          lastValidBlockHeight: HEIGHT + 11,
+        }),
+      },
+    });
+    expect(reads).toBe(1);
+    expect(wallet.calls[0].map(blockhashOf)).toEqual([bs58.encode(new Uint8Array(32).fill(51))]);
+    expect(steps[0].status).toBe("confirmed");
+  });
+
+  it("does not open the prompt when the visitor stops during the last height read (R-003)", async () => {
+    const ctx = setup();
+    let stop = false;
+    const { steps, wallet, rpc } = await run(ctx, {
+      groups: groups(ctx, 2),
+      rpc: {
+        ...claimed(ctx),
+        blockHeight: async () => {
+          stop = true; // "Stop after this one" while the read is in flight
+          return HEIGHT;
+        },
+      },
+      shouldStop: () => stop,
+    });
+    expect(wallet.calls).toHaveLength(0);
+    expect(rpc.sent).toHaveLength(0);
+    expect(statuses(steps)).toEqual(["stopped", "stopped"]);
+  });
+
+  it("does not open the prompt when the wallet switches account during the last height read (R-003)", async () => {
+    const ctx = setup();
+    let address = ctx.owner.toBase58();
+    const { steps, wallet, rpc } = await run(ctx, {
+      groups: groups(ctx, 2),
+      rpc: {
+        ...claimed(ctx),
+        blockHeight: async () => {
+          address = OTHER_WALLET;
+          return HEIGHT;
+        },
+      },
+      currentAddress: () => address,
+    });
+    expect(wallet.calls).toHaveLength(0);
+    expect(rpc.sent).toHaveLength(0);
+    expect(steps.map((s) => [s.status, s.reason])).toEqual([
+      ["stopped", "Wallet changed · stopped"],
+      ["stopped", "Wallet changed · stopped"],
+    ]);
+  });
+
+  it("does not open the prompt when the visitor stops during re-preparation's height read (R-003)", async () => {
+    const ctx = setup();
+    let reads = 0;
+    let heightReads = 0;
+    let stop = false;
+    const { steps, wallet } = await run(ctx, {
+      groups: groups(ctx, 1),
+      rpc: {
+        ...claimed(ctx),
+        latestBlockhash: async () => ({
+          blockhash: bs58.encode(new Uint8Array(32).fill(60 + ++reads)),
+          // The first blockhash is nearly dead, so the chunk is re-prepared.
+          lastValidBlockHeight: HEIGHT + (reads === 1 ? 5 : 150),
+        }),
+        blockHeight: async () => {
+          if (++heightReads === 2) stop = true;
+          return HEIGHT;
+        },
+      },
+      shouldStop: () => stop,
+    });
+    expect(reads).toBe(2);
+    expect(wallet.calls).toHaveLength(0);
+    expect(steps[0].status).toBe("stopped");
+  });
+
   it("waits one more round after expiry before saying it didn't land (R-T7e)", async () => {
     const ctx = setup();
     let heights = 0;

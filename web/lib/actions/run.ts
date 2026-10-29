@@ -250,6 +250,19 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
     publish();
   };
   const walletChanged = () => currentAddress() !== wallet.address;
+  // Stops the run when the visitor asked to, or the wallet's account changed:
+  // every step not yet sent or finished becomes stopped. Synchronous.
+  const haltRun = (): boolean => {
+    if (shouldStop()) {
+      stopRemaining();
+      return true;
+    }
+    if (walletChanged()) {
+      stopRemaining(REASONS.walletChanged);
+      return true;
+    }
+    return false;
+  };
 
   if (groups.length === 0) return [];
   // Ruling R-T7a: the expectation must be what the visitor clicked.
@@ -456,43 +469,20 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
   // wallet is shown has waited behind an earlier prompt.
   for (let c = 0; c < parts.length; c += MAX_PER_PROMPT) {
     const chunk = parts.slice(c, c + MAX_PER_PROMPT).map((part, k) => ({ step: c + k, part }));
-    if (shouldStop()) {
-      stopRemaining();
-      break;
-    }
-    if (walletChanged()) {
-      stopRemaining(REASONS.walletChanged);
-      break;
-    }
+    if (haltRun()) break;
 
     // 1-3. Blockhash and fee for this prompt, then pack, check, simulate.
     let prepared = await prepareChunk(chunk);
     if (!prepared || prepared.ready.length === 0) continue;
 
-    // 4. One wallet prompt for the chunk, checked for a stop right before.
-    if (shouldStop()) {
-      stopRemaining();
-      break;
-    }
-    if (walletChanged()) {
-      stopRemaining(REASONS.walletChanged);
-      break;
-    }
     // Preparation reads the RPC several times per message. If that outlived
     // (or nearly outlived) the blockhash, prepare once more with a fresh one;
     // the wallet is never shown messages that can no longer land.
     if (await nearlyExpired(prepared.lastValidBlockHeight)) {
+      if (haltRun()) break;
       const stillReady = new Set(prepared.ready.map(({ step }) => step));
       prepared = await prepareChunk(chunk.filter(({ step }) => stillReady.has(step)));
       if (!prepared || prepared.ready.length === 0) continue;
-      if (shouldStop()) {
-        stopRemaining();
-        break;
-      }
-      if (walletChanged()) {
-        stopRemaining(REASONS.walletChanged);
-        break;
-      }
       if (await nearlyExpired(prepared.lastValidBlockHeight)) {
         for (const { step } of prepared.ready) set(step, { status: "failed", reason: REASONS.expired });
         continue;
@@ -501,6 +491,9 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
     const { ready, lastValidBlockHeight } = prepared;
     for (const { step } of ready) set(step, { status: "awaiting-approval" });
 
+    // 4. One wallet prompt for the chunk. The stop and account checks come
+    // last, with no await between them and the prompt.
+    if (haltRun()) break;
     let signed: Uint8Array[];
     try {
       signed = await wallet.signTransactions(ready.map(({ bytes }) => Uint8Array.from(bytes)));
