@@ -29,11 +29,12 @@ export default defineConfig({
         DMND_API_BASE_URL: "http://disabled.invalid",
         DMND_API_KEY: "doxxd-synthetic-browser-secret",
         DMND_ENABLED_PROTOCOLS: "",
-        // Wallet actions are off unless the server opts in.
+        // Wallet actions are off unless the server opts in and names an RPC
+        // provider. Specs answer /api/rpc in the browser; anything that slips
+        // through reaches only the synthetic chain helper below, never a
+        // public Solana RPC.
         DOXXD_ACTIONS_ENABLED: "1",
-        // Specs answer /api/rpc in the browser; anything that slips through
-        // fails here instead of reaching a public Solana RPC.
-        SOLANA_RPC_URL: "http://disabled.invalid",
+        SOLANA_RPC_URL: "http://127.0.0.1:4319/rpc",
       },
     },
     // Synthetic-chain JSON-RPC for the LP action flows (lp-actions.spec.ts).

@@ -4,7 +4,12 @@
 // 1.99.0's Connection puts on the wire for it (src/connection.ts), within the
 // limits below. Config objects reject unknown keys. This is not a general RPC
 // proxy: anything not listed here is refused before it reaches the upstream.
+// A transaction to send or simulate must also be one well-formed legacy or
+// v0 transaction, with no address-table lookups, that calls only the
+// programs the pre-sign check allows at the top level (./transaction.ts).
 import bs58 from "bs58";
+import { ALLOWED_PROGRAMS } from "../actions/programs";
+import { transactionAllowed } from "./transaction";
 
 export const CP_AMM_PROGRAM_ID = "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG";
 // cp-amm 1.5.1 IDL `Vesting`: 8-byte discriminator, then `position: pubkey`,
@@ -260,6 +265,11 @@ export function checkRpcRequest(body: unknown): RpcCheck {
     return { ok: false, code: -32601, message: "Method not allowed" };
   if (!validators[method](body.params))
     return { ok: false, code: -32602, message: "Invalid params" };
+  if (
+    (method === "sendTransaction" || method === "simulateTransaction") &&
+    !transactionAllowed(body.params[0] as string, ALLOWED_PROGRAMS)
+  )
+    return { ok: false, code: -32602, message: "Transaction not allowed" };
   return {
     ok: true,
     method,

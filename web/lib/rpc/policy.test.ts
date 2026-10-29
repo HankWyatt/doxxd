@@ -1,9 +1,12 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
 import {
+  AddressLookupTableAccount,
+  ComputeBudgetProgram,
   Connection,
   Keypair,
   PublicKey,
+  SystemProgram,
   TransactionInstruction,
   TransactionMessage,
   VersionedTransaction,
@@ -36,22 +39,24 @@ const keys = (n: number) =>
 const blockhash = bs58.encode(new Uint8Array(32).fill(9));
 const signature = bs58.encode(new Uint8Array(64).fill(8));
 const MEMO = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+const CP_AMM = new PublicKey(CP_AMM_PROGRAM_ID);
 
-function signedTransaction(): VersionedTransaction {
-  const message = new TransactionMessage({
-    payerKey: payer.publicKey,
-    recentBlockhash: blockhash,
-    instructions: [
-      new TransactionInstruction({
-        programId: MEMO,
-        keys: [],
-        data: Buffer.from("doxxd"),
-      }),
-    ],
-  }).compileToV0Message();
-  const transaction = new VersionedTransaction(message);
+function signed(
+  instructions: TransactionInstruction[],
+  form: "v0" | "legacy" = "v0",
+  lookups: AddressLookupTableAccount[] = [],
+): VersionedTransaction {
+  const message = new TransactionMessage({ payerKey: payer.publicKey, recentBlockhash: blockhash, instructions });
+  const transaction = new VersionedTransaction(
+    form === "v0" ? message.compileToV0Message(lookups) : message.compileToLegacyMessage(),
+  );
   transaction.sign([payer]);
   return transaction;
+}
+
+// Allowed top-level programs only (lib/actions/programs.ts).
+function signedTransaction(): VersionedTransaction {
+  return signed([ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 })]);
 }
 
 // Captures the exact JSON-RPC body web3.js 1.99.0's Connection puts on the
@@ -415,9 +420,11 @@ describe("checkRpcRequest rejects", () => {
       expect(code(rpc("sendTransaction", [bad, { encoding: "base64" }]))).toBe(
         -32602,
       );
+    // At the length cap, but not a transaction (ruling S-R002: the bytes
+    // must parse).
     expect(
       code(rpc("sendTransaction", ["A".repeat(1700), { encoding: "base64" }])),
-    ).toBe("accepted");
+    ).toBe(-32602);
   });
 
   it("101 pubkeys, and other over-long lists", () => {
@@ -568,5 +575,88 @@ describe("vesting discovery constants", () => {
     expect(VESTING_SIZE).toBe(total);
     // Anchor's own coder agrees on the account size.
     expect(sdk.cpAmmCoder.accounts.size("Vesting")).toBe(VESTING_SIZE);
+  });
+});
+
+// --- Top-level programs of sent and simulated transactions (S-R002) ----------
+
+describe("checkRpcRequest and the transaction's programs", () => {
+  const b64 = (tx: VersionedTransaction | Uint8Array) =>
+    Buffer.from(tx instanceof VersionedTransaction ? tx.serialize() : tx).toString("base64");
+  const verdict = (tx: VersionedTransaction | Uint8Array) =>
+    [
+      checkRpcRequest(rpc("sendTransaction", [b64(tx), { encoding: "base64" }])),
+      checkRpcRequest(rpc("simulateTransaction", [b64(tx), { encoding: "base64", sigVerify: false }])),
+    ].map((r) => (r.ok ? "accepted" : r.message));
+  const budget = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 10_000 });
+  const cpAmm = new TransactionInstruction({ programId: CP_AMM, keys: [], data: Buffer.from([1, 2, 3]) });
+  const transfer = SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: key(30), lamports: 1 });
+  const memo = new TransactionInstruction({ programId: MEMO, keys: [], data: Buffer.from("hi") });
+  const NOT_ALLOWED = ["Transaction not allowed", "Transaction not allowed"];
+
+  it("accepts legacy and v0 transactions that call only allowed programs", () => {
+    for (const form of ["legacy", "v0"] as const)
+      expect(verdict(signed([budget, cpAmm], form)), form).toEqual(["accepted", "accepted"]);
+  });
+
+  it("refuses a System transfer or a Memo at the top level, in either form", () => {
+    for (const form of ["legacy", "v0"] as const) {
+      expect(verdict(signed([budget, transfer], form)), form).toEqual(NOT_ALLOWED);
+      expect(verdict(signed([memo], form)), form).toEqual(NOT_ALLOWED);
+    }
+  });
+
+  it("refuses a v0 transaction with an address-table lookup", () => {
+    const table = new AddressLookupTableAccount({
+      key: key(31),
+      state: { deactivationSlot: BigInt(2) ** BigInt(64) - BigInt(1), lastExtendedSlot: 0, lastExtendedSlotStartIndex: 0, addresses: [key(32)] },
+    });
+    const viaTable = new TransactionInstruction({
+      programId: CP_AMM,
+      keys: [{ pubkey: key(32), isSigner: false, isWritable: true }],
+      data: Buffer.from([1]),
+    });
+    const tx = signed([viaTable], "v0", [table]);
+    expect(tx.message.addressTableLookups).toHaveLength(1);
+    expect(verdict(tx)).toEqual(NOT_ALLOWED);
+  });
+
+  it("refuses crafted bytes: another version, trailing or missing bytes, a program index out of range", () => {
+    const good = signed([budget, cpAmm]).serialize();
+    const messageAt = 1 + 64;
+    const v1 = Uint8Array.from(good);
+    v1[messageAt] = 0x81;
+    expect(verdict(v1)).toEqual(NOT_ALLOWED);
+    expect(verdict(Uint8Array.from([...good, 0]))).toEqual(NOT_ALLOWED);
+    expect(verdict(good.subarray(0, good.length - 1))).toEqual(NOT_ALLOWED);
+    // The last instruction's program-id index, pointed past the keys.
+    const message = signed([budget, cpAmm]).message;
+    const keyCount = message.staticAccountKeys.length;
+    const lastIx = message.compiledInstructions.at(-1)!;
+    // v0 tail: [program index][1 account count][data len][data][lookup count]
+    const programAt = good.length - 1 - lastIx.data.length - 1 - 1 - 1;
+    expect(good[programAt]).toBe(lastIx.programIdIndex);
+    const outOfRange = Uint8Array.from(good);
+    outOfRange[programAt] = keyCount;
+    expect(verdict(outOfRange)).toEqual(NOT_ALLOWED);
+  });
+
+  it("refuses hand-built legacy bytes that hide a System instruction after allowed ones", () => {
+    // 1 signature, legacy header, keys [payer, ComputeBudget, System],
+    // blockhash, then two instructions: ComputeBudget, then System.
+    const keysBytes = [payer.publicKey, ComputeBudgetProgram.programId, SystemProgram.programId].flatMap((k) => [...k.toBytes()]);
+    const bytes = Uint8Array.from([
+      1, ...new Uint8Array(64),
+      1, 0, 2,
+      3, ...keysBytes,
+      ...bs58.decode(blockhash),
+      2,
+      1, 0, 1, 2,
+      2, 0, 4, 2, 0, 0, 0,
+    ]);
+    expect(verdict(bytes)).toEqual(NOT_ALLOWED);
+    // The same message with only the ComputeBudget instruction.
+    const allowedOnly = Uint8Array.from([...bytes.subarray(0, bytes.length - 12), 1, 1, 0, 1, 2]);
+    expect(verdict(allowedOnly)).toEqual(["accepted", "accepted"]);
   });
 });

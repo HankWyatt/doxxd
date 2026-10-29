@@ -8,13 +8,22 @@ import {
 } from "./availability";
 
 describe("actionsEnabledFromEnv", () => {
+  const RPC = { SOLANA_RPC_URL: "https://rpc.provider.test/" };
+
   it("is true only for the exact value 1", () => {
-    expect(actionsEnabledFromEnv({ DOXXD_ACTIONS_ENABLED: "1" })).toBe(true);
-    expect(actionsEnabledFromEnv({ DOXXD_ACTIONS_ENABLED: "true" })).toBe(false);
-    expect(actionsEnabledFromEnv({ DOXXD_ACTIONS_ENABLED: "0" })).toBe(false);
-    expect(actionsEnabledFromEnv({ DOXXD_ACTIONS_ENABLED: " 1" })).toBe(false);
-    expect(actionsEnabledFromEnv({ DOXXD_ACTIONS_ENABLED: "" })).toBe(false);
+    expect(actionsEnabledFromEnv({ ...RPC, DOXXD_ACTIONS_ENABLED: "1" })).toBe(true);
+    expect(actionsEnabledFromEnv({ ...RPC, DOXXD_ACTIONS_ENABLED: "true" })).toBe(false);
+    expect(actionsEnabledFromEnv({ ...RPC, DOXXD_ACTIONS_ENABLED: "0" })).toBe(false);
+    expect(actionsEnabledFromEnv({ ...RPC, DOXXD_ACTIONS_ENABLED: " 1" })).toBe(false);
+    expect(actionsEnabledFromEnv({ ...RPC, DOXXD_ACTIONS_ENABLED: "" })).toBe(false);
+    expect(actionsEnabledFromEnv(RPC)).toBe(false);
     expect(actionsEnabledFromEnv({})).toBe(false);
+  });
+
+  it("needs an RPC provider URL too: the public endpoint refuses Workers (R-FW1)", () => {
+    expect(actionsEnabledFromEnv({ DOXXD_ACTIONS_ENABLED: "1" })).toBe(false);
+    expect(actionsEnabledFromEnv({ DOXXD_ACTIONS_ENABLED: "1", SOLANA_RPC_URL: "" })).toBe(false);
+    expect(actionsEnabledFromEnv({ DOXXD_ACTIONS_ENABLED: "1", SOLANA_RPC_URL: "  " })).toBe(false);
   });
 });
 

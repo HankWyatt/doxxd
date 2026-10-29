@@ -22,10 +22,13 @@ const slotRequest = { jsonrpc: "2.0", id: ID, method: "getSlot", params: [] };
 
 type Upstream = (input: string, init: RequestInit) => Promise<Response>;
 
+// An upstream answer to the request in `init`, echoing its id as a JSON-RPC
+// server does (the pass-through sends its own id, not the client's).
+const answer = (init: RequestInit, body: Record<string, unknown>) =>
+  Response.json({ jsonrpc: "2.0", id: JSON.parse(String(init.body)).id, ...body });
+
 function setup(upstream?: Upstream, enabled = true) {
-  const fetch = vi.fn<Upstream>(
-    upstream ?? (async () => Response.json({ jsonrpc: "2.0", id: ID, result: 42 })),
-  );
+  const fetch = vi.fn<Upstream>(upstream ?? (async (_input, init) => answer(init, { result: 42 })));
   const limiter = createRateLimiter({ windowMs: 60_000, general: 120, send: 20 });
   const env = {
     enabled,
@@ -172,8 +175,11 @@ describe("handleRpc", () => {
       new Headers({ "content-type": "application/json" }),
     );
     expect([...new Headers(init.headers).keys()]).toEqual(["content-type"]);
-    expect(JSON.parse(String(init.body))).toEqual(slotRequest);
+    const { id: upstreamId, ...forwarded } = JSON.parse(String(init.body));
+    expect(forwarded).toEqual({ jsonrpc: "2.0", method: "getSlot", params: [] });
+    expect(upstreamId).not.toBe(ID);
     expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(init.redirect).toBe("manual");
   });
 
   it("never returns the upstream URL or an upstream error body", async () => {
@@ -184,15 +190,13 @@ describe("handleRpc", () => {
       async () => new Response(leakyBody, { status: 403 }),
       async () => new Response(leakyBody, { status: 200 }),
       async () => new Response(leakyBody, { status: 302, headers: { location: UPSTREAM } }),
-      async () =>
-        Response.json({
-          jsonrpc: "2.0",
-          id: ID,
-          error: { code: -32000, message: `bad api-key=SECRET for ${UPSTREAM}` },
-        }),
-      async () => Response.json({ jsonrpc: "2.0", id: ID, result: UPSTREAM }),
+      async (_input, init) =>
+        answer(init, { error: { code: -32000, message: `bad api-key=SECRET for ${UPSTREAM}` } }),
+      async (_input, init) => answer(init, { result: UPSTREAM }),
       async () => Response.json({ jsonrpc: "2.0", id: "other", result: 1 }),
-      async () => Response.json({ jsonrpc: "2.0", id: ID }),
+      // The client's own id is not the one the pass-through sent.
+      async () => Response.json({ jsonrpc: "2.0", id: ID, result: 1 }),
+      async (_input, init) => answer(init, {}),
       async () => {
         throw new TypeError(`fetch failed: ${UPSTREAM}`);
       },
@@ -210,10 +214,36 @@ describe("handleRpc", () => {
       message: "Transaction simulation failed",
       data: { logs: ["Program log: synthetic"] },
     };
-    const { env } = setup(async () => Response.json({ jsonrpc: "2.0", id: ID, error }));
+    const { env } = setup(async (_input, init) => answer(init, { error }));
     const { response, json } = await call(post(slotRequest), env);
     expect(response.status).toBe(200);
     expect(json()).toEqual({ jsonrpc: "2.0", id: ID, error });
+  });
+
+  it("does not follow upstream redirects: any 3xx is a 502 (T2 R-005)", async () => {
+    for (const status of [301, 302, 303, 307, 308]) {
+      const { env, fetch } = setup(
+        async () => new Response(null, { status, headers: { location: "https://elsewhere.test/" } }),
+      );
+      const { response } = await call(post(slotRequest), env);
+      expect(response.status, String(status)).toBe(502);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(fetch.mock.calls[0][1].redirect).toBe("manual");
+    }
+  });
+
+  it("forwards with its own id and answers with the client's, so ids cannot probe the upstream (S-R004)", async () => {
+    const { env, fetch } = setup();
+    // As a probe would: guess parts of the upstream URL as ids. Each gets the
+    // same answer, its own id back, and none reaches the upstream.
+    for (const guess of ["rpc.provider.test", "rpc.other.test", "api-key", "apikey", 7]) {
+      const response = await handleRpc(post({ ...slotRequest, id: guess }), env);
+      expect(response.status, String(guess)).toBe(200);
+      expect(await response.json()).toEqual({ jsonrpc: "2.0", id: guess, result: 42 });
+    }
+    const sent = fetch.mock.calls.map(([, init]) => JSON.parse(String(init.body)).id);
+    expect(new Set(sent).size).toBe(1);
+    expect(["rpc.provider.test", "rpc.other.test", "api-key", "apikey", 7]).not.toContain(sent[0]);
   });
 
   it("maps upstream 429 to 429 with retry-after", async () => {
@@ -293,6 +323,16 @@ describe("handleRpc", () => {
     expect((await call(from(), env)).response.status).toBe(200);
     expect((await call(from(), env)).response.status).toBe(429);
     expect(fetch).toHaveBeenCalledTimes(5);
+  });
+
+  it("rate-limits IPv6 clients per /64 (S-R002)", async () => {
+    const { env } = setup();
+    env.limiter = createRateLimiter({ windowMs: 60_000, general: 2, send: 1 });
+    const from = (ip: string) => post(slotRequest, { "cf-connecting-ip": ip });
+    expect((await call(from("2001:db8:1:2::1"), env)).response.status).toBe(200);
+    expect((await call(from("2001:db8:1:2::2"), env)).response.status).toBe(200);
+    expect((await call(from("2001:db8:1:2:ffff::9"), env)).response.status).toBe(429);
+    expect((await call(from("2001:db8:1:3::1"), env)).response.status).toBe(200);
   });
 
   it("serves web3.js Connection end to end", async () => {

@@ -47,6 +47,14 @@ test("security headers on pages and API responses", async ({ page, request }) =>
   expect(api.status()).toBe(400);
   expect(api.headers()["x-frame-options"]).toBe("DENY");
   expect(api.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
+
+  // Every method but POST is a 405 from the route itself, not the framework's
+  // automatic answers (T2 R-002).
+  for (const method of ["GET", "OPTIONS", "PUT", "PATCH", "DELETE"]) {
+    const other = await request.fetch("/api/rpc", { method });
+    expect(other.status(), method).toBe(405);
+    expect(other.headers()["allow"], method).toBe("POST");
+  }
 });
 
 test("claim all fees on the synthetic DAMM v2 wallet", async ({ page }) => {

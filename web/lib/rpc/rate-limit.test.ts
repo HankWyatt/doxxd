@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createRateLimiter } from "./rate-limit";
+import { createRateLimiter, rateLimitKey } from "./rate-limit";
 
 const options = { windowMs: 60_000, general: 120, send: 20 };
 
@@ -58,5 +58,37 @@ describe("createRateLimiter", () => {
     expect(limiter.take("ip-19999", "getSlot", 1).ok).toBe(false);
     for (let i = 0; i < 20_000; i++) limiter.take(`new-${i}`, "getSlot", 5_000);
     expect(limiter.size()).toBeLessThanOrEqual(10_000);
+  });
+});
+
+describe("rateLimitKey", () => {
+  it("keys an IPv6 client by its /64 prefix, however the address is written", () => {
+    const key = rateLimitKey("2001:db8:1:2:aaaa:bbbb:cccc:dddd");
+    expect(key).toBe("2001:db8:1:2::/64");
+    for (const same of ["2001:db8:1:2::1", "2001:0db8:0001:0002:0:0:0:ffff", "2001:DB8:1:2::abcd"])
+      expect(rateLimitKey(same), same).toBe(key);
+    expect(rateLimitKey("2001:db8::1")).toBe("2001:db8:0:0::/64");
+    expect(rateLimitKey("::1")).toBe("0:0:0:0::/64");
+    expect(rateLimitKey("2001:db8:1:3::1")).not.toBe(key);
+  });
+
+  it("keys IPv4 (and IPv4-mapped IPv6) by the whole address", () => {
+    expect(rateLimitKey("203.0.113.7")).toBe("203.0.113.7");
+    expect(rateLimitKey("::ffff:203.0.113.7")).toBe("203.0.113.7");
+  });
+
+  it("falls back to one shared key for a missing or unreadable address", () => {
+    expect(rateLimitKey(null)).toBe("local");
+    expect(rateLimitKey("")).toBe("local");
+    expect(rateLimitKey("not an address")).toBe("not an address");
+    expect(rateLimitKey("1:2:3:4:5:6:7:8:9")).toBe("1:2:3:4:5:6:7:8:9");
+  });
+
+  it("makes 300 addresses in one /64 share one budget", () => {
+    const limiter = createRateLimiter({ windowMs: 60_000, general: 300, send: 40 });
+    let limited = 0;
+    for (let i = 0; i < 301; i++)
+      if (!limiter.take(rateLimitKey(`2001:db8::${i.toString(16)}`), "getSlot", 0).ok) limited++;
+    expect(limited).toBe(1);
   });
 });

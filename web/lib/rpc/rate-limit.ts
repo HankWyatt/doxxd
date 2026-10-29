@@ -58,3 +58,44 @@ export function createRateLimiter(options: {
     size: () => buckets.size,
   };
 }
+
+const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+const HEXTET = /^[0-9a-f]{1,4}$/;
+
+// The eight hextets of an IPv6 address, or null. An embedded IPv4 tail
+// (::ffff:a.b.c.d) counts as two hextets.
+function hextets(address: string): number[] | null {
+  let text = address.toLowerCase();
+  const v4 = /:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(text);
+  if (v4) {
+    const parts = IPV4.exec(v4[1])!.slice(1).map(Number);
+    if (parts.some((p) => p > 255)) return null;
+    text = `${text.slice(0, v4.index + 1)}${((parts[0] << 8) | parts[1]).toString(16)}:${((parts[2] << 8) | parts[3]).toString(16)}`;
+  }
+  const halves = text.split("::");
+  if (halves.length > 2) return null;
+  const split = (half: string) => (half === "" ? [] : half.split(":"));
+  const head = split(halves[0]);
+  const tail = halves.length === 2 ? split(halves[1]) : [];
+  const missing = 8 - head.length - tail.length;
+  if (halves.length === 2 ? missing < 1 : missing !== 0) return null;
+  const all = [...head, ...Array<string>(halves.length === 2 ? missing : 0).fill("0"), ...tail];
+  if (!all.every((h) => HEXTET.test(h))) return null;
+  return all.map((h) => parseInt(h, 16));
+}
+
+/**
+ * The rate-limit key for a client address (cf-connecting-ip): an IPv6
+ * client by its /64 prefix, since one subscriber usually holds a whole /64;
+ * an IPv4 client (or IPv4-mapped IPv6) by its address. A missing address
+ * shares the key "local"; anything unreadable is its own key.
+ */
+export function rateLimitKey(address: string | null): string {
+  if (!address) return "local";
+  if (IPV4.test(address)) return address;
+  const h = hextets(address);
+  if (!h) return address;
+  if (h.slice(0, 5).every((x) => x === 0) && h[5] === 0xffff)
+    return `${h[6] >> 8}.${h[6] & 0xff}.${h[7] >> 8}.${h[7] & 0xff}`;
+  return `${h.slice(0, 4).map((x) => x.toString(16)).join(":")}::/64`;
+}

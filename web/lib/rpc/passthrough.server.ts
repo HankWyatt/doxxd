@@ -1,12 +1,15 @@
 // Server-only JSON-RPC pass-through for wallet actions (POST /api/rpc).
 //
 // Accepts one JSON-RPC 2.0 request that lib/rpc/policy allows, rate-limits
-// it, and forwards a freshly serialised copy to the upstream Solana RPC with
-// only `content-type: application/json`. The upstream URL may carry an API
-// key: it, upstream HTTP error bodies and network error messages never reach
-// a response, and nothing here logs.
+// it (IPv6 clients per /64), and forwards a freshly serialised copy to the
+// upstream Solana RPC with only `content-type: application/json` and the
+// pass-through's own request id, never following a redirect. The upstream URL
+// may carry an API key: it, upstream HTTP error bodies and network error
+// messages never reach a response, and nothing here logs. The answer carries
+// the client's id back, put in after the secret scan, so a client cannot
+// probe the scan with ids the upstream echoes.
 import { checkRpcRequest, type JsonRpcRequest } from "./policy";
-import type { RateLimiter } from "./rate-limit";
+import { rateLimitKey, type RateLimiter } from "./rate-limit";
 
 export type RpcEnv = {
   enabled: boolean;
@@ -19,6 +22,8 @@ const MAX_REQUEST_BYTES = 64 * 1024;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const UPSTREAM_TIMEOUT_MS = 10_000;
 const DEFAULT_RETRY_AFTER_SEC = 2;
+// The id every upstream request carries.
+const UPSTREAM_ID = 1;
 const MAX_RETRY_AFTER_SEC = 300;
 
 const BASE_HEADERS = {
@@ -117,8 +122,11 @@ async function forward(
       upstream = await doFetch(env.upstream, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(request),
+        body: JSON.stringify({ ...request, id: UPSTREAM_ID }),
         signal: controller.signal,
+        // A redirect could carry the request (and its key) elsewhere; any
+        // 3xx is refused below as a non-200.
+        redirect: "manual",
       });
       if (upstream.status === 429) {
         await upstream.body?.cancel().catch(() => undefined);
@@ -149,13 +157,19 @@ async function forward(
       parsed === null ||
       Array.isArray(parsed) ||
       (parsed as { jsonrpc?: unknown }).jsonrpc !== "2.0" ||
-      (parsed as { id?: unknown }).id !== request.id ||
+      (parsed as { id?: unknown }).id !== UPSTREAM_ID ||
       !("result" in parsed || "error" in parsed)
     )
       return unavailable();
+    // Scanned as the upstream sent it, before the client's id goes in.
     if (secretParts(env.upstream).some((part) => text.includes(part)))
       return unavailable();
-    return new Response(text, {
+    const reply = parsed as { result?: unknown; error?: unknown };
+    const out =
+      "result" in reply
+        ? { jsonrpc: "2.0", id: request.id, result: reply.result }
+        : { jsonrpc: "2.0", id: request.id, error: reply.error };
+    return new Response(JSON.stringify(out), {
       status: 200,
       headers: { ...BASE_HEADERS, "content-type": "application/json" },
     });
@@ -206,7 +220,7 @@ export async function handleRpc(request: Request, env: RpcEnv): Promise<Response
         : id,
     );
   }
-  const key = request.headers.get("cf-connecting-ip") || "local";
+  const key = rateLimitKey(request.headers.get("cf-connecting-ip"));
   const limit = env.limiter.take(key, checked.method, Date.now());
   if (!limit.ok)
     return rpcError(429, -32005, "Rate limited", checked.request.id, {
