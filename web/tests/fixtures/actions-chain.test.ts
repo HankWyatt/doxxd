@@ -43,8 +43,14 @@ import BN from "bn.js";
 import bs58 from "bs58";
 import { describe, expect, it } from "vitest";
 import { VESTING_POSITION_OFFSET, VESTING_SIZE } from "@/lib/rpc/policy";
-import { PROGRAM_IDS, SYNTHETIC, chainFixture, type SyntheticChain } from "./actions-chain";
-import { mockActionRpc } from "./mock-action-rpc";
+import {
+  PROGRAM_IDS,
+  SYNTHETIC,
+  chainFixture,
+  tokenAccountData,
+  type SyntheticChain,
+} from "./actions-chain";
+import { mockActionRpc, postStatesFrom } from "./mock-action-rpc";
 
 const pk = (address: string) => new PublicKey(address);
 const anchorDiscriminator = (name: string) =>
@@ -439,7 +445,8 @@ describe("mockActionRpc", () => {
 
     const sim = await rpc.simulate(tx, [chain.dammV2.pool, missing]);
     expect(sim).toMatchObject({ err: null, unitsConsumed: 60_000 });
-    expect(sim.accounts[0]).toEqual(chain.accounts.get(chain.dammV2.pool)?.data);
+    const pool = chain.accounts.get(chain.dammV2.pool)!;
+    expect(sim.accounts[0]).toEqual({ data: pool.data, lamports: pool.lamports, owner: pool.owner });
     expect(sim.accounts[1]).toBeNull();
 
     const raw = tx.serialize();
@@ -452,6 +459,53 @@ describe("mockActionRpc", () => {
     const latest = await rpc.latestBlockhash();
     expect(latest.lastValidBlockHeight).toBeGreaterThan(await rpc.blockHeight());
     expect((await rpc.priorityFees([chain.dammV2.pool])).length).toBeGreaterThan(0);
+  });
+
+  it("reports post-transaction states for watched accounts when given postStates", async () => {
+    const chain = chainFixture();
+    const wallet = chain.owner.publicKey;
+    const ownerKey = wallet.toBase58();
+    const synaAta = getAssociatedTokenAddressSync(pk(chain.mints.syna), wallet).toBase58();
+    const wsolAta = getAssociatedTokenAddressSync(pk(chain.mints.wsol), wallet).toBase58();
+    const before = chain.accounts.get(ownerKey)!;
+    const ataBefore = unpackAccount(pk(synaAta), {
+      ...chain.accounts.get(synaAta)!,
+      owner: pk(PROGRAM_IDS.token),
+      executable: false,
+    });
+    const claimed = BigInt(250_000_000);
+    const rpc = mockActionRpc(chain, {
+      postStates: postStatesFrom({
+        // A claim paid SYNA, and a wSOL unwrap closed the temporary ATA and
+        // paid its balance to the owner.
+        [ownerKey]: { ...before, lamports: before.lamports + 125_000_000 },
+        [synaAta]: {
+          ...chain.accounts.get(synaAta)!,
+          data: tokenAccountData({
+            mint: pk(chain.mints.syna),
+            owner: wallet,
+            amount: new BN((ataBefore.amount + claimed).toString()),
+          }),
+        },
+        [wsolAta]: null,
+      }),
+    });
+
+    const sim = await rpc.simulate(transaction(chain.owner), [ownerKey, synaAta, wsolAta, chain.dammV2.pool]);
+    expect(sim.accounts[0]).toMatchObject({
+      lamports: before.lamports + 125_000_000,
+      owner: PROGRAM_IDS.system,
+    });
+    const after = unpackAccount(pk(synaAta), {
+      ...sim.accounts[1]!,
+      owner: pk(sim.accounts[1]!.owner),
+      executable: false,
+    });
+    expect(after.amount - ataBefore.amount).toBe(claimed);
+    expect(sim.accounts[2]).toBeNull();
+    expect(sim.accounts[3]?.data).toEqual(chain.accounts.get(chain.dammV2.pool)!.data);
+    // The chain itself is untouched.
+    expect(chain.accounts.get(ownerKey)!.lamports).toBe(before.lamports);
   });
 
   it("applies overrides and still records every send attempt", async () => {

@@ -16,7 +16,7 @@ vi.mock("@solana/web3.js", () => {
   const browserBuild = "@solana/web3.js/lib/index.browser.esm.js";
   return import(/* @vite-ignore */ browserBuild);
 });
-import { RpcBusyError, createActionRpc } from "./rpc";
+import { RpcBusyError, createActionRpc, isRpcBusy } from "./rpc";
 
 // Synthetic keys only: fixed seeds of repeated bytes.
 const payer = Keypair.fromSeed(new Uint8Array(32).fill(7));
@@ -116,10 +116,45 @@ describe("createActionRpc", () => {
     expect(seen).toHaveLength(1);
   });
 
+  it("lets callers spot RpcBusyError after web3.js re-wraps it (getAccountInfo)", async () => {
+    upstream({ status: 429 });
+    const rpc = createActionRpc(ENDPOINT);
+    const result = rpc.connection.getAccountInfo(key(1)).catch((e: unknown) => e);
+    await vi.runAllTimersAsync();
+    const error = await result;
+    expect(error).not.toBeInstanceOf(RpcBusyError);
+    expect((error as Error).message).toMatch(/^failed to get info about account/);
+    expect(isRpcBusy(error)).toBe(true);
+  });
+
+  it("lets callers spot RpcBusyError after web3.js re-wraps it (getLatestBlockhash)", async () => {
+    upstream(new TypeError("Failed to fetch"));
+    const rpc = createActionRpc(ENDPOINT);
+    const result = rpc.connection.getLatestBlockhash().catch((e: unknown) => e);
+    await vi.runAllTimersAsync();
+    const error = await result;
+    expect(error).not.toBeInstanceOf(RpcBusyError);
+    expect((error as Error).message).toMatch(/^failed to get recent blockhash/);
+    expect(isRpcBusy(error)).toBe(true);
+  });
+
+  it("isRpcBusy follows causes and stringified forms, and rejects other errors", () => {
+    const busy = new RpcBusyError();
+    expect(isRpcBusy(busy)).toBe(true);
+    expect(isRpcBusy(new Error("outer", { cause: new Error("mid", { cause: busy }) }))).toBe(true);
+    // The Raydium SDK's logWithError re-throws JSON.stringify of its arguments.
+    expect(isRpcBusy(new Error(["fetch failed", JSON.stringify(busy)].join(", ")))).toBe(true);
+    expect(isRpcBusy(String(busy))).toBe(true);
+    expect(isRpcBusy(new Error("failed to get info about account: 400 Bad Request"))).toBe(false);
+    expect(isRpcBusy(new TypeError("Failed to fetch"))).toBe(false);
+    expect(isRpcBusy(null)).toBe(false);
+  });
+
   it("puts only policy-allowed requests on the wire, and maps the replies", async () => {
     const tx = signedTransaction();
     const signature = bs58.encode(tx.signatures[0]);
-    const watched = [key(1).toBase58(), key(2).toBase58()];
+    // Open, never existed, and closed by the transaction.
+    const watched = [key(1).toBase58(), key(2).toBase58(), key(3).toBase58()];
     const data = Buffer.from("synthetic account");
     const { seen } = upstream(
       {
@@ -136,6 +171,13 @@ describe("createActionRpc", () => {
               rentEpoch: 0,
             },
             null,
+            {
+              executable: false,
+              owner: "11111111111111111111111111111111",
+              lamports: 0,
+              data: ["", "base64"],
+              rentEpoch: 0,
+            },
           ],
           returnData: null,
         }),
@@ -162,7 +204,7 @@ describe("createActionRpc", () => {
       err: null,
       logs: ["Program log: ok"],
       unitsConsumed: 61_234,
-      accounts: [data, null],
+      accounts: [{ data, lamports: 1_000, owner: MEMO.toBase58() }, null, null],
     });
     await expect(rpc.send(tx.serialize())).resolves.toBe(signature);
     await expect(rpc.statuses([signature, signature])).resolves.toEqual([

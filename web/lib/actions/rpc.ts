@@ -15,7 +15,9 @@ export type ActionRpc = {
     err: unknown | null;
     logs: string[];
     unitsConsumed: number | null;
-    accounts: (Buffer | null)[];
+    // Post-simulation state of each watched address, in order; null when the
+    // account does not exist afterwards (never created, or closed).
+    accounts: SimulatedAccount[];
   }>;
   send(raw: Uint8Array): Promise<string>;
   statuses(
@@ -26,12 +28,45 @@ export type ActionRpc = {
   priorityFees(writable: string[]): Promise<number[]>;
 };
 
+export type SimulatedAccount = { data: Buffer; lamports: number; owner: string } | null;
+
+const RPC_BUSY_NAME = "RpcBusyError";
+// Distinctive on purpose: callers that re-wrap errors keep only text, so
+// isRpcBusy looks for this message (or the name) in what they re-throw.
+const RPC_BUSY_MESSAGE = "Network busy · try again";
+
 /** The RPC stayed rate-limited or unreachable after every retry. */
 export class RpcBusyError extends Error {
   constructor(options?: { cause?: unknown }) {
-    super("Network busy · try again", options);
-    this.name = "RpcBusyError";
+    super(RPC_BUSY_MESSAGE, options);
+    this.name = RPC_BUSY_NAME;
   }
+}
+
+/**
+ * True when `error` is, wraps or was re-thrown from an RpcBusyError. web3.js
+ * re-wraps some failures as `new Error("failed to …: " + e)` without a cause
+ * (getAccountInfo, getLatestBlockhash), and the Raydium SDK's logWithError
+ * re-throws `JSON.stringify`ed arguments, so this checks the instance, then
+ * the `cause` chain, then the name or message inside the text.
+ */
+export function isRpcBusy(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; current != null && depth < 8; depth++) {
+    if (current instanceof RpcBusyError) return true;
+    if (typeof current === "object" && (current as { name?: unknown }).name === RPC_BUSY_NAME)
+      return true;
+    const text =
+      typeof current === "string"
+        ? current
+        : current instanceof Error
+          ? current.message
+          : "";
+    if (text.includes(RPC_BUSY_MESSAGE) || text.includes(`"name":"${RPC_BUSY_NAME}"`))
+      return true;
+    current = typeof current === "object" ? (current as { cause?: unknown }).cause : undefined;
+  }
+  return false;
 }
 
 const RETRY_DELAYS_MS = [500, 1_000, 2_000];
@@ -105,9 +140,15 @@ export function actionRpcFor(connection: Connection): ActionRpc {
         err: value.err ?? null,
         logs: value.logs ?? [],
         unitsConsumed: value.unitsConsumed ?? null,
-        accounts: watch.map((_, i) => {
+        accounts: watch.map((_, i): SimulatedAccount => {
           const account = value.accounts?.[i];
-          return account ? Buffer.from(account.data[0], "base64") : null;
+          // A closed account comes back as null or with zero lamports.
+          if (!account || account.lamports === 0) return null;
+          return {
+            data: Buffer.from(account.data[0], "base64"),
+            lamports: account.lamports,
+            owner: account.owner,
+          };
         }),
       };
     },

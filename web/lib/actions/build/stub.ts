@@ -8,3 +8,4 @@ function browserOnly(): never {
 export const sdkProbe = browserOnly;
 export const createActionRpc = browserOnly;
 export const RpcBusyError = browserOnly;
+export const isRpcBusy = browserOnly;

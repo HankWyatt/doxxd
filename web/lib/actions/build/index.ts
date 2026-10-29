@@ -3,8 +3,8 @@ import { Connection } from "@solana/web3.js";
 import { CpAmm } from "@meteora-ag/cp-amm-sdk";
 import { ClmmInstrument } from "@raydium-io/raydium-sdk-v2";
 
-export { createActionRpc, RpcBusyError } from "../rpc";
-export type { ActionRpc } from "../rpc";
+export { createActionRpc, isRpcBusy, RpcBusyError } from "../rpc";
+export type { ActionRpc, SimulatedAccount } from "../rpc";
 
 // Placeholder until the builders land. Using each SDK keeps it in this chunk
 // so the build proves the chunk and Worker-stub behavior. Replaced in Task 8.

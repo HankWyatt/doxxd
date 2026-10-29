@@ -253,7 +253,8 @@ function mintData(opts: {
   return withExtensions(base, AccountType.Mint, opts.extensions ?? []);
 }
 
-function tokenAccountData(opts: {
+/** SPL Token / Token-2022 account bytes (AccountLayout plus any TLV extensions). */
+export function tokenAccountData(opts: {
   mint: PublicKey;
   owner: PublicKey;
   amount: BN;

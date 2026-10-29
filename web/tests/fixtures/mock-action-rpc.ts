@@ -43,12 +43,31 @@ function matches(info: ChainAccount, filters: Filter[]): boolean {
 }
 
 /**
+ * What simulateTransaction reports for the watched addresses, in order: the
+ * state after the transaction (null for an account that does not exist
+ * afterwards). The double does not run programs, so by default the accounts
+ * come back as they are now, and every balance delta is zero.
+ */
+export type PostStates = (watch: string[], chain: SyntheticChain) => (ChainAccount | null)[];
+
+/** PostStates that report `changes` for their addresses and the rest as they are. */
+export function postStatesFrom(changes: Record<string, ChainAccount | null>): PostStates {
+  return (watch, chain) =>
+    watch.map((address) =>
+      Object.hasOwn(changes, address) ? changes[address] : (chain.accounts.get(address) ?? null),
+    );
+}
+
+export type AnswerOptions = { postStates?: PostStates };
+
+/**
  * Answers one JSON-RPC request body from `chain`, with the HTTP status the
  * pass-through would use. Also usable from a Playwright route.
  */
 export function answerRpc(
   chain: SyntheticChain,
   body: unknown,
+  options: AnswerOptions = {},
 ): { status: number; body: Record<string, unknown> } {
   const checked = checkRpcRequest(body);
   if (!checked.ok) {
@@ -110,11 +129,15 @@ export function answerRpc(
       break;
     case "simulateTransaction": {
       const watched = (params[1] as { accounts?: { addresses: string[] } }).accounts;
+      const states = watched
+        ? options.postStates
+          ? options.postStates(watched.addresses, chain)
+          : watched.addresses.map((a) => get(a) ?? null)
+        : null;
       result = ctx({
         err: null,
         logs: [],
-        // The accounts as they are now: the double does not run programs.
-        accounts: watched ? watched.addresses.map((a) => accountJson(get(a))) : null,
+        accounts: states ? states.map((state) => accountJson(state ?? undefined)) : null,
         unitsConsumed: MOCK_UNITS_CONSUMED,
         returnData: null,
       });
@@ -140,9 +163,9 @@ export function answerRpc(
 }
 
 /** A web3.js Connection whose every request is answered by answerRpc. */
-export function mockConnection(chain: SyntheticChain): Connection {
+export function mockConnection(chain: SyntheticChain, options: AnswerOptions = {}): Connection {
   const fetch = (async (_input: unknown, init?: { body?: unknown }) => {
-    const answer = answerRpc(chain, JSON.parse(String(init?.body)));
+    const answer = answerRpc(chain, JSON.parse(String(init?.body)), options);
     return new Response(JSON.stringify(answer.body), {
       status: answer.status,
       headers: { "content-type": "application/json" },
@@ -155,22 +178,23 @@ export function mockConnection(chain: SyntheticChain): Connection {
   });
 }
 
-export type MockActionRpcOverrides = Partial<Omit<ActionRpc, "connection">>;
+export type MockActionRpcOverrides = Partial<Omit<ActionRpc, "connection">> & AnswerOptions;
 
 /**
  * The real ActionRpc (lib/actions/rpc.ts) over mockConnection, with any
- * method replaceable. `sent` records the bytes of every send attempt,
- * overridden or not.
+ * method replaceable. `postStates` sets what simulations report for watched
+ * accounts. `sent` records the bytes of every send attempt, overridden or not.
  */
 export function mockActionRpc(
   chain: SyntheticChain,
   overrides: MockActionRpcOverrides = {},
 ): ActionRpc & { sent: Uint8Array[] } {
-  const base = actionRpcFor(mockConnection(chain));
+  const { postStates, ...methods } = overrides;
+  const base = actionRpcFor(mockConnection(chain, { postStates }));
   const sent: Uint8Array[] = [];
   return {
     ...base,
-    ...overrides,
+    ...methods,
     async send(raw) {
       sent.push(Uint8Array.from(raw));
       return (overrides.send ?? base.send)(raw);
