@@ -9,3 +9,4 @@ export const sdkProbe = browserOnly;
 export const createActionRpc = browserOnly;
 export const RpcBusyError = browserOnly;
 export const isRpcBusy = browserOnly;
+export const verifyMessage = browserOnly;
