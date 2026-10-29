@@ -28,6 +28,8 @@ export default defineConfig({
       DMND_API_BASE_URL: "http://disabled.invalid",
       DMND_API_KEY: "doxxd-synthetic-browser-secret",
       DMND_ENABLED_PROTOCOLS: "",
+      // Wallet actions are off unless the server opts in.
+      DOXXD_ACTIONS_ENABLED: "1",
     },
   },
 });

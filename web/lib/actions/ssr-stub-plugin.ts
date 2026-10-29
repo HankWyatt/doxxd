@@ -10,6 +10,11 @@ const stubPath = fileURLToPath(new URL("./build/stub.ts", import.meta.url));
 const buildDir = fileURLToPath(new URL("./build", import.meta.url));
 const entryPath = resolve(buildDir, "index.ts");
 
+// The wallet connection libraries run only in the browser after hydration, so
+// the Worker gets the throwing stand-in for them too (keeps its size flat).
+const walletStubPath = fileURLToPath(new URL("./wallet-stub.ts", import.meta.url));
+const walletPackages = new Set(["@wallet-standard/react-core", "@solana/react"]);
+
 function isBuildEntry(id: string, importer: string | undefined): boolean {
   const bare = id.split("?")[0];
   if (/^@\/lib\/actions\/build(\/index(\.ts)?)?$/.test(bare)) return true;
@@ -26,6 +31,7 @@ export function ssrStubPlugin(): Plugin {
     enforce: "pre",
     resolveId(id, importer) {
       if (this.environment?.name === "client") return undefined;
+      if (walletPackages.has(id)) return walletStubPath;
       return isBuildEntry(id, importer) ? stubPath : undefined;
     },
   };

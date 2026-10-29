@@ -15,6 +15,8 @@ import { explorerHref } from "@/lib/safe-url";
 import { WalletSummary } from "./summary";
 import { RecoveryNotice } from "./recovery-notice";
 import { SaveWalletButton } from "../watchlist/watchlist";
+import { HeaderWallet } from "../wallet-connect/header-wallet";
+import { WalletConnectProvider } from "../wallet-connect/provider";
 import { CopyButton } from "../copy-button";
 import { avatarStyle } from "@/lib/portfolio/headline";
 const SummaryContext = createContext<ResourceData["summary"] | null>(null);
@@ -38,14 +40,16 @@ export function WalletFrame({
   const [revision, setRevision] = useState(0);
   return (
     <WalletRefreshContext.Provider value={revision}>
-      <FrameContent
-        address={address}
-        tab={tab}
-        mode={mode}
-        refresh={() => setRevision((n) => n + 1)}
-      >
-        {children}
-      </FrameContent>
+      <WalletConnectProvider>
+        <FrameContent
+          address={address}
+          tab={tab}
+          mode={mode}
+          refresh={() => setRevision((n) => n + 1)}
+        >
+          {children}
+        </FrameContent>
+      </WalletConnectProvider>
     </WalletRefreshContext.Provider>
   );
 }
@@ -101,7 +105,6 @@ function FrameContent({
         }
         actions={
           <div className="wallet-actions">
-            {/* Room for the later "Connect wallet" button (next project). */}
             {mode.kind === "live" && <SaveWalletButton key={address} address={address} />}
             <button
               type="button"
@@ -112,6 +115,7 @@ function FrameContent({
               <RefreshCw size={13} />
               Refresh
             </button>
+            <HeaderWallet viewed={address} />
           </div>
         }
       />

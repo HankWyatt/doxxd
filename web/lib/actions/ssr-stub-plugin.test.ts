@@ -46,6 +46,16 @@ describe("ssrStubPlugin", () => {
     expect(resolve(undefined, "@/lib/actions/build")).toBe(stubPath);
   });
 
+  it.each(["@wallet-standard/react-core", "@solana/react"])(
+    "stubs %s outside the client environment only",
+    (id) => {
+      const walletStub = fileURLToPath(new URL("./wallet-stub.ts", import.meta.url));
+      expect(resolve("ssr", id)).toBe(walletStub);
+      expect(resolve(undefined, id)).toBe(walletStub);
+      expect(resolve("client", id)).toBeUndefined();
+    },
+  );
+
   it("ignores other modules, including siblings of the entry", () => {
     expect(resolve("ssr", "@/lib/actions/availability")).toBeUndefined();
     expect(resolve("ssr", "@/lib/actions/build-other")).toBeUndefined();
