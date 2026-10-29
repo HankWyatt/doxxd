@@ -5,6 +5,10 @@ Look up any public Solana wallet and see its holdings, staking, lending, liquidi
 [![CI](https://github.com/HankWyatt/doxxd/actions/workflows/ci.yml/badge.svg)](https://github.com/HankWyatt/doxxd/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+![Doxxd wallet page rendered from synthetic test fixtures](docs/screenshot.png)
+
+The screenshot shows the wallet page rendered from synthetic test fixtures, not a real wallet.
+
 ## Features
 
 - **No sign-up.** Paste a public address. No wallet connection or account is required.
