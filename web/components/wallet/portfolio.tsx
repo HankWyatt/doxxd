@@ -220,10 +220,15 @@ function PortfolioContent({
             <h2>
               <Layers3 size={16} />
               Protocol positions{" "}
-              {main.length > 0 && (
-                <span className="count">
-                  {main.length} {main.length === 1 ? "protocol" : "protocols"}
-                </span>
+              {summaryFailed ? (
+                // Every registered protocol is listed, none yet checked.
+                <span className="count">not checked</span>
+              ) : (
+                main.length > 0 && (
+                  <span className="count">
+                    {main.length} {main.length === 1 ? "protocol" : "protocols"}
+                  </span>
+                )
               )}
             </h2>
           </div>

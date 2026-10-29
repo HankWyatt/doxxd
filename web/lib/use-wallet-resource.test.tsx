@@ -114,3 +114,20 @@ it("bounds simultaneously open protocol requests to four", async () => {
   );
   expect(max).toBe(4);
 });
+it("keeps the wallet scope of a not_enabled answer", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json({ ok: false, kind: "not_enabled", scope: "wallet" }),
+    ),
+  );
+  const { result } = renderHook(() =>
+    useWalletResource(DEMO_ADDRESS, "summary"),
+  );
+  await waitFor(() => expect(result.current.result).not.toBeNull());
+  expect(result.current.result).toEqual({
+    ok: false,
+    kind: "not_enabled",
+    scope: "wallet",
+  });
+});

@@ -1,6 +1,6 @@
 "use client";
 import { Fragment, useCallback, useLayoutEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, Info } from "lucide-react";
 import type {
   ProtocolResource,
   ResourceError,
@@ -16,6 +16,7 @@ import {
   type ProtocolPayload,
   type ProtocolView,
 } from "@/lib/portfolio/model";
+import { componentState } from "@/lib/portfolio/chips";
 import { kindTag, manageLink } from "@/lib/portfolio/links";
 import { compareDecimalDesc, formatAmount, formatUsd } from "@/lib/decimal";
 import { short } from "@/lib/portfolio/adapters/shared";
@@ -100,6 +101,10 @@ export function ProtocolSection({
   // A failure outlives a collapse: it clears only when the card loads again.
   const [failed, setFailed] = useState(false);
   const definition = resources[resource];
+  // DMND reports "0" for sources it has not finished: only a chip or a
+  // confirmed-complete source has a total worth showing.
+  const state = component ? componentState(component) : null;
+  const totalKnown = state === "chip" || state === "empty";
   const isOpen = useRef(open);
   const retryBody = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
@@ -156,8 +161,8 @@ export function ProtocolSection({
           <span className="badge partial hide-mobile">Partial</span>
         )}
         <span className="protocol-value">
-          {/* A card whose positions failed to load never shows a total. */}
-          {failed ? "—" : formatUsd(component?.known_net_value_usd)}
+          {/* A failed load, or a source not yet checked, never shows a total. */}
+          {failed || !totalKnown ? "—" : formatUsd(component?.known_net_value_usd)}
         </span>
         {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
       </button>
@@ -235,7 +240,12 @@ function ProtocolBody({
     setShowAll(false);
   }
   if (!request.result) return <LoadingRows />;
-  if (!request.result.ok && !cursor && NOT_ENABLED.includes(request.result.kind))
+  if (
+    !request.result.ok &&
+    !cursor &&
+    NOT_ENABLED.includes(request.result.kind) &&
+    request.result.scope !== "wallet"
+  )
     return (
       <>
         <RecoveryNotice state={request.recovery} retained={Boolean(request.refreshError)} retry={request.refresh} />
@@ -343,7 +353,9 @@ function ProtocolBody({
       )}
       <details className="coverage-note">
         <summary>
-          <span className="details-label">ⓘ details</span>
+          <span className="details-label">
+            <Info size={12} aria-hidden="true" /> details
+          </span>
           <span className={"badge " + view.coverage.state}>
             {view.coverage.label}
           </span>
@@ -429,7 +441,7 @@ function DetailsToggle({
       aria-label={row.label + " details"}
       onClick={() => toggle(row.id)}
     >
-      ⓘ details
+      <Info size={12} aria-hidden="true" /> details
     </button>
   );
 }

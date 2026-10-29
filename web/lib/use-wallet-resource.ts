@@ -199,6 +199,9 @@ export function useWalletResource<K extends ResourceName>(
             result = {
               ok: false,
               kind: raw.kind as ResourceError["kind"],
+              ...(raw.kind === "not_enabled" && raw.scope === "wallet"
+                ? { scope: "wallet" as const }
+                : {}),
               ...(typeof raw.retryAfterSeconds === "number" &&
               Number.isFinite(raw.retryAfterSeconds) &&
               raw.retryAfterSeconds >= 0

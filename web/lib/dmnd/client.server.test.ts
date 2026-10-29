@@ -111,7 +111,7 @@ it("enforces an optional wallet allowlist and a shared request budget before ups
   );
   expect(
     await client.read("J3jHGNUJMKHZnC8iTnnMGx5Vii5fjXBuh5Rc6K6feZ38", "summary"),
-  ).toEqual({ ok: false, kind: "not_enabled" });
+  ).toEqual({ ok: false, kind: "not_enabled", scope: "wallet" });
   expect(await client.read(wallet, "summary")).toEqual({
     ok: true,
     data: summary,

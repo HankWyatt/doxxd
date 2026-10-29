@@ -36,6 +36,10 @@ it("keeps holdings usable when the summary fails", async () => {
   render(<Portfolio address={DEMO_ADDRESS} />);
   expect(await screen.findByText("USD Coin")).toBeVisible();
   expect(await screen.findByText("Data connection unavailable")).toBeVisible();
+  // Every protocol is listed but none was checked: no count claims otherwise.
+  const heading = screen.getByRole("heading", { name: /Protocol positions/ });
+  expect(heading).toHaveTextContent("not checked");
+  expect(heading).not.toHaveTextContent(/\d+ protocols?/);
 });
 it("isolates a protocol failure from the rest of the wallet", async () => {
   network();

@@ -154,7 +154,7 @@ export function createDmndClient(
     if (allowed?.some((value) => normalizeAddress(value) !== value))
       return { ok: false, kind: "configuration" };
     if (allowed && !allowed.includes(wallet))
-      return { ok: false, kind: "not_enabled" };
+      return { ok: false, kind: "not_enabled", scope: "wallet" };
     const budget =
       env.DMND_REQUEST_BUDGET === undefined
         ? undefined

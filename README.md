@@ -12,7 +12,7 @@ The screenshot shows the wallet page rendered from synthetic test fixtures, not 
 ## Features
 
 - **No sign-up.** Paste a public address. No wallet connection or account is required.
-- **Portfolio.** The headline is DMND's authoritative known net value. Holdings page 20 at a time, are searchable by name, symbol or mint, and show indexed buy/sell totals and P&L estimates where DMND has trading history. Expandable protocol views cover native staking, liquid staking, Kamino, Solend, MarginFi, Orca, Raydium, Meteora DLMM, Meteora DAMM v2, Drift and Velocity.
+- **Portfolio.** The headline is DMND's authoritative known net value. The holdings list shows the top 10 priced tokens, with unpriced and tiny balances collapsed into one line; it is searchable by name, symbol or mint, and shows indexed buy/sell totals and P&L estimates where DMND has trading history. Expandable protocol views cover native staking, liquid staking, Kamino, Solend, MarginFi, Orca, Raydium, Meteora DLMM, Meteora DAMM v2, Drift and Velocity.
 - **Activity.** Observed executions, transfers, fees and net changes, with UTC date filters and opaque cursor pages kept in the URL.
 - **Watchlist.** Save addresses and optional labels in your browser. The list makes no wallet data requests.
 - **Server-only gateway.** DMND credentials never reach the browser. The browser calls same-origin `/api/wallet/...` routes, and a data error never substitutes synthetic values.
@@ -45,7 +45,7 @@ Live data comes from the [DMND API](https://docs.dmnd.dev) through a server-side
 
 Protocol IDs: `stake`, `liquid-staking`, `kamino`, `solend`, `marginfi`, `orca`, `raydium-clmm`, `meteora`, `meteora-damm-v2`, `raydium-cpmm`, `raydium-amm-v4`, `raydium-farms`, `drift`, `velocity`. These are supported consumer views, not a claim that every upstream protocol is currently activated. Summary, overview, indexed trading positions and activity use fixed routes independently.
 
-The gateway accepts only known resources and validated filters, rejects redirects and mismatched wallets or summary component sources, times out requests, and returns safe errors. Known summary components must identify the correct wallet, resource and protocol; future components retain canonical wallet-scoped provenance and the service's authoritative total. Protocol requests are lazy and limited to four at a time.
+The gateway accepts only known resources and validated filters, rejects redirects and mismatched wallets or summary component sources, times out requests, and returns safe errors. Known summary components must identify the correct wallet, resource and protocol; future components retain canonical wallet-scoped provenance and the service's authoritative total. Protocol cards for sources with a value in the summary, or a receipt in the holdings, load when the page loads; the rest stay collapsed under "Not checked yet" and load only when opened. Requests are limited to four at a time.
 
 Token images load lazily from credential-free HTTPS URLs on DNS hostnames, with no page referrer. Native IPFS image URIs resolve through HTTPS, and IPFS images can retry the same CID and path through a bounded set of public gateways. Literal IPs, local hostnames and custom ports are refused; missing or failed images fall back to initials. Native SOL uses a local vector icon. Images are loaded by the browser, never through a server proxy.
 

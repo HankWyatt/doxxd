@@ -1,6 +1,6 @@
 "use client";
 import { useRef, useState } from "react";
-import { ChevronDown, Layers3 } from "lucide-react";
+import { ChevronDown, Info, Layers3 } from "lucide-react";
 import type { ProtocolResource, Schemas } from "@/lib/dmnd/contracts";
 import { protocolResources, resources } from "@/lib/dmnd/resources";
 import {
@@ -436,7 +436,7 @@ function HoldingsTable({
                             aria-label="estimate"
                             aria-describedby="holdings-pnl-note"
                           >
-                            <span aria-hidden="true">ⓘ</span>
+                            <Info size={12} aria-hidden="true" />
                           </button>
                           <span role="tooltip" id="holdings-pnl-note" aria-hidden="true">
                             Indexed average-cost estimate; partial history, opening balances, transfers and fees can affect actual results.
@@ -530,7 +530,7 @@ function HoldingsTable({
         {trading && <TradingCoverage trading={trading} />}
         <details className="coverage-note">
           <summary>
-            <span aria-hidden="true">ⓘ</span>{" "}
+            <Info size={12} aria-hidden="true" />{" "}
             {overview.coverage.complete
               ? "Token snapshot observed"
               : "Token coverage is incomplete"}

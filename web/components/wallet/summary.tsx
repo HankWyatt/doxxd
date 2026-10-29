@@ -1,5 +1,6 @@
 "use client";
 import { useState, type ReactNode } from "react";
+import { Info } from "lucide-react";
 import type { ResourceData, ResourceResult } from "@/lib/dmnd/contracts";
 import { toSummary } from "@/lib/portfolio/model";
 import {
@@ -66,7 +67,7 @@ export function WalletSummary({
               aria-expanded={open}
               onClick={() => setOpen((v) => !v)}
             >
-              ⓘ
+              <Info size={13} aria-hidden="true" />
             </button>
           </div>
           <div className="summary-value numeric">

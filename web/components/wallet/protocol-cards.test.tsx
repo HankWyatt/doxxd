@@ -263,22 +263,58 @@ it("failed card shows retry not zero", async () => {
   expect(onStatus).toHaveBeenLastCalledWith("orca", expect.any(Function));
 });
 
+it("a wallet turned away by the allowlist is not told other sections remain", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json({ ok: false, kind: "not_enabled", scope: "wallet" }),
+    ),
+  );
+  card("kamino");
+  expect(await screen.findByText("This wallet isn’t enabled yet")).toBeVisible();
+  expect(screen.queryByText(/remain available/)).not.toBeInTheDocument();
+});
+
+it("an incomplete, unchecked card shows an unknown total, never $0.00", () => {
+  serve("kamino", fixture("kamino"));
+  const unchecked: Schemas["WalletPortfolioComponent"] = {
+    ...component("kamino_lend", "0"),
+    coverage_complete: false,
+    coverage_status: "queued",
+  };
+  const { container } = card("kamino", { component: unchecked, defaultOpen: false });
+  const value = container.querySelector(".protocol-value")!;
+  expect(value).toHaveTextContent("—");
+  expect(value).not.toHaveTextContent("$");
+});
+
+it("a confirmed complete card with nothing found keeps its checked $0.00", () => {
+  serve("kamino", fixture("kamino"));
+  const { container } = card("kamino", {
+    component: component("kamino_lend", "0"),
+    defaultOpen: false,
+  });
+  expect(container.querySelector(".protocol-value")).toHaveTextContent("$0.00");
+});
+
 it("details keeps technical rows", async () => {
   serve("meteora-damm-v2", dammV2Page());
   const { container } = card("meteora-damm-v2", { address: DAMM.wallet });
   const table = await screen.findByRole("table");
-  // Card-level coverage and source clocks sit under "ⓘ details".
+  // Card-level coverage and source clocks sit under "details".
   const note = container.querySelector<HTMLElement>(".coverage-note")!;
   const summary = note.querySelector("summary")!;
-  expect(summary).toHaveTextContent("ⓘ details");
+  expect(summary).toHaveTextContent("details");
+  expect(summary.querySelector("svg")).toBeInTheDocument();
   fireEvent.click(summary);
   expect(within(note).getByText("Source snapshot positions: 1.")).toBeVisible();
   expect(within(note).getByText("Coverage reason")).toBeVisible();
-  // Each row keeps its PositionDetail behind its own "ⓘ details".
+  // Each row keeps its PositionDetail behind its own "details".
   const toggle = within(table).getByRole("button", {
     name: "SYNA / " + short(DAMM.tokenB) + " details",
   });
-  expect(toggle).toHaveTextContent("ⓘ details");
+  expect(toggle).toHaveTextContent("details");
+  expect(toggle.querySelector("svg")).toBeInTheDocument();
   expect(toggle).toHaveAttribute("aria-expanded", "false");
   fireEvent.click(toggle);
   expect(toggle).toHaveAttribute("aria-expanded", "true");

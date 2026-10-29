@@ -9,9 +9,9 @@ import { assertNewAddressProfile, newAddressRouteAllowed, reserveNewAddressReque
   completeNewAddressRequest } from "./new-address-profile.mjs";
 
 const tails = new Map();
-const safeError = (kind, status) =>
+const safeError = (kind, status, extra = {}) =>
   Response.json(
-    { ok: false, kind },
+    { ok: false, kind, ...extra },
     { status, headers: { "cache-control": "no-store" } },
   );
 
@@ -57,8 +57,8 @@ export function boundedProxyHandler(config, network = fetch) {
       if (!nativeStakeRouteAllowed(config.nativeStakeProfile, request)) return safeError("refused", 422);
     } else {
       if (!APPROVED_WALLETS.includes(wallet))
-        return safeError("unavailable", 403);
-      if (!CORE.includes(resource)) return safeError("unavailable", 503);
+        return safeError("not_enabled", 403, { scope: "wallet" });
+      if (!CORE.includes(resource)) return safeError("not_enabled", 503);
       if (request.method !== "GET") return safeError("invalid_input", 405);
       // The validation profile never falls back to spending original CORE reads.
       if (config.extensionMode === "bonus" && (resource !== "overview" || url.search))

@@ -44,6 +44,11 @@ const messages: Record<ResourceError["kind"], [string, string]> = {
     "The data service didn’t return a usable response. Other wallet sections remain available.",
   ],
 };
+// The allowlist turned this wallet away, so no section will load for it.
+const walletNotEnabled: [string, string] = [
+  "This wallet isn’t enabled yet",
+  "This connection isn’t set up to read this wallet, so none of its sections are available here.",
+];
 export function ResourceState({
   error,
   retry,
@@ -67,7 +72,10 @@ export function ResourceState({
     );
     return () => clearInterval(timer);
   }, [error]);
-  const [title, detail] = messages[error.kind];
+  const [title, detail] =
+    error.kind === "not_enabled" && error.scope === "wallet"
+      ? walletNotEnabled
+      : messages[error.kind];
   return (
     <div className="empty-state" role="status">
       <strong>{title}</strong>

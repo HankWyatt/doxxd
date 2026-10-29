@@ -49,6 +49,8 @@ export type ResourceError = {
     | "upstream";
   retryAfterSeconds?: number;
   upstreamStatus?: 401 | 403;
+  // "not_enabled" only: the whole wallet is not enabled here, not one source.
+  scope?: "wallet";
 };
 export type ResourceResult<T> = { ok: true; data: T } | ResourceError;
 export const fixtureScenarios = [

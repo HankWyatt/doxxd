@@ -92,6 +92,12 @@ it("fails closed for unknown wallets, write methods, redirects and malformed gra
     "http://127.0.0.1:4317/api/wallet/11111111111111111111111111111111/summary",
   );
   expect((await handle(wrong)).status).toBe(403);
+  expect(await (await handle(wrong.clone())).json()).toEqual({
+    ok: false,
+    kind: "not_enabled",
+    scope: "wallet",
+  });
+  expect(calls).toBe(0);
   expect(
     (await handle(new Request(request().url, { method: "POST" }))).status,
   ).toBe(405);
@@ -105,6 +111,18 @@ it("fails closed for unknown wallets, write methods, redirects and malformed gra
   });
   expect((await missing(request())).status).toBe(422);
   expect(calls).toBe(1);
+});
+it("answers a protocol read the validation proxy does not serve as not enabled, not unavailable", async () => {
+  const path = grant();
+  let calls = 0;
+  const handle = boundedProxyHandler(config(path), async () => {
+    calls++;
+    return Response.json({});
+  });
+  const response = await handle(request("kamino"));
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({ ok: false, kind: "not_enabled" });
+  expect(calls).toBe(0);
 });
 it("reserves before a failed attempt and does not retry or release it", async () => {
   const path = grant(1);
