@@ -15,6 +15,25 @@ const entryPath = resolve(buildDir, "index.ts");
 const walletStubPath = fileURLToPath(new URL("./wallet-stub.ts", import.meta.url));
 const walletPackages = new Set(["@wallet-standard/react-core", "@solana/react"]);
 
+// The header's account card (Radix Popover and its positioning code) is a lazy
+// import that only runs after a wallet connects in the browser.
+const menuPath = fileURLToPath(
+  new URL("../../components/wallet-connect/account-menu.tsx", import.meta.url),
+);
+const menuStubPath = fileURLToPath(
+  new URL("../../components/wallet-connect/account-menu.stub.ts", import.meta.url),
+);
+
+function isAccountMenu(id: string, importer: string | undefined): boolean {
+  const bare = id.split("?")[0];
+  if (/^@\/components\/wallet-connect\/account-menu(\.tsx)?$/.test(bare)) return true;
+  const path =
+    bare.startsWith(".") && importer
+      ? resolve(dirname(importer.split("?")[0]), bare)
+      : bare;
+  return path === menuPath || path === menuPath.replace(/\.tsx$/, "");
+}
+
 function isBuildEntry(id: string, importer: string | undefined): boolean {
   const bare = id.split("?")[0];
   if (/^@\/lib\/actions\/build(\/index(\.ts)?)?$/.test(bare)) return true;
@@ -32,6 +51,7 @@ export function ssrStubPlugin(): Plugin {
     resolveId(id, importer) {
       if (this.environment?.name === "client") return undefined;
       if (walletPackages.has(id)) return walletStubPath;
+      if (isAccountMenu(id, importer)) return menuStubPath;
       return isBuildEntry(id, importer) ? stubPath : undefined;
     },
   };

@@ -17,7 +17,8 @@ async function openOwnWallet(page: Page, signBehavior: "sign" | "reject") {
   await installMockWallet(page, { address: owner, signBehavior });
   await page.goto(`/wallet/${owner}`);
   await waitForWalletHydration(page);
-  await page.getByRole("button", { name: "Connect wallet" }).click();
+  // Connect from the site header (the wallet page has no button of its own).
+  await page.locator(".site-header").getByRole("button", { name: "Connect wallet" }).click();
   await page.getByRole("button", { name: /Mock/ }).click();
   await expect(page.getByText("Your wallet · Mock")).toBeVisible();
   const damm = page.locator("#protocol-meteora-damm-v2");
@@ -55,6 +56,19 @@ test("security headers on pages and API responses", async ({ page, request }) =>
     expect(other.status(), method).toBe(405);
     expect(other.headers()["allow"], method).toBe("POST");
   }
+});
+
+test("the header's Claim LP fees link opens the DAMM v2 card from another page", async ({ page }) => {
+  const { damm } = await openOwnWallet(page, "sign");
+  const owner = new URL(page.url()).pathname.split("/").at(-1)!;
+  await page.goto("/watchlist");
+  await page.getByRole("button", { name: /^Connected wallet / }).click();
+  const card = page.getByRole("dialog", { name: "Wallet account" });
+  await expect(card.getByText("Opportunities")).toBeVisible();
+  await card.getByRole("link", { name: /Claim LP fees/ }).click();
+  await expect(page).toHaveURL(`/wallet/${owner}#protocol-meteora-damm-v2`);
+  await expect(damm.getByRole("button", { name: "Collapse Meteora DAMM v2" })).toBeFocused();
+  await expect(damm).toBeInViewport();
 });
 
 test("claim all fees on the synthetic DAMM v2 wallet", async ({ page }) => {

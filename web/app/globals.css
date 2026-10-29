@@ -1589,7 +1589,7 @@ tbody tr.data-row:hover {
 
 .watchlist-add > .button { background: var(--accent); border-color: var(--accent); color: #0b211b; }
 
-/* Wallet connection in the wallet header */
+/* Wallet connection: the site header control and the wallet page's tag */
 .button.primary { background: var(--accent); border-color: var(--accent); color: #0b211b; font-weight: 700; }
 .button.primary:hover:not(:disabled) { color: #0b211b; border-color: var(--accent); filter: brightness(1.06); }
 .pill {
@@ -1648,16 +1648,102 @@ tbody tr.data-row:hover {
 .wallet-picker-empty { display: flex; flex-direction: column; gap: 6px; padding: 9px 10px; font-size: 13px; color: var(--muted); }
 .wallet-picker-empty a { color: var(--accent); }
 .wallet-picker-error { padding: 0 10px 6px; font-size: 12px; color: var(--negative); }
+.pill-link { color: var(--accent); }
+.pill-link:hover { text-decoration: underline; }
+.header-meta .wallet-connect .button { padding: 8px 14px; }
+.account-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 10px 0 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  color: var(--text);
+  font: 600 13px ui-monospace, SFMono-Regular, monospace;
+  cursor: pointer;
+}
+.account-pill:hover,
+.account-pill[data-state="open"] {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+}
+.account-pill:focus-visible,
+.account-action:focus-visible,
+.account-opportunity:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.account-pill-chevron { color: var(--muted); transition: transform 0.15s; }
+.account-pill[data-state="open"] .account-pill-chevron { transform: rotate(180deg); }
+.account-icon,
+.account-avatar { display: inline-block; flex: none; border-radius: 50%; }
+.account-card {
+  z-index: 50;
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--raised);
+  box-shadow: 0 18px 48px #000b;
+  color: var(--text);
+}
+.account-card-head { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+.account-worth { margin-top: 18px; }
+.account-worth-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; min-height: 40px; }
+.account-worth-value { font-size: 30px; font-weight: 800; letter-spacing: -0.8px; line-height: 1.2; }
+.account-worth-skeleton { width: 150px; height: 32px; }
+.account-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 20px; }
+.account-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  padding: 4px 0;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.account-action:hover { color: var(--text); }
+.account-action-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--text);
+}
+.account-action:hover .account-action-icon {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  color: var(--accent);
+}
+.account-opportunities { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.account-opportunity {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  font-size: 13px;
+}
+.account-opportunity:hover { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.account-opportunity svg { color: var(--muted); }
 @media (max-width: 600px) {
   .wallet-actions { gap: 8px; }
-  /* The shared mobile rule collapses header buttons to icons; these carry text only. */
-  .wallet-actions .wallet-connect .button,
-  .wallet-actions .button.wallet-connect-small {
-    padding: 9px 12px;
-    font-size: 12px;
-    gap: 8px;
-  }
-  .wallet-picker { right: auto; left: 0; }
+  /* Icon only: the address and chevron return in the account card. */
+  .account-pill { gap: 0; height: 34px; padding: 0 6px; }
+  .account-pill-address,
+  .account-pill-chevron { display: none; }
+  /* Full width under the header; Radix keeps it 16px from each edge. */
+  .account-card { width: calc(100vw - 32px); }
+  .header-meta .wallet-connect .button { padding: 7px 10px; font-size: 11px; }
 }
 
 /* On-site LP actions on your own wallet's LP cards */

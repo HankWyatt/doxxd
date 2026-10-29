@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ArrowUpRight,
 } from "lucide-react";
-import { ActionsAvailabilityProvider } from "@/lib/actions/availability";
 import { WalletFrame } from "../wallet/frame";
 import { ResourceState, LoadingRows } from "../resource-state";
 import { useWalletResource } from "@/lib/use-wallet-resource";
@@ -28,7 +27,6 @@ type Props = {
   cursor?: string;
   mode?: WalletDataMode;
   source?: "transactions" | "activity";
-  actionsEnabled?: boolean;
 };
 export function Activity({
   address,
@@ -36,28 +34,25 @@ export function Activity({
   cursor,
   mode = LIVE_MODE,
   source = "transactions",
-  actionsEnabled = false,
 }: Props) {
   return (
-    <ActionsAvailabilityProvider enabled={actionsEnabled}>
-      <WalletFrame address={address} tab="activity" mode={mode}>
-        {source === "activity" ? (
-          <BalanceFeed
-            address={address}
-            window={window}
-            cursor={cursor}
-            mode={mode}
-          />
-        ) : (
-          <GroupedFeed
-            address={address}
-            window={window}
-            cursor={cursor}
-            mode={mode}
-          />
-        )}
-      </WalletFrame>
-    </ActionsAvailabilityProvider>
+    <WalletFrame address={address} tab="activity" mode={mode}>
+      {source === "activity" ? (
+        <BalanceFeed
+          address={address}
+          window={window}
+          cursor={cursor}
+          mode={mode}
+        />
+      ) : (
+        <GroupedFeed
+          address={address}
+          window={window}
+          cursor={cursor}
+          mode={mode}
+        />
+      )}
+    </WalletFrame>
   );
 }
 type FeedProps = {

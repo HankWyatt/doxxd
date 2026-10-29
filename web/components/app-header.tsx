@@ -1,5 +1,6 @@
 import { Bookmark } from "lucide-react";
 import { AddressSearch } from "./address-search";
+import { HeaderAccount } from "./wallet-connect/header-account";
 export function AppHeader({ search = false }: { search?: boolean }) {
   return (
     <header className="site-header">
@@ -20,6 +21,7 @@ export function AppHeader({ search = false }: { search?: boolean }) {
           <i />
           Solana
         </span>
+        <HeaderAccount />
       </nav>
     </header>
   );

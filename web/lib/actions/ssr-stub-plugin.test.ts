@@ -56,6 +56,24 @@ describe("ssrStubPlugin", () => {
     },
   );
 
+  it("stubs the header's lazy account card outside the client environment only", () => {
+    const menuStub = fileURLToPath(
+      new URL("../../components/wallet-connect/account-menu.stub.ts", import.meta.url),
+    );
+    const header = fileURLToPath(
+      new URL("../../components/wallet-connect/header-account.tsx", import.meta.url),
+    );
+    const menu = fileURLToPath(
+      new URL("../../components/wallet-connect/account-menu.tsx", import.meta.url),
+    );
+    expect(resolve("ssr", "./account-menu", header)).toBe(menuStub);
+    expect(resolve("rsc", "@/components/wallet-connect/account-menu")).toBe(menuStub);
+    expect(resolve(undefined, menu)).toBe(menuStub);
+    expect(resolve("client", "./account-menu", header)).toBeUndefined();
+    expect(resolve("ssr", "./account-menu.stub", header)).toBeUndefined();
+    expect(resolve("ssr", "./account-menu", importer)).toBeUndefined();
+  });
+
   it("ignores other modules, including siblings of the entry", () => {
     expect(resolve("ssr", "@/lib/actions/availability")).toBeUndefined();
     expect(resolve("ssr", "@/lib/actions/build-other")).toBeUndefined();

@@ -2,15 +2,31 @@ import { act, render, renderHook, screen, waitFor } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import bs58 from "bs58";
 import type { ReactNode } from "react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ActionsAvailabilityProvider } from "@/lib/actions/availability";
+import { pillAddress } from "@/lib/actions/account";
 import { createFakeWallet } from "./fake-wallet.test-util";
+import { HeaderAccount } from "./header-account";
 import { HeaderWallet } from "./header-wallet";
 import { useConnectedWallet, useCurrentAddress, WalletConnectProvider } from "./provider";
 
 const VIEWED = bs58.encode(new Uint8Array(32).fill(7));
 const OTHER = bs58.encode(new Uint8Array(32).fill(8));
 const STORAGE_KEY = "doxxd.wallet.v1";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+// Radix measures the account menu's anchor; jsdom has no ResizeObserver.
+beforeAll(() => {
+  if (!("ResizeObserver" in globalThis))
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+});
 
 const cleanup: Array<() => void> = [];
 function track<T extends ReturnType<typeof createFakeWallet>>(fake: T): T {
@@ -28,16 +44,29 @@ function Shell({ enabled = true, children }: { enabled?: boolean; children: Reac
 function renderHeader(viewed = VIEWED, enabled = true) {
   return render(
     <Shell enabled={enabled}>
+      <HeaderAccount />
       <HeaderWallet viewed={viewed} />
     </Shell>,
   );
 }
-beforeEach(() => window.localStorage.clear());
+beforeEach(() => {
+  window.localStorage.clear();
+  // The account card loads the connected wallet's summary; it is not under test here.
+  vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+});
 afterEach(() => {
   cleanup.splice(0).forEach((fn) => fn());
+  vi.unstubAllGlobals();
 });
+async function disconnectFromMenu(address: string) {
+  await userEvent.click(
+    await screen.findByRole("button", { name: `Connected wallet ${pillAddress(address)}` }),
+  );
+  await userEvent.click(await screen.findByRole("button", { name: "Disconnect" }));
+}
+const otherTag = "Viewing another wallet · Go to my wallet";
 
-describe("HeaderWallet", () => {
+describe("HeaderWallet with the header account control", () => {
   it("renders nothing when actions are disabled", () => {
     track(createFakeWallet({ address: VIEWED }));
     const { container } = renderHeader(VIEWED, false);
@@ -75,8 +104,14 @@ describe("HeaderWallet", () => {
     await userEvent.click(await screen.findByRole("button", { name: /Phantom/ }));
     expect(await screen.findByText("Your wallet · Phantom")).toBeInTheDocument();
     expect(window.localStorage.getItem(STORAGE_KEY)).toContain("Phantom");
-    await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    // The page itself offers no Connect or Disconnect button any more.
+    await screen.findByRole("button", { name: `Connected wallet ${pillAddress(VIEWED)}` });
+    expect(screen.getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual([
+      `Connected wallet ${pillAddress(VIEWED)}`,
+    ]);
+    await disconnectFromMenu(VIEWED);
     expect(await screen.findByRole("button", { name: "Connect wallet" })).toBeInTheDocument();
+    expect(screen.queryByText(/Your wallet/)).toBeNull();
     expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
     expect(fake.wallet.accounts).toEqual([]);
   });
@@ -86,11 +121,9 @@ describe("HeaderWallet", () => {
     renderHeader();
     await userEvent.click(await screen.findByRole("button", { name: "Connect wallet" }));
     await userEvent.click(await screen.findByRole("button", { name: /Phantom/ }));
-    const short = `${OTHER.slice(0, 5)}…${OTHER.slice(-5)}`;
-    expect(
-      await screen.findByText(`Connected as ${short} · viewing another wallet`),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Go to my wallet" })).toHaveAttribute(
+    const link = await screen.findByRole("link", { name: "Go to my wallet" });
+    expect(link.closest(".pill")).toHaveTextContent(otherTag);
+    expect(link).toHaveAttribute(
       "href",
       `/wallet/${OTHER}`,
     );
@@ -104,6 +137,8 @@ describe("HeaderWallet", () => {
     renderHeader();
     await waitFor(() => expect(fake.connectCalls).toEqual([{ silent: true }]));
     expect(screen.getByRole("button", { name: "Connect wallet" })).toBeInTheDocument();
+    // Disconnected: the page shows no tag at all.
+    expect(screen.queryByText(/Your wallet|Viewing another wallet/)).toBeNull();
   });
 
   it("restores an authorized remembered wallet without a prompt", async () => {
@@ -165,7 +200,7 @@ describe("HeaderWallet", () => {
     await userEvent.click(await screen.findByRole("button", { name: /Phantom/ }));
     expect(await screen.findByText("Your wallet · Phantom")).toBeInTheDocument();
     act(() => fake.switchAccount(OTHER));
-    expect(await screen.findByText(/viewing another wallet/)).toBeInTheDocument();
+    expect(await screen.findByText(/Viewing another wallet/)).toBeInTheDocument();
     act(() => fake.switchAccount(null));
     expect(await screen.findByRole("button", { name: "Connect wallet" })).toBeInTheDocument();
   });

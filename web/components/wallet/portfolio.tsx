@@ -1,8 +1,7 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Layers3 } from "lucide-react";
 import { useWalletResource } from "@/lib/use-wallet-resource";
-import { ActionsAvailabilityProvider } from "@/lib/actions/availability";
 import { useWalletPositions } from "@/lib/use-wallet-positions";
 import {
   LIVE_MODE,
@@ -24,18 +23,14 @@ import { RecoveryNotice } from "./recovery-notice";
 export function Portfolio({
   address,
   mode = LIVE_MODE,
-  actionsEnabled = false,
 }: {
   address: string;
   mode?: WalletDataMode;
-  actionsEnabled?: boolean;
 }) {
   return (
-    <ActionsAvailabilityProvider enabled={actionsEnabled}>
-      <WalletFrame address={address} mode={mode}>
-        <PortfolioContent address={address} mode={mode} />
-      </WalletFrame>
-    </ActionsAvailabilityProvider>
+    <WalletFrame address={address} mode={mode}>
+      <PortfolioContent address={address} mode={mode} />
+    </WalletFrame>
   );
 }
 function PortfolioContent({
@@ -138,7 +133,18 @@ function PortfolioContent({
     }));
     setTarget(resource);
   }
-  const card = (resource: ProtocolResource) => (
+  // A link from another page (the header's "Claim LP fees") can name a card
+  // before the summary has mounted it; follow the anchor once, when it does.
+  const arrival = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (arrival.current === undefined)
+      arrival.current = window.location.hash.slice(1) || null;
+    const resource = cards.find((r) => "protocol-" + r === arrival.current);
+    if (!resource) return;
+    arrival.current = null;
+    showProtocol(resource);
+  });
+  const card =(resource: ProtocolResource) => (
     <ProtocolSection
       key={address + resource}
       address={address}

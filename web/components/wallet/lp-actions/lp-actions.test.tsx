@@ -159,7 +159,7 @@ describe("who sees LP actions", () => {
   it("shows nothing new on another wallet's page", async () => {
     serve({ "meteora-damm-v2": dammPage() });
     mount(DAMM.wallet, "meteora-damm-v2", { connected: OTHER });
-    await screen.findByText(/viewing another wallet/);
+    await screen.findByText(/Viewing another wallet/);
     expect(await screen.findByText("3 positions")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Claim" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Withdraw" })).toBeNull();
@@ -183,7 +183,7 @@ describe("who sees LP actions", () => {
         ))}
       </Shell>,
     );
-    await screen.findByText(/viewing another wallet/);
+    await screen.findByText(/Viewing another wallet/);
     await screen.findByText("1 position");
     await screen.findByText(short(CPMM.tokenA) + " + " + short(CPMM.tokenB));
     expect(screen.queryByText(/at least/)).toBeNull();
@@ -227,7 +227,7 @@ describe("who sees LP actions", () => {
   it("hides the actions when the wallet switches account", async () => {
     const { fake } = await ownDamm();
     act(() => fake!.switchAccount(OTHER));
-    await screen.findByText(/viewing another wallet/);
+    await screen.findByText(/Viewing another wallet/);
     expect(screen.queryByRole("button", { name: "Claim" })).toBeNull();
     expect(screen.queryByText(/fees to claim/)).toBeNull();
   });
@@ -436,7 +436,7 @@ describe("claiming", () => {
     act(() => fake!.switchAccount(OTHER));
     expect(run.options().currentAddress()).toBe(OTHER);
     expect(run.options().wallet.address).toBe(DAMM.wallet);
-    await screen.findByText(/viewing another wallet/);
+    await screen.findByText(/Viewing another wallet/);
     expect(screen.queryByRole("button", { name: "Claim" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Claim all/ })).toBeNull();
   });

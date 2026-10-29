@@ -4,7 +4,8 @@ import { useConnect, useWallets, type UiWallet } from "@wallet-standard/react-co
 import { isSolanaSigner } from "@/lib/actions/wallet-session";
 import { useWalletConnectControls } from "./provider";
 
-export function ConnectButton() {
+/** `onChosen` runs after the visitor picks a wallet and it connects (never on a silent reconnect). */
+export function ConnectButton({ onChosen }: { onChosen?(name: string): void } = {}) {
   const { ready } = useWalletConnectControls();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLSpanElement>(null);
@@ -34,12 +35,18 @@ export function ConnectButton() {
       >
         Connect wallet
       </button>
-      {open && <WalletPicker onDone={() => setOpen(false)} />}
+      {open && <WalletPicker onDone={() => setOpen(false)} onChosen={onChosen} />}
     </span>
   );
 }
 
-function WalletPicker({ onDone }: { onDone(): void }) {
+function WalletPicker({
+  onDone,
+  onChosen,
+}: {
+  onDone(): void;
+  onChosen?(name: string): void;
+}) {
   const wallets = useWallets().filter(isSolanaSigner);
   return (
     <div className="wallet-picker" role="group" aria-label="Choose a Solana wallet">
@@ -52,14 +59,22 @@ function WalletPicker({ onDone }: { onDone(): void }) {
         </div>
       ) : (
         wallets.map((wallet) => (
-          <WalletOption key={wallet.name} wallet={wallet} onDone={onDone} />
+          <WalletOption key={wallet.name} wallet={wallet} onDone={onDone} onChosen={onChosen} />
         ))
       )}
     </div>
   );
 }
 
-function WalletOption({ wallet, onDone }: { wallet: UiWallet; onDone(): void }) {
+function WalletOption({
+  wallet,
+  onDone,
+  onChosen,
+}: {
+  wallet: UiWallet;
+  onDone(): void;
+  onChosen?(name: string): void;
+}) {
   const { choose } = useWalletConnectControls();
   const [connecting, connect] = useConnect(wallet);
   const [failed, setFailed] = useState(false);
@@ -75,6 +90,7 @@ function WalletOption({ wallet, onDone }: { wallet: UiWallet; onDone(): void }) 
             const accounts = await connect();
             if (accounts.length === 0) return setFailed(true);
             choose(wallet.name);
+            onChosen?.(wallet.name);
             onDone();
           } catch {
             setFailed(true);

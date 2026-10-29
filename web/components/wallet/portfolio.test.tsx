@@ -485,3 +485,18 @@ it("keeps a card opened during a summary failure mounted, without refetching, on
   expect(counts.get("orca")).toBe(1);
   expect(counts.get("stake")).toBe(1);
 });
+
+it("opens and focuses the card a link's #protocol- anchor names once the card appears", async () => {
+  // The header's "Claim LP fees" link lands here before the summary has
+  // mounted the card, so the browser's own anchor jump finds nothing.
+  window.history.replaceState(null, "", `/wallet/${DEMO_ADDRESS}#protocol-kamino`);
+  try {
+    network();
+    render(<Portfolio address={DEMO_ADDRESS} />);
+    const toggle = await screen.findByRole("button", { name: "Collapse Kamino Lend" });
+    await waitFor(() => expect(toggle).toHaveFocus());
+    expect(window.location.hash).toBe("#protocol-kamino");
+  } finally {
+    window.history.replaceState(null, "", "/");
+  }
+});
