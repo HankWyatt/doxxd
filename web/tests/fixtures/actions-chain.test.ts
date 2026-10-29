@@ -33,9 +33,9 @@ import {
   unpackMint,
 } from "@solana/spl-token";
 import {
+  ComputeBudgetProgram,
   Keypair,
   PublicKey,
-  TransactionInstruction,
   TransactionMessage,
   VersionedTransaction,
 } from "@solana/web3.js";
@@ -454,12 +454,15 @@ describe("chainFixture: shape", () => {
 });
 
 describe("mockActionRpc", () => {
-  const memo = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+  // Compute budget only: a top-level program the /api/rpc policy allows.
   function transaction(signer: Keypair): VersionedTransaction {
     const message = new TransactionMessage({
       payerKey: signer.publicKey,
       recentBlockhash: bs58.encode(new Uint8Array(32).fill(9)),
-      instructions: [new TransactionInstruction({ programId: memo, keys: [], data: Buffer.from("x") })],
+      instructions: [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }),
+        ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 20_000 }),
+      ],
     }).compileToV0Message();
     const tx = new VersionedTransaction(message);
     tx.sign([signer]);
@@ -472,19 +475,23 @@ describe("mockActionRpc", () => {
     const tx = transaction(chain.owner);
     const missing = Keypair.fromSeed(new Uint8Array(32).fill(99)).publicKey.toBase58();
 
-    const sim = await rpc.simulate(tx, [chain.dammV2.pool, missing]);
+    const sim = await rpc.simulate(tx, [chain.dammV2.pool, missing, chain.owner.publicKey.toBase58()]);
     expect(sim).toMatchObject({ err: null, unitsConsumed: 60_000 });
     const pool = chain.accounts.get(chain.dammV2.pool)!;
     expect(sim.accounts[0]).toEqual({ data: pool.data, lamports: pool.lamports, owner: pool.owner });
     expect(sim.accounts[1]).toBeNull();
+    // The fee payer has paid 5,000 + ceil(20,000 × 100,000 / 1,000,000).
+    expect(sim.accounts[2]!.lamports).toBe(SYNTHETIC.ownerLamports - 5_000 - 2_000);
 
     const raw = tx.serialize();
     const signature = await rpc.send(raw);
     expect(signature).toBe(bs58.encode(tx.signatures[0]));
     expect(rpc.sent).toEqual([raw]);
-    await expect(rpc.statuses([signature])).resolves.toEqual([
-      { slot: 1_000, confirmationStatus: "confirmed", err: null },
-    ]);
+    await expect(rpc.statuses([signature])).resolves.toEqual({
+      contextSlot: 1_000,
+      value: [{ slot: 1_000, confirmationStatus: "confirmed", err: null }],
+    });
+    await expect(rpc.chainTip()).resolves.toEqual({ blockHeight: SYNTHETIC.clock.blockHeight, slot: 1_000 });
     const latest = await rpc.latestBlockhash();
     expect(latest.lastValidBlockHeight).toBeGreaterThan(await rpc.blockHeight());
     expect((await rpc.priorityFees([chain.dammV2.pool])).length).toBeGreaterThan(0);
