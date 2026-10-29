@@ -388,7 +388,8 @@ describe("quoteWithdraw / buildWithdrawGroups (Meteora DAMM v2)", () => {
     expect(quote.closes).toBe(false);
     expect(quote.depositRefundLamports).toBeNull();
 
-    const { groups, expectation } = await buildWithdrawGroups(rpc, owner, t, 5_000, 100);
+    const { groups, expectation, closes } = await buildWithdrawGroups(rpc, owner, t, 5_000, 100);
+    expect(closes).toBe(false);
     expect(groups).toHaveLength(1);
     expect(groups[0].positionIds).toEqual([t.id]);
     const ixs = groups[0].instructions;
@@ -434,7 +435,8 @@ describe("quoteWithdraw / buildWithdrawGroups (Meteora DAMM v2)", () => {
     expect(receiveA.symbol).toBe("SYNA");
     expect(receiveA.decimals).toBe(9);
 
-    const { groups, expectation } = await buildWithdrawGroups(rpc, owner, t, 10_000, 100);
+    const { groups, expectation, closes } = await buildWithdrawGroups(rpc, owner, t, 10_000, 100);
+    expect(closes).toBe(true);
     const ixs = groups[0].instructions;
     expect(cpAmmNames(ixs)).toEqual(["claim_position_fee", "remove_all_liquidity", "claim_reward", "close_position"]);
     const removeAll = ixs.find((ix) => isCpAmm(ix, "remove_all_liquidity"))!;

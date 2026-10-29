@@ -91,14 +91,18 @@ export async function quoteWithdraw(
   return notImplemented();
 }
 
-/** The withdraw group for `bps` of `target`'s withdrawable liquidity (kind "withdraw"). */
+/**
+ * The withdraw group for `bps` of `target`'s withdrawable liquidity (kind
+ * "withdraw"), and whether it closes the position, read from the same chain
+ * state as the group, so the dialog can re-check what its quote promised.
+ */
 export async function buildWithdrawGroups(
   rpc: ActionRpc,
   owner: string,
   target: ActionTarget,
   bps: number,
   slippageBps: number,
-): Promise<{ groups: InstructionGroup[]; expectation: Expectation }> {
+): Promise<{ groups: InstructionGroup[]; expectation: Expectation; closes: boolean }> {
   if (isDammV2(target)) return buildDammV2WithdrawGroups(rpc, owner, target, bps, slippageBps);
   if (isClmm(target)) return buildClmmWithdrawGroups(rpc, owner, target, bps, slippageBps);
   return notImplemented();

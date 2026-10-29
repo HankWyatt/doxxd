@@ -659,7 +659,7 @@ export async function buildDammV2WithdrawGroups(
   target: DammV2Target,
   bps: number,
   slippageBps: number,
-): Promise<{ groups: InstructionGroup[]; expectation: Expectation }> {
+): Promise<{ groups: InstructionGroup[]; expectation: Expectation; closes: boolean }> {
   checkShare(bps, slippageBps, 1);
   const plan = await planWithdraw(rpc, owner, target, bps, slippageBps);
   if (plan.withdrawable.isZero()) throw new NothingToWithdrawError();
@@ -721,5 +721,6 @@ export async function buildDammV2WithdrawGroups(
       ]),
       positions: [positionExpectation(target)],
     },
+    closes: plan.quote.closes,
   };
 }

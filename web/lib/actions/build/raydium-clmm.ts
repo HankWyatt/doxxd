@@ -304,7 +304,14 @@ function paidMints(live: Live): LiveMint[] {
 const ataOf = (wallet: PublicKey, mint: LiveMint) =>
   getAssociatedTokenAddressSync(mint.address, wallet, false, mint.program);
 
-/** The wallet's ATA addresses (of `lives`' paid mints) that already hold an initialized token account. */
+/**
+ * The wallet's ATAs (of `lives`' paid mints) that need no create: an
+ * initialized token account the mint's token program owns, of that mint,
+ * whose owner field is the wallet. Anything else keeps its idempotent
+ * create, which fails safely on an account that is not the wallet's (ruling
+ * R-T9b). The wSOL ATA is never "existing": every group that unwraps it
+ * closes it, so the next group must create it again.
+ */
 async function existingAtas(rpc: ActionRpc, wallet: PublicKey, lives: Live[]): Promise<Set<string>> {
   const mints = new Map<string, LiveMint>();
   for (const mint of lives.flatMap(paidMints)) mints.set(ataOf(wallet, mint).toBase58(), mint);
@@ -312,9 +319,11 @@ async function existingAtas(rpc: ActionRpc, wallet: PublicKey, lives: Live[]): P
   const out = new Set<string>();
   for (const [ata, mint] of mints) {
     const info = accounts.get(ata);
-    // Lamports sent to an ATA address do not make it a token account: only
-    // an account the token program owns and has initialized counts.
-    if (info && info.owner.equals(mint.program) && attempt(() => unpackAccount(new PublicKey(ata), info, mint.program)))
+    if (mint.address.equals(NATIVE_MINT) || !info || !info.owner.equals(mint.program)) continue;
+    // Lamports sent to an ATA address do not make it a token account, and a
+    // token account whose owner was reassigned is not the wallet's.
+    const account = attempt(() => unpackAccount(new PublicKey(ata), info, mint.program));
+    if (account && account.isInitialized && account.owner.equals(wallet) && account.mint.equals(mint.address))
       out.add(ata);
   }
   return out;
@@ -627,7 +636,7 @@ export async function buildClmmWithdrawGroups(
   target: ClmmTarget,
   bps: number,
   slippageBps: number,
-): Promise<{ groups: InstructionGroup[]; expectation: Expectation }> {
+): Promise<{ groups: InstructionGroup[]; expectation: Expectation; closes: boolean }> {
   checkShare(bps, slippageBps, 1);
   const plan = await planWithdraw(rpc, owner, target, bps, slippageBps);
   if (plan.live.position.liquidity.isZero()) throw new NothingToWithdrawError();
@@ -649,5 +658,6 @@ export async function buildClmmWithdrawGroups(
       mints: mintExpectations([plan.live]),
       positions: [positionExpectation(target)],
     },
+    closes: plan.quote.closes,
   };
 }
