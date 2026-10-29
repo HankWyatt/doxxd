@@ -642,7 +642,7 @@ function HoldingRow({
                 <dd className="mono break">
                   {row.mint ? (
                     <a
-                      href={explorerHref("address", row.mint)}
+                      href={explorerHref("token", row.mint)}
                       target="_blank"
                       rel="noreferrer"
                     >

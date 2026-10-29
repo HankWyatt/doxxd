@@ -48,8 +48,7 @@ export function tokenImageCandidates(input: unknown): string[] {
     ? ["https://gateway.pinata.cloud" + path, primary, "https://ipfs.io" + path, "https://dweb.link" + path]
     : [primary])];
 }
-export function explorerHref(kind: "address" | "tx", value: string): string {
-  return (
-    "https://explorer.solana.com/" + kind + "/" + encodeURIComponent(value)
-  );
+/** Solscan page for a wallet or account, a token mint, or a transaction. */
+export function explorerHref(kind: "account" | "token" | "tx", value: string): string {
+  return "https://solscan.io/" + kind + "/" + encodeURIComponent(value);
 }

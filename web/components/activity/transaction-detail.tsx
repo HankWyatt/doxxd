@@ -174,7 +174,7 @@ export function TransactionDetail({
                       <br />
                       <a
                         className="mono faint"
-                        href={explorerHref("address", transfer.mint)}
+                        href={explorerHref("token", transfer.mint)}
                         target="_blank"
                         rel="noreferrer"
                       >

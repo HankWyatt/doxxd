@@ -300,7 +300,7 @@ function FeedBody({
                             href={explorerHref("tx", row.signature)}
                             target="_blank"
                             rel="noreferrer"
-                            aria-label="View transaction on Solana Explorer"
+                            aria-label="View transaction on Solscan"
                           >
                             <ArrowUpRight size={13} />
                           </a>

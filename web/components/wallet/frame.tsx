@@ -88,10 +88,10 @@ function FrameContent({
                 />
                 <a
                   className="icon-button"
-                  href={explorerHref("address", address)}
+                  href={explorerHref("account", address)}
                   target="_blank"
                   rel="noreferrer"
-                  aria-label="View wallet on Solana Explorer"
+                  aria-label="View wallet on Solscan"
                 >
                   <ArrowUpRight size={13} />
                 </a>

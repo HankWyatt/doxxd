@@ -67,7 +67,9 @@ it("rejects non-HTTPS, credentialed, local and literal-address image URLs", () =
     "https://tokens.example.com:8443/a", "/icon.png", null, {},
   ])
     expect(tokenImageUrl(value)).toBeNull();
-  expect(explorerHref("address", "a/b")).toBe(
-    "https://explorer.solana.com/address/a%2Fb",
+  expect(explorerHref("account", "a/b")).toBe("https://solscan.io/account/a%2Fb");
+  expect(explorerHref("token", "So11111111111111111111111111111111111111112")).toBe(
+    "https://solscan.io/token/So11111111111111111111111111111111111111112",
   );
+  expect(explorerHref("tx", "sig/1")).toBe("https://solscan.io/tx/sig%2F1");
 });
