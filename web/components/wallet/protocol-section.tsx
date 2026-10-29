@@ -39,11 +39,17 @@ function kindOf(resource: ProtocolResource): ProtocolKind {
   return kind;
 }
 // Only these may succeed on a retry; the rest are answers, not outages.
-const TRANSIENT: ResourceError["kind"][] = ["upstream", "timeout", "rate_limited"];
-// The gateway has not enabled or configured this source.
+// "unavailable" is DMND's temporary 503.
+const TRANSIENT: ResourceError["kind"][] = [
+  "upstream",
+  "timeout",
+  "rate_limited",
+  "unavailable",
+];
+// This deployment has not enabled, configured or supported this source.
 const NOT_ENABLED: ResourceError["kind"][] = [
   "configuration",
-  "unavailable",
+  "not_enabled",
   "unsupported",
 ];
 const plural = (count: number, noun: string) =>
@@ -61,6 +67,7 @@ export function ProtocolSection({
   limit = 5,
   onStatus,
   reveal,
+  onOpened,
 }: {
   address: string;
   resource: ProtocolResource;
@@ -73,12 +80,22 @@ export function ProtocolSection({
   onStatus?: ProtocolStatus;
   /** Each new value opens the card (a followed receipt link). */
   reveal?: number;
+  /** The visitor opened the card (toggle or page-level retry). */
+  onOpened?: (resource: ProtocolResource) => void;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const [revealed, setRevealed] = useState(reveal);
   if (reveal !== revealed) {
     setRevealed(reveal);
     setOpen(true);
+  }
+  // A card that becomes open by default (the summary arrived) opens, unless
+  // the visitor has already toggled it; it is never closed from outside.
+  const [initial, setInitial] = useState(defaultOpen);
+  const [toggled, setToggled] = useState(false);
+  if (defaultOpen !== initial) {
+    setInitial(defaultOpen);
+    if (defaultOpen && !toggled) setOpen(true);
   }
   // A failure outlives a collapse: it clears only when the card loads again.
   const [failed, setFailed] = useState(false);
@@ -98,12 +115,15 @@ export function ProtocolSection({
           ? () => {
               // A collapsed card retries by opening, which loads it afresh.
               if (isOpen.current) retryBody.current?.();
-              else setOpen(true);
+              else {
+                setOpen(true);
+                onOpened?.(resource);
+              }
             }
           : null,
       );
     },
-    [resource, onStatus],
+    [resource, onStatus, onOpened],
   );
   // Unmounting (another wallet) withdraws this card's failure.
   useLayoutEffect(() => () => onStatus?.(resource, null), [resource, onStatus]);
@@ -114,7 +134,11 @@ export function ProtocolSection({
         className="protocol-toggle"
         aria-expanded={open}
         aria-label={(open ? "Collapse " : "Expand ") + definition.label}
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          setToggled(true);
+          setOpen(!open);
+          if (!open) onOpened?.(resource);
+        }}
       >
         <span className="protocol-icon" aria-hidden="true">
           {definition.label.slice(0, 2)}

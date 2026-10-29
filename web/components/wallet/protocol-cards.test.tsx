@@ -310,7 +310,7 @@ it("claimable fees column shows only DMND claimable fees, never rewards", async 
   expect(within(fees).queryByText(short(DAMM.reward))).toBeNull();
 });
 
-it.each(["configuration", "unavailable", "unsupported"] as const)(
+it.each(["configuration", "not_enabled", "unsupported"] as const)(
   "a %s protocol shows Not available yet and is not counted as a failure",
   async (kind) => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: false, kind })));
@@ -325,7 +325,8 @@ it.each(["configuration", "unavailable", "unsupported"] as const)(
   },
 );
 
-it.each(["upstream", "timeout", "rate_limited"] as const)(
+// "unavailable" is a DMND 503: temporary, so counted and retryable.
+it.each(["upstream", "timeout", "rate_limited", "unavailable"] as const)(
   "a transient %s failure is counted and hides the total",
   async (kind) => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: false, kind })));
@@ -338,6 +339,7 @@ it.each(["upstream", "timeout", "rate_limited"] as const)(
     expect(container.querySelector(".protocol-value")).toHaveTextContent(/^—$/);
     expect(onStatus).toHaveBeenLastCalledWith("orca", expect.any(Function));
     expect(screen.queryByText("Not available yet")).toBeNull();
+    expect(screen.getByRole("button", { name: /Retry/ })).toBeInTheDocument();
   },
 );
 

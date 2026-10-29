@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { Schemas } from "../dmnd/contracts";
-import { chipModel } from "./chips";
+import { chipModel, componentState } from "./chips";
 
 type Component = Schemas["WalletPortfolioComponent"];
 
@@ -154,4 +154,15 @@ it("wallet chip links to #holdings, and protocols link to #protocol-<resource>",
   expect(byId.meteora_damm_v2.href).toBe("#protocol-meteora-damm-v2");
   expect(byId.mystery_source).toMatchObject({ resource: undefined, href: "#coverage", label: "mystery source", initials: "·" });
   expect(byId.kamino_lend.initials).toBe("Ka");
+});
+
+it("classifies each component the same way the chip counts do", () => {
+  expect(componentState(component("kamino_lend", { known_net_value_usd: "10" }))).toBe("chip");
+  expect(componentState(component("solend"))).toBe("empty");
+  expect(
+    componentState(component("orca_whirlpools", { coverage_status: "snapshot_queued", coverage_complete: false })),
+  ).toBe("pending");
+  expect(componentState(component("drift", { coverage_status: "disabled" }))).toBe("unavailable");
+  expect(componentState(component("marginfi", { coverage_complete: false }))).toBe("unavailable");
+  expect(componentState(component("tokens_native_sol", { known_net_value_usd: null }))).toBeNull();
 });

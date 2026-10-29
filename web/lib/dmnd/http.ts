@@ -10,6 +10,7 @@ export function resourceResponse(result: ResourceResult<unknown>): Response {
     invalid_input: 400,
     unsupported: 501,
     unavailable: 503,
+    not_enabled: 503,
     rate_limited: 429,
     timeout: 504,
     upstream: 502,

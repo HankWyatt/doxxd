@@ -2,7 +2,7 @@ import { act, cleanup, render, screen, fireEvent, waitFor, within } from "@testi
 import { afterEach, expect, it, vi } from "vitest";
 import { Portfolio } from "./portfolio";
 import { readFixture, DEMO_ADDRESS } from "@/lib/fixtures/wallet";
-import type { ResourceName } from "@/lib/dmnd/contracts";
+import type { ResourceName, Schemas } from "@/lib/dmnd/contracts";
 import { validResourcePayload } from "@/lib/dmnd/validation.server";
 import { protocolResources } from "@/lib/dmnd/resources";
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -295,9 +295,13 @@ it("cards render only for chip protocols, open, and fetch on mount", async () =>
   expect(toggle).toHaveAttribute("aria-expanded", "true");
   expect(toggle).toHaveClass("protocol-toggle");
   expect(await within(container.querySelector<HTMLElement>("#protocol-kamino")!).findByText("Lending position")).toBeVisible();
-  expect(container.querySelectorAll("section[id^='protocol-']")).toHaveLength(1);
+  expect(container.querySelectorAll(".protocol-toggle[aria-expanded='true']")).toHaveLength(1);
+  // Complete and empty: not rendered.
   expect(document.getElementById("protocol-orca")).toBeNull();
   expect(document.getElementById("protocol-stake")).toBeNull();
+  // Protocols absent from the summary stay reachable, collapsed.
+  expect(screen.getByText(/^Not checked yet/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "Expand Raydium CLMM" })).toHaveAttribute("aria-expanded", "false");
   expect(screen.queryByText(/Additional protocol views/)).toBeNull();
   expect(screen.getByText("1 protocol")).toBeVisible();
   // One request per rendered card, none for protocols without a chip.
@@ -351,7 +355,7 @@ it("renders every protocol card collapsed and lazy when the summary is unavailab
   expect(calls).toHaveLength(4);
 });
 
-it("treats a summary with no components like an unavailable summary", async () => {
+it("puts every protocol in the collapsed group when the summary has no components", async () => {
   vi.stubGlobal("fetch", vi.fn(async (input: string) => {
     const resource = new URL(input, "http://doxxd.test").pathname.split("/").at(-1) as ResourceName;
     const result = readFixture(resource, "complete");
@@ -362,9 +366,11 @@ it("treats a summary with no components like an unavailable summary", async () =
     return Response.json(result);
   }));
   const { container } = render(<Portfolio address={DEMO_ADDRESS} />);
-  expect(await screen.findByText("Portfolio summary unavailable — open a protocol to check it.")).toBeVisible();
+  expect(await screen.findByText(/^Not checked yet/)).toBeVisible();
   expect(container.querySelectorAll(".protocol-toggle")).toHaveLength(protocolResources.length);
   expect(container.querySelector(".protocol-toggle[aria-expanded='true']")).toBeNull();
+  // The summary loaded, so it is not called unavailable.
+  expect(screen.queryByText(/Portfolio summary unavailable/)).toBeNull();
 });
 
 it("keeps a collapsed failed card counted until it loads", async () => {
@@ -389,4 +395,89 @@ it("keeps a collapsed failed card counted until it loads", async () => {
   expect(orca.querySelector(".protocol-value")).toHaveTextContent("$1,645.67");
   expect(screen.queryByText(/couldn’t load ·/)).toBeNull();
   expect(orcaReads).toBe(2);
+});
+
+function summaryWith(edit: (components: Schemas["WalletPortfolioComponent"][]) => void) {
+  const calls: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    const resource = new URL(input, "http://doxxd.test").pathname.split("/").at(-1) as ResourceName;
+    calls.push(resource);
+    const result = readFixture(resource, "complete");
+    if (resource === "summary" && result.ok && "components" in result.data) {
+      edit(result.data.components);
+      expect(validResourcePayload("summary", result.data)).toBe(true);
+    }
+    return Response.json(result);
+  }));
+  return calls;
+}
+const component = (components: Schemas["WalletPortfolioComponent"][], id: string) =>
+  components.find((c) => c.id === id)!;
+
+it("keeps a ready summary whose components are all pending collapsed, with no protocol fetch", async () => {
+  const calls = summaryWith((components) => {
+    for (const c of components.slice(1))
+      Object.assign(c, {
+        known_asset_value_usd: null, known_debt_value_usd: null, known_net_value_usd: null,
+        coverage_status: "snapshot_queued", coverage_complete: false, coverage_fresh: false,
+      });
+  });
+  const { container } = render(<Portfolio address={DEMO_ADDRESS} />);
+  expect(await screen.findByText(/^Not checked yet/)).toBeVisible();
+  await screen.findByText("USD Coin");
+  expect(container.querySelectorAll(".protocol-toggle")).toHaveLength(protocolResources.length);
+  expect(container.querySelector(".protocol-toggle[aria-expanded='true']")).toBeNull();
+  expect(screen.queryByText(/Portfolio summary unavailable/)).toBeNull();
+  expect(calls.slice().sort()).toEqual(["overview", "positions", "summary"]);
+});
+
+it("collapses a not-available protocol and drops a complete empty one", async () => {
+  const calls = summaryWith((components) => {
+    Object.assign(component(components, "native_stake"), {
+      known_asset_value_usd: "0", known_debt_value_usd: "0", known_net_value_usd: "0",
+      coverage_status: "disabled", reason: "disabled", coverage_complete: false,
+    });
+    Object.assign(component(components, "orca_whirlpools"), {
+      known_asset_value_usd: "0", known_debt_value_usd: "0", known_net_value_usd: "0",
+    });
+  });
+  render(<Portfolio address={DEMO_ADDRESS} />);
+  expect(await screen.findByText("Lending position")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Expand Native staking" })).toHaveAttribute("aria-expanded", "false");
+  expect(document.getElementById("protocol-orca")).toBeNull();
+  expect(calls.filter((r) => r === "stake")).toHaveLength(0);
+  expect(calls.filter((r) => r === "kamino")).toHaveLength(1);
+});
+
+it("keeps a card opened during a summary failure mounted, without refetching, once the summary recovers", async () => {
+  vi.useFakeTimers();
+  const counts = new Map<string, number>();
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    const resource = new URL(input, "http://doxxd.test").pathname.split("/").at(-1) as ResourceName;
+    const count = (counts.get(resource) ?? 0) + 1;
+    counts.set(resource, count);
+    if (resource === "summary" && count === 1) return Response.json({ ok: false, kind: "upstream" });
+    return Response.json(readFixture(resource, "complete"));
+  }));
+  render(<Portfolio address={DEMO_ADDRESS} />);
+  await act(async () => {});
+  expect(screen.getByText("Portfolio summary unavailable — open a protocol to check it.")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Expand Kamino Lend" }));
+  await act(async () => {});
+  const kamino = document.getElementById("protocol-kamino");
+  expect(within(kamino!).getByText("Lending position")).toBeVisible();
+  expect(counts.get("kamino")).toBe(1);
+  // The summary recovers automatically.
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(counts.get("summary")).toBe(2);
+  expect(screen.queryByText(/Portfolio summary unavailable/)).toBeNull();
+  // Same card, still open, not fetched again; chip cards now open and load once.
+  expect(document.getElementById("protocol-kamino")).toBe(kamino);
+  expect(screen.getByRole("button", { name: "Collapse Kamino Lend" })).toBeVisible();
+  expect(within(kamino!).getByText("Lending position")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Collapse Orca Whirlpools" })).toBeVisible();
+  await act(async () => { await vi.advanceTimersByTimeAsync(150_000); });
+  expect(counts.get("kamino")).toBe(1);
+  expect(counts.get("orca")).toBe(1);
+  expect(counts.get("stake")).toBe(1);
 });

@@ -27,6 +27,10 @@ const messages: Record<ResourceError["kind"], [string, string]> = {
     "Wallet data is unavailable",
     "This source may be awaiting activation or a new snapshot. Refresh to check again.",
   ],
+  not_enabled: [
+    "Not available yet",
+    "This view isn’t enabled for this connection yet. Other wallet sections remain available.",
+  ],
   rate_limited: [
     "A little pause",
     "The data service has asked us to wait before another request.",

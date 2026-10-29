@@ -50,7 +50,7 @@ it("reads only the fixed DAMM v2 route with validated paging", async () => {
   expect(network).toHaveBeenCalledTimes(1);
 });
 
-it("keeps DAMM v2 unavailable until its resource ID is enabled", async () => {
+it("keeps DAMM v2 not enabled until its resource ID is enabled", async () => {
   const network = vi.fn();
   for (const enabled of ["", "meteora", "meteora_damm_v2", undefined])
     expect(
@@ -58,7 +58,7 @@ it("keeps DAMM v2 unavailable until its resource ID is enabled", async () => {
         { ...env, DMND_ENABLED_PROTOCOLS: enabled },
         network,
       ).read(wallet, "meteora-damm-v2"),
-    ).toEqual({ ok: false, kind: "unavailable" });
+    ).toEqual({ ok: false, kind: "not_enabled" });
   expect(network).not.toHaveBeenCalled();
 });
 

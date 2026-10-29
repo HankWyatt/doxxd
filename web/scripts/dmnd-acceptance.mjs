@@ -273,6 +273,7 @@ export async function runAcceptance(input, network = fetch) {
               "invalid_input",
               "unsupported",
               "unavailable",
+              "not_enabled",
               "rate_limited",
               "timeout",
               "upstream",

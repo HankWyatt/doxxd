@@ -42,6 +42,8 @@ export type ResourceError = {
     | "invalid_input"
     | "unsupported"
     | "unavailable"
+    // This deployment has not enabled the wallet or source: not an outage.
+    | "not_enabled"
     | "rate_limited"
     | "timeout"
     | "upstream";

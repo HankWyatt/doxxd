@@ -154,7 +154,7 @@ export function createDmndClient(
     if (allowed?.some((value) => normalizeAddress(value) !== value))
       return { ok: false, kind: "configuration" };
     if (allowed && !allowed.includes(wallet))
-      return { ok: false, kind: "unavailable" };
+      return { ok: false, kind: "not_enabled" };
     const budget =
       env.DMND_REQUEST_BUDGET === undefined
         ? undefined
@@ -177,7 +177,7 @@ export function createDmndClient(
         .map((v) => v.trim())
         .includes(resource)
     )
-      return { ok: false, kind: "unavailable" };
+      return { ok: false, kind: "not_enabled" };
     const identity = JSON.stringify([wallet, resource, validQuery]);
     const existing = pending.get(identity);
     if (existing) return existing as Promise<ResourceResult<ResourceData[K]>>;

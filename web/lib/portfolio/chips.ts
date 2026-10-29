@@ -48,6 +48,33 @@ function chipFor(c: Component): Chip {
 }
 
 /**
+ * How a summary component shows: a chip, still updating, not available, or
+ * complete and empty. The wallet, when it has no chip, is none of these.
+ */
+export type ComponentState = "chip" | "pending" | "unavailable" | "empty";
+export function componentState(c: Component): ComponentState | null {
+  const value = c.known_net_value_usd ?? null;
+  if (
+    sign(value) !== 0 ||
+    sign(c.known_asset_value_usd) > 0 ||
+    sign(c.known_debt_value_usd) > 0 ||
+    (c.unpriced_count ?? 0) > 0 ||
+    (c.id === WALLET && value !== null)
+  )
+    return "chip";
+  // The wallet is not a protocol, so it is never "checked" or "unavailable".
+  if (c.id === WALLET) return null;
+  if (PENDING.test(c.coverage_status)) return "pending";
+  if (
+    UNAVAILABLE.test(c.coverage_status) ||
+    UNAVAILABLE.test(c.reason) ||
+    !c.coverage_complete
+  )
+    return "unavailable";
+  return "empty";
+}
+
+/**
  * Chips only for sources with something to show. The rest are summarised as
  * counts; sources still updating are counted by the header status line.
  */
@@ -60,28 +87,10 @@ export function chipModel(components: Component[]): {
   let nothingFound = 0;
   let notAvailable = 0;
   for (const c of components) {
-    const value = c.known_net_value_usd ?? null;
-    const pending = PENDING.test(c.coverage_status);
-    if (
-      sign(value) !== 0 ||
-      sign(c.known_asset_value_usd) > 0 ||
-      sign(c.known_debt_value_usd) > 0 ||
-      (c.unpriced_count ?? 0) > 0 ||
-      (c.id === WALLET && value !== null)
-    ) {
-      chips.push(chipFor(c));
-    } else if (pending || c.id === WALLET) {
-      // The wallet is not a protocol, so it is never "checked" or "unavailable".
-      continue;
-    } else if (
-      UNAVAILABLE.test(c.coverage_status) ||
-      UNAVAILABLE.test(c.reason) ||
-      !c.coverage_complete
-    ) {
-      notAvailable++;
-    } else {
-      nothingFound++;
-    }
+    const state = componentState(c);
+    if (state === "chip") chips.push(chipFor(c));
+    else if (state === "unavailable") notAvailable++;
+    else if (state === "empty") nothingFound++;
   }
   // Array.prototype.sort is stable, so equal values keep summary order.
   chips.sort((a, b) => compareDecimalDesc(a.valueUsd, b.valueUsd));

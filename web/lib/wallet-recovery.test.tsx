@@ -152,7 +152,7 @@ it("does not send a retry before Retry-After, including manual refresh", async (
   expect(result.current.result?.ok).toBe(true);
 });
 
-it.each(["configuration", "authentication", "refused", "invalid_input", "unsupported", "unavailable"] as ResourceError["kind"][])(
+it.each(["configuration", "authentication", "refused", "invalid_input", "unsupported", "unavailable", "not_enabled"] as ResourceError["kind"][])(
   "does not retry a terminal %s error", async (kind) => {
     const network = respond({ ok: false, kind });
     const { result } = renderHook(() => useWalletResource(DEMO_ADDRESS, "overview"));

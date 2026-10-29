@@ -904,6 +904,9 @@ tbody tr.data-row:hover {
 .protocol-unsummarised {
   margin: -4px 0 12px;
 }
+.protocol-group-note {
+  margin: 8px 0 0;
+}
 .protocol-failures {
   margin: 0 0 22px;
 }

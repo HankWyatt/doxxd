@@ -190,6 +190,7 @@ export function useWalletResource<K extends ResourceName>(
               "invalid_input",
               "unsupported",
               "unavailable",
+              "not_enabled",
               "rate_limited",
               "timeout",
               "upstream",

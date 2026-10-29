@@ -10,7 +10,7 @@ import {
 } from "@/lib/dmnd/contracts";
 import { protocolResources, resources } from "@/lib/dmnd/resources";
 import { formatUsd } from "@/lib/decimal";
-import { chipModel } from "@/lib/portfolio/chips";
+import { chipModel, componentState } from "@/lib/portfolio/chips";
 import { ResourceState, LoadingRows } from "../resource-state";
 import {
   WalletFrame,
@@ -45,26 +45,52 @@ function PortfolioContent({
   const summary = usePortfolioSummary();
   const summaryStatus = usePortfolioSummaryStatus();
   const chips = chipModel(summary?.components ?? []);
-  // Without a summary to choose from, every protocol gets a collapsed card
-  // that loads only when opened, so positions stay reachable.
-  const unsummarised =
-    summaryStatus === "failed" ||
-    (summaryStatus === "ready" && !summary?.components.length);
-  // Otherwise a card for every protocol with a chip (in chip order), then for
-  // every protocol a holdings receipt names, so each link has a target.
-  const cards: ProtocolResource[] = unsummarised ? [...protocolResources] : [];
-  for (const chip of chips.chips)
-    if (chip.resource && chip.resource !== "overview" && !cards.includes(chip.resource))
-      cards.push(chip.resource);
-  // Cards wait for the summary, so none opens (and loads) before it decides.
-  if (summaryStatus !== "loading" && overview.result?.ok)
+  const ready = summaryStatus === "ready";
+  const summaryFailed = summaryStatus === "failed";
+  const chipCards = chips.chips.flatMap((chip) =>
+    chip.resource && chip.resource !== "overview" ? [chip.resource] : [],
+  );
+  const receiptCards: ProtocolResource[] = [];
+  if (overview.result?.ok)
     for (const asset of overview.result.data.assets) {
       const protocol = asset.position?.protocol;
       const resource = protocolResources.find(
         (r) => protocol && resources[r].componentId === protocol,
       );
-      if (resource && !cards.includes(resource)) cards.push(resource);
+      if (resource) receiptCards.push(resource);
     }
+  // Cards the visitor opened or revealed stay mounted whatever the summary says.
+  const [kept, setKept] = useState<ProtocolResource[]>([]);
+  const keep = useCallback((resource: ProtocolResource) => {
+    setKept((current) =>
+      current.includes(resource) ? current : [...current, resource],
+    );
+  }, []);
+  // Main cards: every protocol when the summary failed (collapsed, lazy);
+  // otherwise chip protocols in chip order, then receipt protocols. While the
+  // summary loads only receipt cards mount, collapsed, so links have targets.
+  // A ready summary's pending, unavailable or absent protocols wait collapsed
+  // in a "Not checked yet" group; complete and empty ones are not shown.
+  const main: ProtocolResource[] = [];
+  const unchecked: ProtocolResource[] = [];
+  const add = (list: ProtocolResource[], resource: ProtocolResource) => {
+    if (!main.includes(resource) && !unchecked.includes(resource))
+      list.push(resource);
+  };
+  if (summaryFailed) for (const r of protocolResources) add(main, r);
+  for (const r of [...chipCards, ...receiptCards, ...kept]) add(main, r);
+  if (ready)
+    for (const r of protocolResources) {
+      const c = summary?.components.find(
+        (component) => component.id === resources[r].componentId,
+      );
+      const state = c ? componentState(c) : undefined;
+      if (!c || state === "pending" || state === "unavailable") add(unchecked, r);
+    }
+  const cards = [...main, ...unchecked];
+  // Chip and receipt cards open (and load) once the summary has loaded.
+  const openByDefault = (resource: ProtocolResource) =>
+    ready && (chipCards.includes(resource) || receiptCards.includes(resource));
   // Cards whose positions failed to load, each with its retry.
   const [failures, setFailures] = useState<
     Partial<Record<ProtocolResource, () => void>>
@@ -100,12 +126,29 @@ function PortfolioContent({
   }, [target]);
   function showProtocol(resource: ProtocolResource) {
     if (!cards.includes(resource)) return;
+    keep(resource);
     setReveals((current) => ({
       ...current,
       [resource]: (current[resource] ?? 0) + 1,
     }));
     setTarget(resource);
   }
+  const card = (resource: ProtocolResource) => (
+    <ProtocolSection
+      key={address + resource}
+      address={address}
+      resource={resource}
+      mode={mode}
+      labels={labels}
+      defaultOpen={openByDefault(resource)}
+      onStatus={onStatus}
+      onOpened={keep}
+      reveal={reveals[resource]}
+      component={summary?.components.find(
+        (c) => c.id === resources[resource].componentId,
+      )}
+    />
+  );
   const labels: Record<string, string> = {
     So11111111111111111111111111111111111111112: "WSOL",
   };
@@ -177,33 +220,33 @@ function PortfolioContent({
             <h2>
               <Layers3 size={16} />
               Protocol positions{" "}
-              <span className="count">
-                {cards.length} {cards.length === 1 ? "protocol" : "protocols"}
-              </span>
+              {main.length > 0 && (
+                <span className="count">
+                  {main.length} {main.length === 1 ? "protocol" : "protocols"}
+                </span>
+              )}
             </h2>
           </div>
-          {unsummarised && (
+          {summaryFailed && (
             <p className="small faint protocol-unsummarised">
               Portfolio summary unavailable — open a protocol to check it.
             </p>
           )}
+          {/* One keyed list, so a card keeps its state when it changes group. */}
           <div className="protocol-list">
-            {cards.map((resource) => (
-              <ProtocolSection
-                // A change of summary state remounts cards in the new mode.
-                key={address + resource + (unsummarised ? ":lazy" : "")}
-                address={address}
-                resource={resource}
-                mode={mode}
-                labels={labels}
-                defaultOpen={!unsummarised}
-                onStatus={onStatus}
-                reveal={reveals[resource]}
-                component={summary?.components.find(
-                  (c) => c.id === resources[resource].componentId,
-                )}
-              />
-            ))}
+            {[
+              ...main.map(card),
+              ...(unchecked.length
+                ? [
+                    <p className="small faint protocol-group-note" key="unchecked">
+                      Not checked yet · {unchecked.length}{" "}
+                      {unchecked.length === 1 ? "protocol" : "protocols"} still
+                      updating or not available. Open one to check it.
+                    </p>,
+                  ]
+                : []),
+              ...unchecked.map(card),
+            ]}
           </div>
         </>
       )}

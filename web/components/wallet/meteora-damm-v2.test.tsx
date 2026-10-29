@@ -408,8 +408,8 @@ it("links a valued DAMM v2 component that the known total excludes", async () =>
 it("gives a disabled DAMM v2 component no chip but counts it as not available", async () => {
   const { detailFetches } = await renderDammSummary("disabled", false, null);
   expect(dammLink()).toBeNull();
-  // Without a chip or a receipt there is no card.
-  expect(document.getElementById("protocol-meteora-damm-v2")).toBeNull();
+  // Not available: reachable as a collapsed card that loads only when opened.
+  expect(screen.getByRole("button", { name: "Expand Meteora DAMM v2" })).toHaveAttribute("aria-expanded", "false");
   expect(screen.getByText("1 not available yet")).toBeVisible();
   expect(screen.queryByText(/sources? still updating/)).toBeNull();
   expect(detailFetches()).toBe(0);
@@ -418,7 +418,7 @@ it("gives a disabled DAMM v2 component no chip but counts it as not available", 
 it("gives a queued DAMM v2 component no chip and leaves it to the header status", async () => {
   const { detailFetches } = await renderDammSummary("queued", false, null);
   expect(dammLink()).toBeNull();
-  expect(document.getElementById("protocol-meteora-damm-v2")).toBeNull();
+  expect(screen.getByRole("button", { name: "Expand Meteora DAMM v2" })).toHaveAttribute("aria-expanded", "false");
   expect(screen.queryByText(/not available yet/)).toBeNull();
   expect(screen.getByText(/sources? still updating/)).toBeVisible();
   expect(detailFetches()).toBe(0);
@@ -506,4 +506,34 @@ it("moves focus to the protocol section each time a receipt link is followed", a
     await waitFor(() => expect(document.activeElement).toBe(toggle()));
     expect(window.location.hash).toBe("#protocol-meteora-damm-v2");
   }
+});
+
+it("opens and focuses a receipt's card while the summary is still loading", async () => {
+  const fetcher = vi.fn(async (input: string) => {
+    const resource = new URL(input, "http://doxxd.test").pathname.split("/").at(-1) as ResourceName;
+    if (resource === "summary") return new Promise<Response>(() => {});
+    if (resource === "overview")
+      return Response.json({
+        ok: true,
+        data: receiptOverview({ protocol: "meteora_damm_v2", position: DAMM.position, pool: DAMM.pool }),
+      });
+    return Response.json(readFixture(resource, "complete"));
+  });
+  vi.stubGlobal("fetch", fetcher);
+  window.location.hash = "";
+  const { DEMO_ADDRESS } = await import("@/lib/fixtures/wallet");
+  render(<Portfolio address={DEMO_ADDRESS} />);
+  const line = (await screen.findByText(/1 LP position NFT/)).closest("p")!;
+  const detailFetches = () =>
+    fetcher.mock.calls.filter(([input]) => String(input).includes("meteora-damm-v2")).length;
+  const card = document.getElementById("protocol-meteora-damm-v2")!;
+  expect(within(card).getByRole("button", { name: "Expand Meteora DAMM v2" }))
+    .toHaveAttribute("aria-expanded", "false");
+  expect(detailFetches()).toBe(0);
+  fireEvent.click(within(line).getByRole("link", { name: "Meteora DAMM v2" }));
+  const toggle = within(card).getByRole("button", { name: "Collapse Meteora DAMM v2" });
+  await waitFor(() => expect(document.activeElement).toBe(toggle));
+  expect(window.location.hash).toBe("#protocol-meteora-damm-v2");
+  expect(await within(card).findByText("No positions were found in this supported scope.")).toBeVisible();
+  expect(detailFetches()).toBe(1);
 });

@@ -111,7 +111,7 @@ it("enforces an optional wallet allowlist and a shared request budget before ups
   );
   expect(
     await client.read("J3jHGNUJMKHZnC8iTnnMGx5Vii5fjXBuh5Rc6K6feZ38", "summary"),
-  ).toEqual({ ok: false, kind: "unavailable" });
+  ).toEqual({ ok: false, kind: "not_enabled" });
   expect(await client.read(wallet, "summary")).toEqual({
     ok: true,
     data: summary,
@@ -238,6 +238,13 @@ it("redacts upstream errors and refuses redirects", async () => {
     expect(result).toEqual({ ok: false, kind: "upstream" });
     expect(JSON.stringify(result)).not.toContain("synthetic-secret");
   }
+});
+it("reports a protocol missing from the enabled list as not enabled, without an upstream read", async () => {
+  const network = vi.fn(async () => reply({}));
+  expect(
+    await createDmndClient({ ...env, DMND_ENABLED_PROTOCOLS: "orca" }, network).read(wallet, "kamino"),
+  ).toEqual({ ok: false, kind: "not_enabled" });
+  expect(network).not.toHaveBeenCalled();
 });
 it("distinguishes explicit unsupported from temporarily unavailable", async () => {
   expect(
