@@ -137,6 +137,11 @@ function currentPoint(pool: PoolState, clock: Clock): BN {
   throw new Error("Unknown pool activation type.");
 }
 
+/** True for a base58 string that is a 32-byte public key. */
+function isAddress(value: unknown): value is string {
+  return typeof value === "string" && attempt(() => new PublicKey(value)) !== null;
+}
+
 /** `parse()`, or null when the bytes do not decode. */
 function attempt<T>(parse: () => T): T | null {
   try {
@@ -212,9 +217,13 @@ async function loadPositions(
   owner: PublicKey,
   targets: DammV2Target[],
 ): Promise<{ loaded: Loaded[]; clock: Clock }> {
+  // A row with a malformed address is skipped before the read, so it cannot
+  // fail the batch.
+  const keysOf = (t: DammV2Target) => [t.pool, t.position, t.positionNftAccount, t.positionMint];
+  const wellFormed = targets.map((t) => keysOf(t).every(isAddress));
   const accounts = await readAccounts(rpc, [
     SYSVAR_CLOCK_PUBKEY.toBase58(),
-    ...targets.flatMap((t) => [t.pool, t.position, t.positionNftAccount, t.positionMint]),
+    ...targets.flatMap((t, i) => (wellFormed[i] ? keysOf(t) : [])),
   ]);
   const clock = decodeClock(accounts.get(SYSVAR_CLOCK_PUBKEY.toBase58()));
   const coder = cpAmm._program.coder.accounts;
@@ -231,8 +240,8 @@ async function loadPositions(
   };
 
   type Read = Omit<Live, "tokens">;
-  const read = targets.map((target): { ok: true; live: Read } | { ok: false; reason: SkipReason } => {
-    if (target.program !== CP_AMM.toBase58()) return { ok: false, reason: MISMATCH };
+  const read = targets.map((target, i): { ok: true; live: Read } | { ok: false; reason: SkipReason } => {
+    if (!wellFormed[i] || target.program !== CP_AMM.toBase58()) return { ok: false, reason: MISMATCH };
     const positionInfo = accounts.get(target.position);
     if (!positionInfo) return { ok: false, reason: GONE };
     const position = positionInfo.owner.equals(CP_AMM)
@@ -523,7 +532,7 @@ async function planWithdraw(
   const vestings = await loadVestings(cpAmm, rpc, live);
   const point = currentPoint(pool, clock);
 
-  // getAvailableVestingLiquidity and isVestingComplete read only `innerVesting`.
+  // getAvailableVestingLiquidity reads only `innerVesting`.
   const schedules = [
     ...vestings.map((v) => v.vestingState),
     { innerVesting: position.innerVesting } as unknown as VestingState,
@@ -543,7 +552,12 @@ async function planWithdraw(
     !withdrawable.isZero() &&
     position.permanentLockedLiquidity.isZero() &&
     stillVesting.isZero() &&
-    schedules.every((v) => isVestingComplete(v, point)) &&
+    // Vesting accounts must have run their course (the SDK's own close check,
+    // canUnlockPosition). The inner schedule is gated by stillVesting alone:
+    // the program releases it in remove_all_liquidity and resets it once
+    // nothing is left to vest, even with periods still nominally to come
+    // (e.g. liquidity_per_period = 0).
+    vestings.every((v) => isVestingComplete(v.vestingState, point)) &&
     closeRewards.every(({ index }) => !live.tokens.unclaimableRewards.has(index));
 
   const mintA = mints.get(pool.tokenAMint.toBase58())!;

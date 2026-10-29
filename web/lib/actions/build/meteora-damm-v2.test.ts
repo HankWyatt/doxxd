@@ -309,6 +309,30 @@ describe("buildClaimGroups (Meteora DAMM v2)", () => {
     expect(packAndVerify(chain, second.groups, second.expectation)).toEqual([{ ok: true }]);
   });
 
+  it("skips rows with a malformed address and still builds the good ones", async () => {
+    const chain = chainFixture();
+    const owner = chain.owner.publicKey.toBase58();
+    const good = target(chain, "unlocked");
+    const badPool = { ...target(chain, "vested"), pool: "not-base58-0OIl" };
+    const badPosition = { ...target(chain, "locked"), position: "0".repeat(44) };
+    const badNft = { ...target(chain, "transferFee"), positionNftAccount: "" };
+    const badMint = { ...target(chain, "innerPartial"), positionMint: "abc" };
+    const { groups, skipped } = await buildClaimGroups(mockActionRpc(chain), owner, [
+      badPool,
+      good,
+      badPosition,
+      badNft,
+      badMint,
+    ]);
+    expect(groups.map((g) => g.positionIds)).toEqual([[good.id]]);
+    expect(skipped).toEqual(
+      [badPool, badPosition, badNft, badMint].map((t) => ({ positionId: t.id, reason: MISMATCH })),
+    );
+    await expect(
+      buildWithdrawGroups(mockActionRpc(chain), owner, badPool, 5_000, 100),
+    ).rejects.toThrow("Position data doesn't match the pool");
+  });
+
   it("fails the whole claim only when the clock cannot be read", async () => {
     const chain = chainFixture();
     chain.accounts.delete(CLOCK_SYSVAR);
@@ -583,6 +607,29 @@ describe("quoteWithdraw / buildWithdrawGroups (Meteora DAMM v2)", () => {
     expect(u128(all.groups[0].instructions.find((ix) => isCpAmm(ix, "remove_liquidity"))!.data, 8).toString()).toBe(
       withdrawable.toString(),
     );
+  });
+
+  it("closes at 100% when inner vesting released everything at its cliff (no per-period liquidity)", async () => {
+    const chain = chainFixture();
+    const owner = chain.owner.publicKey.toBase58();
+    const t = target(chain, "innerElapsed");
+    // Periods still to come by the clock (cliff 1.7e9 + 4 × 1e8 > now), but
+    // with 0 per period the cliff released the whole 2^103.
+    patchCpAmm(chain, t.position, "Position", (state) => {
+      state.inner_vesting = {
+        ...state.inner_vesting,
+        period_frequency: new BN(100_000_000),
+        cliff_unlock_liquidity: D.halfLiquidity,
+        liquidity_per_period: new BN(0),
+        number_of_period: 4,
+      };
+    });
+    const rpc = mockActionRpc(chain);
+    const quote = await quoteWithdraw(rpc, owner, t, 10_000, 100);
+    expect([quote.withdrawableBps, quote.vestingBps, quote.closes]).toEqual([10_000, 0, true]);
+    const { groups, expectation } = await buildWithdrawGroups(rpc, owner, t, 10_000, 100);
+    expect(cpAmmNames(groups[0].instructions)).toContain("close_position");
+    expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
   });
 
   it("releases nothing from inner vesting before its cliff", async () => {
