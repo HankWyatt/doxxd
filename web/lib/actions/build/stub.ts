@@ -5,7 +5,6 @@ function browserOnly(): never {
   throw new Error("Action builders only run in the browser.");
 }
 
-export const sdkProbe = browserOnly;
 export const createActionRpc = browserOnly;
 export const RpcBusyError = browserOnly;
 export const isRpcBusy = browserOnly;
@@ -13,3 +12,9 @@ export const verifyMessage = browserOnly;
 export const packGroups = browserOnly;
 export const GroupTooLargeError = browserOnly;
 export const runAction = browserOnly;
+export const AmountTooSmallError = browserOnly;
+export const NothingToWithdrawError = browserOnly;
+export const PositionGoneError = browserOnly;
+export const buildClaimGroups = browserOnly;
+export const quoteWithdraw = browserOnly;
+export const buildWithdrawGroups = browserOnly;
