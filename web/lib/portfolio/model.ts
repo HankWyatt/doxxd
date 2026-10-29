@@ -15,6 +15,7 @@ import {
 import { farmRows } from "./adapters/farms";
 import { tradingRows } from "./adapters/trading";
 import { sourceDetail } from "./adapters/shared";
+import type { ActionTarget } from "../actions/types";
 export type SummaryView = {
   label: string;
   valueUsd: string | null;
@@ -45,6 +46,8 @@ export type PositionView = {
   locked?: boolean;
   /** Native stake: the validator vote account, when delegated. */
   validator?: string | null;
+  /** What on-site actions need from DMND's row; absent when none apply. */
+  action?: ActionTarget;
 };
 export type ProtocolPayload = {
   [K in ProtocolResource]: { resource: K; data: ResourceData[K] };
@@ -91,7 +94,7 @@ export function toProtocolView(
       break;
     case "orca":
     case "raydium-clmm":
-      positions = liquidityRows(input.data);
+      positions = liquidityRows(input.data, input.resource);
       break;
     case "meteora":
       positions = meteoraRows(input.data);
@@ -101,7 +104,7 @@ export function toProtocolView(
       break;
     case "raydium-cpmm":
     case "raydium-amm-v4":
-      positions = fungibleRows(input.data);
+      positions = fungibleRows(input.data, input.resource);
       break;
     case "raydium-farms":
       positions = farmRows(input.data);

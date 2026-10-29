@@ -2,6 +2,11 @@ import type { Schemas } from "../../dmnd/contracts";
 import type { AmountView, PositionView } from "../model";
 import { atomsToUi, compareDecimalDesc } from "../../decimal";
 import {
+  ACTION_PROGRAM_IDS,
+  type ActionTarget,
+  type Leg,
+} from "../../actions/types";
+import {
   position,
   leg,
   legLabel,
@@ -18,8 +23,19 @@ export function sourceContextDetails(
     sourceDetail(`${prefix} ${i + 1} context slot`, source.context_slot),
   ]);
 }
+const actionLeg = (source: {
+  mint: string;
+  decimals?: number | null;
+  symbol?: string | null;
+}): Leg => ({
+  mint: source.mint,
+  decimals: source.decimals ?? null,
+  symbol: source.symbol ?? null,
+});
+// Only Raydium CLMM rows get actions; Orca rows share this adapter without.
 export function liquidityRows(
   raw: Schemas["WalletLiquidityPositions"],
+  resource: "orca" | "raydium-clmm" = "orca",
 ): PositionView[] {
   return raw.data.map((row) => ({
     ...position(
@@ -32,6 +48,32 @@ export function liquidityRows(
       position: row.position,
       positionMint: row.position_mint,
     },
+    ...(resource === "raydium-clmm" &&
+    row.program === ACTION_PROGRAM_IDS["raydium-clmm"]
+      ? {
+          action: {
+            protocol: "raydium-clmm",
+            id: row.position,
+            pool: row.pool,
+            position: row.position,
+            positionMint: row.position_mint,
+            positionNftAccount: row.owner_token_account,
+            nftTokenProgram: row.token_program,
+            program: row.program,
+            liquidity: row.liquidity,
+            tickLower: row.tick_lower,
+            tickUpper: row.tick_upper,
+            feeOwedAAtoms: row.fee_owed_a,
+            feeOwedBAtoms: row.fee_owed_b,
+            rewards: row.rewards.flatMap((r) =>
+              r.mint ? [{ mint: r.mint, atoms: r.owed_atoms }] : [],
+            ),
+            tokenA: actionLeg(row.principal_a),
+            tokenB: actionLeg(row.principal_b),
+            snapshotSlot: row.position_slot,
+          } satisfies ActionTarget,
+        }
+      : {}),
     rewards: row.rewards.map((r) => ({
       label: r.mint ? mintName(r.mint) : "Reward",
       mint: r.mint ?? undefined,
@@ -141,6 +183,36 @@ export function dammV2Rows(
         position: row.position,
         positionMint: row.position_mint,
       },
+      ...(row.program === ACTION_PROGRAM_IDS["meteora-damm-v2"]
+        ? {
+            action: {
+              protocol: "meteora-damm-v2",
+              id: row.position,
+              pool: row.pool,
+              position: row.position,
+              positionMint: row.position_mint,
+              positionNftAccount: row.owner_token_account,
+              nftTokenProgram: row.token_program,
+              program: row.program,
+              liquidity: {
+                unlocked: row.liquidity.unlocked,
+                vested: row.liquidity.vested,
+                permanentLocked: row.liquidity.permanent_locked,
+                total: row.liquidity.total,
+              },
+              feeAAtoms: row.fee_a_claimable_atoms,
+              feeBAtoms: row.fee_b_claimable_atoms,
+              rewards: row.rewards.map((r) => ({
+                index: r.index,
+                mint: r.mint,
+                atoms: r.claimable_atoms,
+              })),
+              tokenA: actionLeg(row.token_a),
+              tokenB: actionLeg(row.token_b),
+              snapshotSlot: row.position_slot,
+            } satisfies ActionTarget,
+          }
+        : {}),
       valueUsd: row.principal_value_usd ?? null,
       locked: [row.liquidity.permanent_locked, row.liquidity.vested].some(
         (units) => compareDecimalDesc(units, "0") < 0,
@@ -189,13 +261,32 @@ export function dammV2Rows(
     };
   });
 }
+// DMND's receipt rows carry no program ID; a refused (unverified) row gets no
+// action, and callers that do not say which protocol they hold get none either.
 export function fungibleRows(
   raw: Schemas["WalletFungibleLiquidityPositions"],
+  protocol?: "raydium-cpmm" | "raydium-amm-v4",
 ): PositionView[] {
   return raw.data.map((row) => ({
     ...position(row.owner_token_account, "Direct LP receipt"),
     assets: row.principal.map(leg),
     ...(row.pool ? { links: { pool: row.pool } } : {}),
+    ...(protocol && row.status !== "refused"
+      ? {
+          action: {
+            protocol,
+            id: row.owner_token_account,
+            pool: row.pool ?? null,
+            lpMint: row.lp_mint,
+            lpAccount: row.owner_token_account,
+            lpAtoms: row.lp_atoms,
+            lpDecimals: row.lp_decimals,
+            withdrawalAvailable: row.withdrawal_available ?? null,
+            legs: row.principal.map(actionLeg),
+            snapshotSlot: row.context_slot,
+          } satisfies ActionTarget,
+        }
+      : {}),
     details: [
       { label: "LP mint", value: row.lp_mint },
       { label: "Receipt atoms", value: row.lp_atoms },
