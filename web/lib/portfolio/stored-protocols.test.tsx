@@ -131,7 +131,7 @@ it.each(["marginfi", "velocity"] as const)("keeps stored %s coverage incomplete/
     return Response.json({ ok: true, data });
   });
   vi.stubGlobal("fetch", request);
-  render(<ProtocolSection address={data.wallet} resource={resource} mode={{ kind: "live" }} labels={{}} />);
+  render(<ProtocolSection address={data.wallet} resource={resource} mode={{ kind: "live" }} labels={{}} defaultOpen={false} />);
   fireEvent.click(screen.getByRole("button", { name: resource === "marginfi" ? "Expand MarginFi" : "Expand Velocity" }));
   expect(await screen.findByText("Saved snapshot")).toBeVisible();
   expect(screen.getByText("Coverage reason", { exact: true }).nextElementSibling).toHaveTextContent(`${resource}_scan_disabled`);

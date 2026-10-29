@@ -168,7 +168,7 @@ it.each([
       recovery: "idle", refreshError: null,
     });
     const { container } = render(<ProtocolSection address={DEMO_ADDRESS}
-      resource="raydium-farms" mode={LIVE_MODE} labels={{}} />);
+      resource="raydium-farms" mode={LIVE_MODE} labels={{}} defaultOpen={false} />);
     fireEvent.click(screen.getByRole("button", { name: "Expand Raydium farms" }));
     const note = container.querySelector<HTMLElement>(".coverage-note")!;
     fireEvent.click(note.querySelector("summary")!);

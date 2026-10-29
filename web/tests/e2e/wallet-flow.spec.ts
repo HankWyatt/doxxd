@@ -73,10 +73,10 @@ test("portfolio expands with keyboard, copies, and refreshes", async ({
     page.getByText("$0.00002", { exact: true }).first(),
   ).toBeVisible();
   const kamino = page.getByRole("button", {
-    name: "Expand Kamino Lend",
+    name: "Collapse Kamino Lend",
     exact: true,
   });
-  await kamino.click();
+  await expect(kamino).toHaveAttribute("aria-expanded", "true");
   await expect(page.locator("#protocol-kamino table")).toBeVisible();
   await page.locator("#protocol-kamino table button").first().click();
   await expect(page.locator("#protocol-kamino .detail-row")).toBeVisible();
@@ -184,7 +184,7 @@ test("native staking source details retain raw epochs on desktop and mobile", as
   await expect(page.getByText("$12,345.67", { exact: true })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("Demo data", { exact: true })).toHaveCount(0);
   const section = page.locator("#protocol-stake");
-  await section.getByRole("button", { name: "Expand Native staking", exact: true }).click();
+  await expect(section.getByRole("button", { name: "Collapse Native staking", exact: true })).toHaveAttribute("aria-expanded", "true");
   await section.locator(".data-row button").click();
   const detail = section.locator(".detail-row");
   const field = (label: string) => detail.locator("dl > div")

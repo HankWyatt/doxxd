@@ -1,6 +1,6 @@
 import type { Schemas } from "../../dmnd/contracts";
 import type { AmountView, PositionView } from "../model";
-import { atomsToUi } from "../../decimal";
+import { atomsToUi, compareDecimalDesc } from "../../decimal";
 import {
   position,
   leg,
@@ -138,6 +138,9 @@ export function dammV2Rows(
         positionMint: row.position_mint,
       },
       valueUsd: row.principal_value_usd ?? null,
+      locked: [row.liquidity.permanent_locked, row.liquidity.vested].some(
+        (units) => compareDecimalDesc(units, "0") < 0,
+      ),
       rewards: [
         claimable(a.label, a.mint!, row.fee_a_claimable_atoms, row.token_a.decimals, "claimable fee"),
         claimable(b.label, b.mint!, row.fee_b_claimable_atoms, row.token_b.decimals, "claimable fee"),

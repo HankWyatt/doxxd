@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { URL as NodeURL } from "node:url";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createDmndClient } from "../dmnd/client.server";
 import { validResourcePayload } from "../dmnd/validation.server";
@@ -81,7 +81,7 @@ it.each([originalStakeBytes, newStakeBytes])("qualifies the recorded empty stake
     return Response.json({ ok: true, data });
   });
   vi.stubGlobal("fetch", request);
-  const { container } = render(<ProtocolSection address={data.wallet} resource="stake" mode={{ kind: "live" }} labels={{}} />);
+  const { container } = render(<ProtocolSection address={data.wallet} resource="stake" mode={{ kind: "live" }} labels={{}} defaultOpen={false} />);
   expect(request).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Expand Native staking" }));
   expect(await screen.findByText("No positions were found in this supported scope.")).toBeVisible();
@@ -94,7 +94,7 @@ it.each([originalStakeBytes, newStakeBytes])("qualifies the recorded empty stake
   expect(request).toHaveBeenCalledTimes(1);
 });
 
-it("keeps holdings and the independent empty stake scan usable without inventing a portfolio total", async () => {
+it("keeps holdings usable without inventing a portfolio total or a card for an unsummarised stake scan", async () => {
   const data = overview();
   const request = vi.fn(async (input: string) => {
     const url = new URL(input, "https://doxxd.invalid");
@@ -108,12 +108,11 @@ it("keeps holdings and the independent empty stake scan usable without inventing
   expect(container.querySelector(".summary-value")).toHaveTextContent("—");
   expect(request).toHaveBeenCalledTimes(3);
   expect(request.mock.calls.filter(([input]) => new URL(input, "http://test.local").pathname.endsWith("/positions"))).toHaveLength(1);
-  fireEvent.click(screen.getByRole("button", { name: "Expand Native staking" }));
-  expect(await screen.findByText("No positions were found in this supported scope.")).toBeVisible();
   expect(container.querySelector(".summary-value")).toHaveTextContent("—");
   expect(screen.getByRole("button", { name: "Inspect SYN holding" })).toBeVisible();
-  expect(within(container.querySelector("#protocol-stake")!).getByText("—")).toBeVisible();
-  expect(request).toHaveBeenCalledTimes(4);
+  // Without a summary chip or a holdings receipt there is no stake card to load.
+  expect(container.querySelector("#protocol-stake")).toBeNull();
+  expect(request).toHaveBeenCalledTimes(3);
 });
 
 it("rejects another recorded wallet's stake response rather than reusing its qualified empty scope", async () => {

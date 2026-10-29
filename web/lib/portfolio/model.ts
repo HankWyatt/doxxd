@@ -39,6 +39,10 @@ export type PositionView = {
   valueUsd: string | null;
   details: { label: string; value: string }[];
   links?: { pool?: string; position?: string; positionMint?: string };
+  /** Some liquidity is permanently locked or vesting (Meteora DAMM v2). */
+  locked?: boolean;
+  /** Native stake: the validator vote account, when delegated. */
+  validator?: string | null;
 };
 export type ProtocolPayload = {
   [K in ProtocolResource]: { resource: K; data: ResourceData[K] };

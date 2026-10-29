@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, fireEvent } from "@testing-library/react";
+import { act, cleanup, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { Portfolio } from "./portfolio";
 import { readFixture, DEMO_ADDRESS } from "@/lib/fixtures/wallet";
@@ -26,7 +26,7 @@ it("shows holdings and protocol detail without changing the authoritative headli
   render(<Portfolio address={DEMO_ADDRESS} />);
   expect(await screen.findByText("$12,345.67")).toBeVisible();
   expect(await screen.findByText("USD Coin")).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: /expand kamino/i }));
+  // Protocol cards are open by default.
   expect(await screen.findByText("Lending position")).toBeVisible();
   expect(screen.getByText("$12,345.67")).toBeVisible();
 });
@@ -40,7 +40,6 @@ it("isolates a protocol failure from the rest of the wallet", async () => {
   network();
   render(<Portfolio address={DEMO_ADDRESS} />);
   await screen.findByText("$12,345.67");
-  fireEvent.click(screen.getByRole("button", { name: /expand orca/i }));
   expect(await screen.findByText("Couldn’t load this section")).toBeVisible();
   expect(screen.getByText("USD Coin")).toBeVisible();
 });
@@ -73,11 +72,13 @@ it("mounts summary navigation targets even when a component is excluded from the
   const reference = await screen.findByRole("link", { name: /Liquid staking/ });
   expect(reference).toHaveAttribute("href", "#protocol-liquid-staking");
   expect(document.getElementById("protocol-liquid-staking")).not.toBeNull();
-  expect(screen.getByRole("button", { name: "Expand Liquid staking" }))
-    .toHaveAttribute("aria-expanded", "false");
+  // An excluded component with a value still gets an open card.
+  expect(screen.getByRole("button", { name: "Collapse Liquid staking" }))
+    .toHaveAttribute("aria-expanded", "true");
   expect(screen.getByText("$12,345.67")).toBeVisible();
-  expect(fetcher.mock.calls).toHaveLength(3);
-  expect(fetcher.mock.calls.every(([input]) => !input.includes("/liquid-staking"))).toBe(true);
+  // Summary, overview and trading, plus one request per card.
+  await waitFor(() => expect(fetcher.mock.calls).toHaveLength(7));
+  expect(fetcher.mock.calls.filter(([input]) => input.includes("/liquid-staking"))).toHaveLength(1);
 });
 
 it("keeps a pending zero subtotal separate from positive holdings until the summary includes wallet balances", async () => {
@@ -243,4 +244,81 @@ it("shows chips only for sources with something, and summarises the rest", async
   expect(links[1]).toHaveTextContent("$31.07");
   expect(strip).toHaveTextContent("+1 protocol checked · nothing found");
   expect(strip).toHaveTextContent("1 not available yet");
+});
+
+function chipSummary(fetcher: (resource: ResourceName, url: URL) => Response | undefined) {
+  const calls: string[] = [];
+  const fetch = vi.fn(async (input: string) => {
+    const url = new URL(input, "http://doxxd.test");
+    const resource = url.pathname.split("/").at(-1) as ResourceName;
+    calls.push(resource);
+    const custom = fetcher(resource, url);
+    if (custom) return custom;
+    if (resource === "summary") {
+      const result = readFixture("summary", "complete");
+      if (!result.ok) throw Error("fixture");
+      for (const c of result.data.components)
+        Object.assign(c, {
+          known_asset_value_usd: "0",
+          known_debt_value_usd: "0",
+          known_net_value_usd: "0",
+        });
+      Object.assign(result.data.components.find((c) => c.id === "tokens_native_sol")!, {
+        known_asset_value_usd: "31.07",
+        known_net_value_usd: "31.07",
+      });
+      Object.assign(result.data.components.find((c) => c.id === "kamino_lend")!, {
+        known_asset_value_usd: "400",
+        known_net_value_usd: "400",
+      });
+      result.data.known_component_net_value_usd = "431.07";
+      expect(validResourcePayload("summary", result.data)).toBe(true);
+      return Response.json(result);
+    }
+    return Response.json(readFixture(resource, "complete"));
+  });
+  vi.stubGlobal("fetch", fetch);
+  return calls;
+}
+
+it("cards render only for chip protocols, open, and fetch on mount", async () => {
+  const calls = chipSummary(() => undefined);
+  const { container } = render(<Portfolio address={DEMO_ADDRESS} />);
+  const toggle = await screen.findByRole("button", { name: "Collapse Kamino Lend" });
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+  expect(toggle).toHaveClass("protocol-toggle");
+  expect(await within(container.querySelector<HTMLElement>("#protocol-kamino")!).findByText("Lending position")).toBeVisible();
+  expect(container.querySelectorAll("section[id^='protocol-']")).toHaveLength(1);
+  expect(document.getElementById("protocol-orca")).toBeNull();
+  expect(document.getElementById("protocol-stake")).toBeNull();
+  expect(screen.queryByText(/Additional protocol views/)).toBeNull();
+  expect(screen.getByText("1 protocol")).toBeVisible();
+  // One request per rendered card, none for protocols without a chip.
+  expect(calls.filter((r) => r === "kamino")).toHaveLength(1);
+  expect(calls.slice().sort()).toEqual(["kamino", "overview", "positions", "summary"]);
+});
+
+it("failed card shows retry not zero", async () => {
+  let orcaReads = 0;
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    const resource = new URL(input, "http://doxxd.test").pathname.split("/").at(-1) as ResourceName;
+    if (resource === "orca" && ++orcaReads === 1) return Response.json({ ok: false, kind: "upstream" });
+    return Response.json(readFixture(resource, "complete"));
+  }));
+  const { container } = render(<Portfolio address={DEMO_ADDRESS} />);
+  const orca = () => {
+    const section = container.querySelector<HTMLElement>("#protocol-orca");
+    if (!section) throw Error("orca card not mounted");
+    return section;
+  };
+  expect(await within(await waitFor(orca)).findByText("Couldn’t load this section")).toBeVisible();
+  expect(orca().querySelector(".protocol-value")).toHaveTextContent("—");
+  expect(within(orca()).queryByText("$0.00")).toBeNull();
+  const note = screen.getByText(/couldn’t load ·/);
+  expect(note).toHaveTextContent("1 protocol couldn’t load · retry");
+  fireEvent.click(within(note).getByRole("button", { name: "retry" }));
+  expect(await within(orca()).findByRole("table")).toBeVisible();
+  expect(orca().querySelector(".protocol-value")).toHaveTextContent("$1,645.67");
+  expect(screen.queryByText(/couldn’t load ·/)).toBeNull();
+  expect(orcaReads).toBe(2);
 });

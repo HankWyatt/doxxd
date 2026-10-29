@@ -770,6 +770,143 @@ tbody tr.data-row:hover {
 .coverage-note p {
   margin: 7px 0;
 }
+/* Protocol cards: header tag, per-kind tables and "ⓘ details" controls. */
+.protocol-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+.protocol-title h3 {
+  margin: 0;
+}
+.kind-tag {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10px;
+  padding: 2px 9px;
+  white-space: nowrap;
+}
+.card-summary {
+  margin: 0;
+  padding: 12px 18px 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.pool-cell {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.pair-icons {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.token-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 650;
+}
+.token-icon + .token-icon {
+  margin-left: -9px;
+  outline: 2px solid var(--panel);
+  color: var(--violet);
+}
+.pool-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin-top: 3px;
+}
+.lock-badge {
+  color: var(--muted);
+  font-size: 10px;
+}
+.details-toggle,
+.link-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--faint);
+  font-size: 10px;
+  cursor: pointer;
+}
+.details-toggle:hover,
+.details-toggle[aria-expanded="true"],
+.link-button {
+  color: var(--accent);
+}
+.link-button {
+  font-size: inherit;
+  text-decoration: underline;
+}
+.manage-link {
+  display: inline-block;
+  margin-top: 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 1px 10px;
+  color: var(--accent);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.manage-link:hover {
+  border-color: var(--accent);
+}
+.group-row td {
+  background: var(--raised);
+}
+.group-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+.section-row th {
+  background: none;
+  padding-top: 10px;
+  padding-bottom: 6px;
+}
+.show-all {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 12px 18px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: left;
+}
+.show-all:hover {
+  color: var(--accent);
+}
+.protocol-card .coverage-note summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.details-label {
+  color: var(--accent);
+}
+.protocol-failures {
+  margin: 0 0 22px;
+}
+.protocol-strip + .protocol-failures {
+  margin-top: -22px;
+}
 .empty-state {
   padding: 28px 22px;
   color: var(--muted);
@@ -1365,6 +1502,12 @@ tbody tr.data-row:hover {
   }
   .protocol-toggle .badge {
     font-size: 9px;
+  }
+  .card-summary {
+    padding: 10px 13px 0;
+  }
+  .show-all {
+    padding: 12px 13px;
   }
   .breadcrumb {
     margin-bottom: 22px;

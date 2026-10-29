@@ -75,11 +75,11 @@ test("page boundaries preserve source absence and manual continuation recovery",
   const receipt = page.locator("#protocol-liquid-staking");
   await page.getByRole("link", { name: /Liquid staking/ }).click();
   await expect(receipt).toBeInViewport();
-  await expect(receipt.getByRole("button", { name: "Expand Liquid staking" })).toHaveAttribute("aria-expanded", "false");
-  expect(reads.some(r => r.resource === "liquid-staking")).toBe(false);
+  // Protocol cards with a chip are open and load their first page once.
+  await expect(receipt.getByRole("button", { name: "Collapse Liquid staking" })).toHaveAttribute("aria-expanded", "true");
+  await expect.poll(() => reads.filter(r => r.resource === "liquid-staking").length).toBe(1);
 
   const lp = page.locator("#protocol-orca");
-  await lp.getByRole("button", { name: "Expand Orca Whirlpools" }).click();
   await expect(lp.getByText("No positions on this page", { exact: true })).toBeVisible();
   await expect(lp).not.toContainText("No positions were found in this supported scope.");
   await lp.locator(".coverage-note summary").click();

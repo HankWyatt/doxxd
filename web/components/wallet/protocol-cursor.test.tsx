@@ -25,10 +25,8 @@ it("can return to the seed when a snapshot-bound position cursor expires", async
       resource="orca"
       mode={{ kind: "live" }}
       labels={{}}
+      defaultOpen
     />,
-  );
-  fireEvent.click(
-    screen.getByRole("button", { name: "Expand Orca Whirlpools" }),
   );
   fireEvent.click(
     await screen.findByRole("button", { name: "Next positions" }),
@@ -54,9 +52,9 @@ function renderOrca() {
       resource="orca"
       mode={{ kind: "live" }}
       labels={{}}
+      defaultOpen
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Expand Orca Whirlpools" }));
 }
 function protocolResponse(data: ReturnType<typeof orcaPage>) {
   expect(validResourcePayload("orca", data)).toBe(true);
@@ -202,9 +200,9 @@ it("renders non-liquidity rows safely when coverage contains an unrecognized inv
       resource="stake"
       mode={{ kind: "live" }}
       labels={{}}
+      defaultOpen
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Expand Native staking" }));
   expect(await screen.findByRole("table")).toBeVisible();
   expect(screen.queryByText(/Source snapshot positions:/)).toBeNull();
 });
@@ -226,9 +224,9 @@ it("keeps liquid receipt rows when unpaged payloads contain pagination extension
       resource="liquid-staking"
       mode={{ kind: "live" }}
       labels={{}}
+      defaultOpen
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Expand Liquid staking" }));
   expect(await screen.findByRole("table")).toBeVisible();
   expect(screen.queryByRole("button", { name: "Next positions" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Retry positions page" })).toBeNull();

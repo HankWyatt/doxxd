@@ -37,11 +37,16 @@ test("pending, stale, unpriced, and protocol failure preserve honest values", as
   fixtureApi.setScenario("protocol-error");
   await page.goto(`/wallet/${DEMO_ADDRESS}`);
   await waitForWalletHydration(page);
-  await page
-    .getByRole("button", { name: "Expand Orca Whirlpools", exact: true })
-    .click();
+  await expect(
+    page.getByRole("button", { name: "Collapse Orca Whirlpools", exact: true }),
+  ).toHaveAttribute("aria-expanded", "true");
   await expect(
     page.locator("#protocol-orca").getByText("Couldn’t load this section"),
+  ).toBeVisible();
+  // The failed card never shows a total, and the page offers one retry.
+  await expect(page.locator("#protocol-orca .protocol-value")).toHaveText("—");
+  await expect(
+    page.getByText("1 protocol couldn’t load · retry", { exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Inspect SOL holding", exact: true }),

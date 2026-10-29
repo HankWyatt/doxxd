@@ -1,12 +1,11 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Layers3 } from "lucide-react";
 import { useWalletResource } from "@/lib/use-wallet-resource";
 import { useWalletPositions } from "@/lib/use-wallet-positions";
 import {
   LIVE_MODE,
   type WalletDataMode,
-  type ResourceData,
   type ProtocolResource,
 } from "@/lib/dmnd/contracts";
 import { protocolResources, resources } from "@/lib/dmnd/resources";
@@ -15,7 +14,7 @@ import { chipModel } from "@/lib/portfolio/chips";
 import { ResourceState, LoadingRows } from "../resource-state";
 import { WalletFrame, usePortfolioSummary } from "./frame";
 import { Holdings } from "./holdings";
-import { ProtocolSection } from "./protocol-section";
+import { ProtocolSection, type ProtocolStatus } from "./protocol-section";
 import { RecoveryNotice } from "./recovery-notice";
 export function Portfolio({
   address,
@@ -40,21 +39,37 @@ function PortfolioContent({
   const overview = useWalletResource(address, "overview", {}, mode);
   const trading = useWalletPositions(address, mode);
   const summary = usePortfolioSummary();
-  const [showAll, setShowAll] = useState(false);
   const chips = chipModel(summary?.components ?? []);
-  const represented = protocolResources.filter((resource) =>
-    summary?.components.some(
-      (c) =>
-        c.id === resources[resource].componentId,
-    ),
-  );
-  // Financial inclusion does not determine whether a summary link has a target.
-  const featured = represented.length
-    ? represented
-    : (["stake", "kamino", "orca"] satisfies ProtocolResource[]);
-  const other = protocolResources.filter((r) => !featured.includes(r));
-  // A receipt link reveals hidden protocol views, then follows the anchor once
-  // its section is mounted.
+  // A card for every protocol with a chip (in chip order), then for every
+  // protocol a holdings receipt names, so each chip and receipt link has a target.
+  const cards: ProtocolResource[] = [];
+  for (const chip of chips.chips)
+    if (chip.resource && chip.resource !== "overview" && !cards.includes(chip.resource))
+      cards.push(chip.resource);
+  if (overview.result?.ok)
+    for (const asset of overview.result.data.assets) {
+      const protocol = asset.position?.protocol;
+      const resource = protocolResources.find(
+        (r) => protocol && resources[r].componentId === protocol,
+      );
+      if (resource && !cards.includes(resource)) cards.push(resource);
+    }
+  // Cards whose positions failed to load, each with its retry.
+  const [failures, setFailures] = useState<
+    Partial<Record<ProtocolResource, () => void>>
+  >({});
+  const onStatus = useCallback<ProtocolStatus>((resource, retry) => {
+    setFailures((current) => {
+      if (current[resource] === retry || (!retry && !(resource in current)))
+        return current;
+      const next = { ...current };
+      if (retry) next[resource] = retry;
+      else delete next[resource];
+      return next;
+    });
+  }, []);
+  const failed = Object.values(failures);
+  // A receipt link follows the anchor of its mounted card.
   const [target, setTarget] = useState<ProtocolResource | null>(null);
   useEffect(() => {
     if (!target) return;
@@ -68,10 +83,9 @@ function PortfolioContent({
     element
       .querySelector<HTMLButtonElement>(".protocol-toggle")
       ?.focus({ preventScroll: true });
-  }, [target, showAll]);
+  }, [target]);
   function showProtocol(resource: ProtocolResource) {
-    if (!featured.includes(resource)) setShowAll(true);
-    setTarget(resource);
+    if (cards.includes(resource)) setTarget(resource);
   }
   const labels: Record<string, string> = {
     So11111111111111111111111111111111111111112: "WSOL",
@@ -108,6 +122,19 @@ function PortfolioContent({
           )}
         </div>
       )}
+      {failed.length > 0 && (
+        <p className="chip-note protocol-failures" role="status">
+          {failed.length} {failed.length === 1 ? "protocol" : "protocols"}{" "}
+          couldn’t load ·{" "}
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => failed.forEach((retry) => retry())}
+          >
+            retry
+          </button>
+        </p>
+      )}
       <RecoveryNotice state={overview.recovery} retained={Boolean(overview.refreshError)} retry={overview.refresh} />
       {!overview.result ? (
         <div className="panel">
@@ -125,54 +152,34 @@ function PortfolioContent({
           <ResourceState error={overview.result} retry={overview.refresh} />
         </div>
       )}
-      <div className="section-heading">
-        <h2>
-          <Layers3 size={16} />
-          Protocol positions{" "}
-          <span className="count">{protocolResources.length} views</span>
-        </h2>
-        <span className="faint small hide-mobile">
-          Expand a protocol to inspect positions
-        </span>
-      </div>
-      <div className="protocol-list">
-        {featured.map((resource) => (
-          <ProtocolSection
-            key={address + resource}
-            address={address}
-            resource={resource}
-            mode={mode}
-            labels={labels}
-            component={summary?.components.find(
-              (c) => c.id === resources[resource].componentId,
-            )}
-          />
-        ))}
-        {showAll &&
-          other.map((resource) => (
-            <ProtocolSection
-              key={address + resource}
-              address={address}
-              resource={resource}
-              mode={mode}
-              labels={labels}
-              component={summary?.components.find(
-                (c) => c.id === resources[resource].componentId,
-              )}
-            />
-          ))}
-      </div>
-      {other.length > 0 && (
-        <button
-          type="button"
-          className="button ghost"
-          style={{ marginTop: 14, width: "100%" }}
-          onClick={() => setShowAll(!showAll)}
-        >
-          {showAll
-            ? "Show fewer protocols"
-            : "Additional protocol views (" + other.length + ")"}
-        </button>
+      {cards.length > 0 && (
+        <>
+          <div className="section-heading">
+            <h2>
+              <Layers3 size={16} />
+              Protocol positions{" "}
+              <span className="count">
+                {cards.length} {cards.length === 1 ? "protocol" : "protocols"}
+              </span>
+            </h2>
+          </div>
+          <div className="protocol-list">
+            {cards.map((resource) => (
+              <ProtocolSection
+                key={address + resource}
+                address={address}
+                resource={resource}
+                mode={mode}
+                labels={labels}
+                defaultOpen
+                onStatus={onStatus}
+                component={summary?.components.find(
+                  (c) => c.id === resources[resource].componentId,
+                )}
+              />
+            ))}
+          </div>
+        </>
       )}
       <p className="small faint" style={{ lineHeight: 1.7, marginTop: 18 }}>
         Protocol availability and coverage vary. Unknown values stay unknown;

@@ -52,7 +52,7 @@ it.each(records)("shows the $phase supported Drift scope without inventing zero 
     return Response.json({ ok: true, data });
   });
   vi.stubGlobal("fetch", request);
-  const { container } = render(<ProtocolSection address={data.wallet} resource="drift" mode={{ kind: "live" }} labels={{}} />);
+  const { container } = render(<ProtocolSection address={data.wallet} resource="drift" mode={{ kind: "live" }} labels={{}} defaultOpen={false} />);
   expect(request).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Expand Drift" }));
   if (record.phase === "initial") {

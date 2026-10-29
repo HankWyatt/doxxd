@@ -34,10 +34,10 @@ function openSection() {
       resource="meteora-damm-v2"
       mode={{ kind: "live" }}
       labels={{}}
+      defaultOpen
     />,
   );
-  expect(screen.getByText("Liquidity positions")).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "Expand Meteora DAMM v2" }));
+  expect(screen.getByText("Liquidity Pool")).toBeVisible();
 }
 
 it("loads lazily and shows a complete position with expandable detail", async () => {
@@ -48,6 +48,7 @@ it("loads lazily and shows a complete position with expandable detail", async ()
       resource="meteora-damm-v2"
       mode={{ kind: "live" }}
       labels={{}}
+      defaultOpen={false}
     />,
   );
   expect(fetch).not.toHaveBeenCalled();
@@ -92,12 +93,12 @@ it("pages manually with the opaque cursor and returns to the first page", async 
   expect(await screen.findByText("Partial coverage")).toBeInTheDocument();
   expect(fetch).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole("button", { name: "Next positions" }));
-  expect(await screen.findByText(/^SYNC \//)).toBeVisible();
+  expect(await screen.findByText(/^SYNC \+ /)).toBeVisible();
   expect(String(fetch.mock.calls[1][0])).toContain(
     "cursor=synthetic-damm-v2-cursor-2",
   );
   fireEvent.click(screen.getByRole("button", { name: "First page" }));
-  expect(await screen.findByText(/^SYNA \//)).toBeVisible();
+  expect(await screen.findByText(/^SYNA \+ /)).toBeVisible();
   expect(fetch).toHaveBeenCalledTimes(3);
 });
 
@@ -280,7 +281,7 @@ it.each(["claimed", "creator-supplied"])(
   },
 );
 
-it("reveals a hidden protocol view before following a receipt link", async () => {
+it("mounts a card for a receipt's protocol and follows its link", async () => {
   const fetcher = vi.fn(async (input: string) => {
     const url = new URL(input, "http://doxxd.test");
     const resource = url.pathname.split("/").at(-1) as ResourceName;
@@ -301,14 +302,13 @@ it("reveals a hidden protocol view before following a receipt link", async () =>
   const { DEMO_ADDRESS } = await import("@/lib/fixtures/wallet");
   render(<Portfolio address={DEMO_ADDRESS} />);
   const line = (await screen.findByText(/1 LP position NFT/)).closest("p")!;
-  expect(document.getElementById("protocol-meteora-damm-v2")).toBeNull();
-  fireEvent.click(within(line).getByRole("link", { name: "Meteora DAMM v2" }));
-  expect(await screen.findByRole("button", { name: "Show fewer protocols" })).toBeVisible();
+  // No chip (the summary failed), but the receipt names the protocol.
   expect(document.getElementById("protocol-meteora-damm-v2")).not.toBeNull();
+  fireEvent.click(within(line).getByRole("link", { name: "Meteora DAMM v2" }));
   await waitFor(() => expect(window.location.hash).toBe("#protocol-meteora-damm-v2"));
   expect(
-    fetcher.mock.calls.every(([input]) => !String(input).includes("meteora-damm-v2")),
-  ).toBe(true);
+    fetcher.mock.calls.filter(([input]) => String(input).includes("meteora-damm-v2")),
+  ).toHaveLength(1);
 });
 
 it("labels Orca, Raydium and unknown LP receipts without valuing them", () => {
@@ -368,46 +368,47 @@ async function renderDammSummary(
   const { DEMO_ADDRESS } = await import("@/lib/fixtures/wallet");
   render(<Portfolio address={DEMO_ADDRESS} />);
   await screen.findByText("$12,345.67");
-  const noDetailFetch = () =>
-    fetcher.mock.calls.every(([input]) => !String(input).includes("meteora-damm-v2"));
-  return { noDetailFetch };
+  const detailFetches = () =>
+    fetcher.mock.calls.filter(([input]) => String(input).includes("meteora-damm-v2")).length;
+  return { detailFetches };
 }
 
 const dammLink = () => screen.queryByRole("link", { name: /Meteora DAMM v2/ });
 
 it("links a stale DAMM v2 summary component with a value to its protocol section", async () => {
-  const { noDetailFetch } = await renderDammSummary("stale", true, "75");
+  const { detailFetches } = await renderDammSummary("stale", true, "75");
   expect(await screen.findByRole("link", { name: /Meteora DAMM v2/ }))
     .toHaveAttribute("href", "#protocol-meteora-damm-v2");
   expect(document.getElementById("protocol-meteora-damm-v2")).not.toBeNull();
-  expect(noDetailFetch()).toBe(true);
+  await waitFor(() => expect(detailFetches()).toBe(1));
   expect(screen.getByText(/^Saved data from/)).toBeVisible();
 });
 
 it("links a valued DAMM v2 component that the known total excludes", async () => {
-  const { noDetailFetch } = await renderDammSummary("stale", false, "75");
+  const { detailFetches } = await renderDammSummary("stale", false, "75");
   expect(await screen.findByRole("link", { name: /Meteora DAMM v2/ }))
     .toHaveAttribute("href", "#protocol-meteora-damm-v2");
   expect(document.getElementById("protocol-meteora-damm-v2")).not.toBeNull();
-  expect(noDetailFetch()).toBe(true);
+  await waitFor(() => expect(detailFetches()).toBe(1));
 });
 
 it("gives a disabled DAMM v2 component no chip but counts it as not available", async () => {
-  const { noDetailFetch } = await renderDammSummary("disabled", false, null);
+  const { detailFetches } = await renderDammSummary("disabled", false, null);
   expect(dammLink()).toBeNull();
-  expect(document.getElementById("protocol-meteora-damm-v2")).not.toBeNull();
+  // Without a chip or a receipt there is no card.
+  expect(document.getElementById("protocol-meteora-damm-v2")).toBeNull();
   expect(screen.getByText("1 not available yet")).toBeVisible();
   expect(screen.queryByText(/sources? still updating/)).toBeNull();
-  expect(noDetailFetch()).toBe(true);
+  expect(detailFetches()).toBe(0);
 });
 
 it("gives a queued DAMM v2 component no chip and leaves it to the header status", async () => {
-  const { noDetailFetch } = await renderDammSummary("queued", false, null);
+  const { detailFetches } = await renderDammSummary("queued", false, null);
   expect(dammLink()).toBeNull();
-  expect(document.getElementById("protocol-meteora-damm-v2")).not.toBeNull();
+  expect(document.getElementById("protocol-meteora-damm-v2")).toBeNull();
   expect(screen.queryByText(/not available yet/)).toBeNull();
   expect(screen.getByText(/sources? still updating/)).toBeVisible();
-  expect(noDetailFetch()).toBe(true);
+  expect(detailFetches()).toBe(0);
 });
 
 function copycatPage(resource: "orca" | "raydium-clmm" | "meteora") {
@@ -455,9 +456,9 @@ it.each([
   vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data })));
   const { DEMO_ADDRESS } = await import("@/lib/fixtures/wallet");
   render(
-    <ProtocolSection address={DEMO_ADDRESS} resource={resource} mode={{ kind: "live" }} labels={{}} />,
+    <ProtocolSection address={DEMO_ADDRESS} resource={resource} mode={{ kind: "live" }} labels={{}} defaultOpen />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Expand " + label }));
+  expect(screen.getByRole("button", { name: "Collapse " + label })).toBeVisible();
   fireEvent.click(await screen.findByRole("button", { name: /WSOL \/ USDC/ }));
   const detail = document.querySelector(".detail-row") as HTMLElement;
   expect(within(detail).getByText(copycat)).toBeVisible();
@@ -481,7 +482,7 @@ it("moves focus to the protocol section each time a receipt link is followed", a
   const { DEMO_ADDRESS } = await import("@/lib/fixtures/wallet");
   render(<Portfolio address={DEMO_ADDRESS} />);
   await screen.findByText(/1 LP position NFT/);
-  const toggle = () => screen.getByRole("button", { name: "Expand Meteora DAMM v2" });
+  const toggle = () => screen.getByRole("button", { name: "Collapse Meteora DAMM v2" });
   for (let attempt = 0; attempt < 2; attempt++) {
     const link = screen.getByRole("link", { name: "Meteora DAMM v2" });
     link.focus();

@@ -13,6 +13,7 @@ export function stakeRows(raw: Schemas["WalletStakeAccounts"]): PositionView[] {
       },
     ],
     valueUsd: row.value_usd ?? null,
+    validator: row.vote_account ?? null,
     details: [
       { label: "Stake account", value: row.stake_account },
       sourceDetail("Account lamports", row.lamports),

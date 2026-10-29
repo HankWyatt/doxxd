@@ -5,6 +5,9 @@ import { DEMO_ADDRESS, readFixture } from "@/lib/fixtures/wallet";
 import type { ResourceName } from "@/lib/dmnd/contracts";
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+// The header and holdings; open protocol cards report their own recovery.
+const outsideCards = (elements: HTMLElement[]) =>
+  elements.filter((element) => !element.closest(".protocol-card"));
 
 it("replaces a queued headline and failed holdings without a click, then stops checking", async () => {
   vi.useFakeTimers();
@@ -22,15 +25,20 @@ it("replaces a queued headline and failed holdings without a click, then stops c
   await act(async () => {});
   expect(screen.getByText(/sources? still updating/)).toBeVisible();
   expect(screen.getByText("Couldn’t load this section")).toBeVisible();
-  expect(screen.getAllByText("Checking for wallet data automatically…")).toHaveLength(2);
+  expect(outsideCards(screen.getAllByText("Checking for wallet data automatically…"))).toHaveLength(2);
   await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
   expect(screen.getByText("$12,345.67")).toBeVisible();
   expect(screen.getByText("USD Coin")).toBeVisible();
   expect(screen.queryByText("Couldn’t load this section")).not.toBeInTheDocument();
   expect(screen.queryByText("Checking for wallet data automatically…")).not.toBeInTheDocument();
   await act(async () => { await vi.advanceTimersByTimeAsync(150_000); });
-  expect(network).toHaveBeenCalledTimes(5);
+  expect(counts.get("summary")).toBe(2);
+  expect(counts.get("overview")).toBe(2);
   expect(counts.get("positions")).toBe(1);
+  // Nothing, protocol cards included, keeps checking once settled.
+  const settled = network.mock.calls.length;
+  await act(async () => { await vi.advanceTimersByTimeAsync(150_000); });
+  expect(network).toHaveBeenCalledTimes(settled);
 });
 
 it("keeps loaded values visible after a failed manual refresh", async () => {
@@ -45,8 +53,8 @@ it("keeps loaded values visible after a failed manual refresh", async () => {
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Refresh wallet" })));
   expect(screen.getByText("$12,345.67")).toBeVisible();
   expect(screen.getByText("USD Coin")).toBeVisible();
-  expect(screen.getAllByText("Showing the last loaded data.")).toHaveLength(2);
+  expect(outsideCards(screen.getAllByText("Showing the last loaded data."))).toHaveLength(2);
   await act(async () => { await vi.advanceTimersByTimeAsync(150_000); });
-  expect(screen.getAllByText(/Automatic checks have stopped/)).toHaveLength(2);
-  expect(screen.getAllByRole("button", { name: "Check again" })).toHaveLength(2);
+  expect(outsideCards(screen.getAllByText(/Automatic checks have stopped/))).toHaveLength(2);
+  expect(outsideCards(screen.getAllByRole("button", { name: "Check again" }))).toHaveLength(2);
 });

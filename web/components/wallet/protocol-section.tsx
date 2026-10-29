@@ -1,41 +1,76 @@
 "use client";
-import { Fragment, useState } from "react";
-import { ChevronDown, ChevronUp, Layers3 } from "lucide-react";
+import { Fragment, useCallback, useLayoutEffect, useRef, useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import type {
   ProtocolResource,
-  ResourceData,
   WalletDataMode,
   Schemas,
 } from "@/lib/dmnd/contracts";
-import { resources } from "@/lib/dmnd/resources";
+import { resources, type ProtocolKind } from "@/lib/dmnd/resources";
 import { useWalletResource } from "@/lib/use-wallet-resource";
 import {
   toProtocolView,
+  type AmountView,
+  type PositionView,
   type ProtocolPayload,
   type ProtocolView,
 } from "@/lib/portfolio/model";
-import { formatUsd } from "@/lib/decimal";
+import { kindTag, manageLink } from "@/lib/portfolio/links";
+import { compareDecimalDesc, formatAmount, formatUsd } from "@/lib/decimal";
 import { short } from "@/lib/portfolio/adapters/shared";
 import { ResourceState, LoadingRows } from "../resource-state";
 import { Amounts, PositionDetail } from "./position-detail";
 import { RecoveryNotice } from "./recovery-notice";
+
+/** Reports a card's failed request with a way to retry it, or null once it loads. */
+export type ProtocolStatus = (
+  resource: ProtocolResource,
+  retry: (() => void) | null,
+) => void;
+
+// Every protocol resource declares a kind (links.test.ts checks it).
+function kindOf(resource: ProtocolResource): ProtocolKind {
+  const kind = resources[resource].kind;
+  if (!kind) throw new Error("Protocol resource without a kind: " + resource);
+  return kind;
+}
+const plural = (count: number, noun: string) =>
+  count + " " + noun + (count === 1 ? "" : "s");
+const legName = (a: AmountView, labels: Record<string, string>) =>
+  a.mint ? (labels[a.mint] ?? a.label) : a.label;
+
 export function ProtocolSection({
   address,
   resource,
   mode,
   component,
   labels,
+  defaultOpen,
+  limit = 5,
+  onStatus,
 }: {
   address: string;
   resource: ProtocolResource;
   mode: WalletDataMode;
   component?: Schemas["WalletPortfolioComponent"];
   labels: Record<string, string>;
+  defaultOpen: boolean;
+  /** Positions shown before "Show all". */
+  limit?: number;
+  onStatus?: ProtocolStatus;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
+  const [failed, setFailed] = useState(false);
   const definition = resources[resource];
+  const report = useCallback(
+    (retry: (() => void) | null) => {
+      setFailed(retry !== null);
+      onStatus?.(resource, retry);
+    },
+    [resource, onStatus],
+  );
   return (
-    <section className="panel" id={"protocol-" + resource}>
+    <section className="panel protocol-card" id={"protocol-" + resource}>
       <button
         type="button"
         className="protocol-toggle"
@@ -43,27 +78,24 @@ export function ProtocolSection({
         aria-label={(open ? "Collapse " : "Expand ") + definition.label}
         onClick={() => setOpen(!open)}
       >
-        <span className="protocol-icon">{definition.label.slice(0, 2)}</span>
-        <span>
+        <span className="protocol-icon" aria-hidden="true">
+          {definition.label.slice(0, 2)}
+        </span>
+        <span className="protocol-title">
           <h3>{definition.label}</h3>
-          <span className="faint" style={{ fontSize: 10 }}>
-            {resource === "liquid-staking"
-              ? "Receipt references · overlaps holdings"
-              : resource === "stake"
-                ? "Native stake accounts"
-                : resource.includes("raydium") ||
-                    ["orca", "meteora", "meteora-damm-v2"].includes(resource)
-                  ? "Liquidity positions"
-                  : resource === "drift" || resource === "velocity"
-                    ? "Trading accounts"
-                    : "Deposits & borrowing"}
-          </span>
+          <span className="kind-tag">{kindTag(kindOf(resource))}</span>
+          {resource === "liquid-staking" && (
+            <span className="faint small hide-mobile">
+              Receipt references · overlaps holdings
+            </span>
+          )}
         </span>
         {component && !component.coverage_complete && (
           <span className="badge partial hide-mobile">Partial</span>
         )}
         <span className="protocol-value">
-          {formatUsd(component?.known_net_value_usd)}
+          {/* A card whose positions failed to load never shows a total. */}
+          {failed ? "—" : formatUsd(component?.known_net_value_usd)}
         </span>
         {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
       </button>
@@ -74,25 +106,33 @@ export function ProtocolSection({
             resource={resource}
             mode={mode}
             labels={labels}
+            limit={limit}
+            report={report}
           />
         </div>
       )}
     </section>
   );
 }
+
 function ProtocolBody({
   address,
   resource,
   mode,
   labels,
+  limit,
+  report,
 }: {
   address: string;
   resource: ProtocolResource;
   mode: WalletDataMode;
   labels: Record<string, string>;
+  limit: number;
+  report: (retry: (() => void) | null) => void;
 }) {
   const [cursor, setCursor] = useState<string | undefined>();
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
   const request = useWalletResource(
     address,
     resource,
@@ -101,6 +141,34 @@ function ProtocolBody({
       : { limit: 50, ...(cursor ? { cursor } : {}) },
     mode,
   );
+  let view: ProtocolView | null = null;
+  if (request.result?.ok) {
+    try {
+      view = toProtocolView(
+        { resource, data: request.result.data } as ProtocolPayload,
+        { isContinuation: Boolean(cursor) },
+      );
+    } catch {
+      view = null;
+    }
+  }
+  const failed = Boolean(request.result) && view === null;
+  // The hook returns a new (equivalent) refresh each render; report a stable one.
+  const refresh = useRef(request.refresh);
+  useLayoutEffect(() => {
+    refresh.current = request.refresh;
+  });
+  // Before paint, so the header never shows a total beside a failed load.
+  useLayoutEffect(() => {
+    report(failed ? () => refresh.current() : null);
+  }, [failed, report]);
+  // A collapsed card no longer holds a failed request.
+  useLayoutEffect(() => () => report(null), [report]);
+  function page(next: string | undefined) {
+    setCursor(next);
+    setExpanded(null);
+    setShowAll(false);
+  }
   if (!request.result) return <LoadingRows />;
   if (!request.result.ok)
     return (
@@ -110,86 +178,69 @@ function ProtocolBody({
         {cursor && (
           <div className="paging">
             <span>Start a fresh position page.</span>
-            <button
-              className="button"
-              onClick={() => {
-                setCursor(undefined);
-                setExpanded(null);
-              }}
-            >
+            <button className="button" onClick={() => page(undefined)}>
               First page
             </button>
           </div>
         )}
       </>
     );
-  let view: ProtocolView;
-  try {
-    view = toProtocolView(
-      { resource, data: request.result.data } as ProtocolPayload,
-      { isContinuation: Boolean(cursor) },
-    );
-  } catch {
+  if (!view)
     return (
       <ResourceState
         error={{ ok: false, kind: "upstream" }}
         retry={request.refresh}
       />
     );
-  }
+  const kind = kindOf(resource);
+  // Array.prototype.sort is stable: unvalued rows keep source order, last.
+  const sorted = [...view.positions].sort((a, b) =>
+    compareDecimalDesc(a.valueUsd, b.valueUsd),
+  );
+  const rows = showAll ? sorted : sorted.slice(0, limit);
+  const toggle = (id: string) => setExpanded(expanded === id ? null : id);
+  const table = {
+    rows,
+    resource,
+    labels,
+    expanded,
+    toggle,
+  };
   return (
     <>
       <RecoveryNotice state={request.recovery} retained={Boolean(request.refreshError)} retry={request.refresh} />
+      {kind === "liquidity" && view.totalPositions !== null && (
+        <p className="card-summary">{plural(view.totalPositions, "position")}</p>
+      )}
       {view.positions.length > 0 ? (
         <div className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Position</th>
-                <th className="hide-mobile">Assets / principal</th>
-                <th className="hide-mobile">Debt</th>
-                <th className="right">Value</th>
-              </tr>
-            </thead>
-            <tbody>
-              {view.positions.map((row) => (
-                <Fragment key={row.id}>
-                  <tr className="data-row">
-                    <td>
-                      <button
-                        className="row-expander"
-                        aria-expanded={expanded === row.id}
-                        onClick={() =>
-                          setExpanded(expanded === row.id ? null : row.id)
-                        }
-                      >
-                        <Layers3 size={15} className="faint" />
-                        <span className="stack">
-                          <strong>{row.label}</strong>
-                          <span className="mono faint">{short(row.id)}</span>
-                        </span>
-                        <ChevronDown size={12} className="expand-icon" />
-                      </button>
-                    </td>
-                    <td className="hide-mobile">
-                      <Amounts values={row.assets} labels={labels} />
-                    </td>
-                    <td className="hide-mobile">
-                      <Amounts values={row.debts} labels={labels} />
-                    </td>
-                    <td className="right numeric">{formatUsd(row.valueUsd)}</td>
-                  </tr>
-                  {expanded === row.id && (
-                    <tr className="detail-row">
-                      <td colSpan={4}>
-                        <PositionDetail position={row} labels={labels} />
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
+          {kind === "liquidity" ? (
+            <LiquidityTable {...table} />
+          ) : kind === "lending" ? (
+            <LegTable
+              {...table}
+              columns={["Token", "Balance"]}
+              sections={["Supplied", "Borrowed"]}
+            />
+          ) : kind === "perps" ? (
+            <LegTable
+              {...table}
+              columns={["Market", "Size"]}
+              sections={[null, "Borrowed"]}
+            />
+          ) : (
+            <PositionTable
+              {...table}
+              first={
+                resource === "stake"
+                  ? "Validator"
+                  : kind === "staking"
+                    ? "Token"
+                    : "Position"
+              }
+              second={kind === "staking" ? "Amount" : "Balance"}
+            />
+          )}
         </div>
       ) : (
         <div className="empty-state">
@@ -205,13 +256,23 @@ function ProtocolBody({
               : view.coverage.detail}
         </div>
       )}
+      {sorted.length > rows.length && (
+        <button
+          type="button"
+          className="show-all"
+          onClick={() => setShowAll(true)}
+        >
+          Show all {sorted.length}
+        </button>
+      )}
       <details className="coverage-note">
         <summary>
+          <span className="details-label">ⓘ details</span>
           <span className={"badge " + view.coverage.state}>
             {view.coverage.label}
           </span>
           {view.pageValueUsd !== null && (
-            <span className="numeric" style={{ marginLeft: 10 }}>
+            <span className="numeric">
               This page: {formatUsd(view.pageValueUsd)}
             </span>
           )}
@@ -255,24 +316,12 @@ function ProtocolBody({
               </button>
             )}
             {cursor && (
-              <button
-                className="button"
-                onClick={() => {
-                  setCursor(undefined);
-                  setExpanded(null);
-                }}
-              >
+              <button className="button" onClick={() => page(undefined)}>
                 First page
               </button>
             )}
             {view.hasMore && !view.continuationUnavailable && view.cursor && (
-              <button
-                className="button"
-                onClick={() => {
-                  setCursor(view.cursor!);
-                  setExpanded(null);
-                }}
-              >
+              <button className="button" onClick={() => page(view.cursor!)}>
                 Next positions
               </button>
             )}
@@ -280,5 +329,260 @@ function ProtocolBody({
         </div>
       )}
     </>
+  );
+}
+
+type TableProps = {
+  rows: PositionView[];
+  resource: ProtocolResource;
+  labels: Record<string, string>;
+  expanded: string | null;
+  toggle: (id: string) => void;
+};
+
+function DetailsToggle({
+  row,
+  expanded,
+  toggle,
+}: Pick<TableProps, "expanded" | "toggle"> & { row: PositionView }) {
+  return (
+    <button
+      type="button"
+      className="details-toggle"
+      aria-expanded={expanded === row.id}
+      aria-label={row.label + " details"}
+      onClick={() => toggle(row.id)}
+    >
+      ⓘ details
+    </button>
+  );
+}
+
+function DetailRow({
+  row,
+  labels,
+  span,
+}: {
+  row: PositionView;
+  labels: Record<string, string>;
+  span: number;
+}) {
+  return (
+    <tr className="detail-row">
+      <td colSpan={span}>
+        <PositionDetail position={row} labels={labels} />
+      </td>
+    </tr>
+  );
+}
+
+/** Claimable amounts; USD only when the source values them. */
+function Claimable({
+  values,
+  labels,
+}: {
+  values: AmountView[];
+  labels: Record<string, string>;
+}) {
+  if (!values.length) return <span className="faint">—</span>;
+  return (
+    <div className="stack">
+      {values.map((a, i) => (
+        <div key={i}>
+          <span className="numeric">{formatAmount(a.amount)}</span>{" "}
+          <span className="muted">{legName(a, labels)}</span>
+          {a.valueUsd != null && (
+            <span className="faint"> ({formatUsd(a.valueUsd)})</span>
+          )}
+          {a.qualifier?.startsWith("raw atoms") && (
+            <span className="faint small"> · raw atoms</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LiquidityTable({ rows, resource, labels, expanded, toggle }: TableProps) {
+  return (
+    <table>
+      <thead>
+        <tr>
+          <th>Pool</th>
+          <th>Balance</th>
+          <th className="hide-mobile">Claimable fees</th>
+          <th className="right">USD Value</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => {
+          const legs = row.assets.map((a) => legName(a, labels));
+          const manage = manageLink(resource, row.links);
+          return (
+            <Fragment key={row.id}>
+              <tr className="data-row">
+                <td>
+                  <div className="pool-cell">
+                    <span className="pair-icons" aria-hidden="true">
+                      {legs.slice(0, 2).map((name, i) => (
+                        <span className="token-icon" key={i}>
+                          {name.slice(0, 1)}
+                        </span>
+                      ))}
+                    </span>
+                    <span className="stack">
+                      <strong>{legs.length ? legs.join(" + ") : row.label}</strong>
+                      <span className="pool-meta">
+                        {row.locked && (
+                          <span
+                            className="lock-badge"
+                            title="Part of this position's liquidity is permanently locked or vesting."
+                          >
+                            <span aria-hidden="true">🔒 </span>locked
+                          </span>
+                        )}
+                        <DetailsToggle row={row} expanded={expanded} toggle={toggle} />
+                      </span>
+                    </span>
+                  </div>
+                </td>
+                <td>
+                  <Amounts values={row.assets} labels={labels} />
+                  {manage && (
+                    <a
+                      className="manage-link"
+                      href={manage.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {manage.label} <span aria-hidden="true">↗</span>
+                    </a>
+                  )}
+                </td>
+                <td className="hide-mobile">
+                  <Claimable values={row.rewards} labels={labels} />
+                </td>
+                <td className="right numeric">{formatUsd(row.valueUsd)}</td>
+              </tr>
+              {expanded === row.id && <DetailRow row={row} labels={labels} span={4} />}
+            </Fragment>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+function PositionTable({
+  rows,
+  resource,
+  labels,
+  expanded,
+  toggle,
+  first,
+  second,
+}: TableProps & { first: string; second: string }) {
+  return (
+    <table>
+      <thead>
+        <tr>
+          <th>{first}</th>
+          <th>{second}</th>
+          <th className="right">USD Value</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <Fragment key={row.id}>
+            <tr className="data-row">
+              <td>
+                <span className="stack">
+                  <strong className={resource === "stake" ? "mono" : undefined}>
+                    {resource === "stake"
+                      ? row.validator
+                        ? short(row.validator)
+                        : "Unknown"
+                      : row.label}
+                  </strong>
+                  <DetailsToggle row={row} expanded={expanded} toggle={toggle} />
+                </span>
+              </td>
+              <td>
+                <Amounts values={row.assets} labels={labels} />
+              </td>
+              <td className="right numeric">{formatUsd(row.valueUsd)}</td>
+            </tr>
+            {expanded === row.id && <DetailRow row={row} labels={labels} span={3} />}
+          </Fragment>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/** One block per position: its legs under labelled sections (assets, then debts). */
+function LegTable({
+  rows,
+  labels,
+  expanded,
+  toggle,
+  columns,
+  sections,
+}: TableProps & {
+  columns: [string, string];
+  sections: [string | null, string];
+}) {
+  return (
+    <table>
+      <thead>
+        <tr>
+          <th>{columns[0]}</th>
+          <th>{columns[1]}</th>
+          <th className="right">USD Value</th>
+        </tr>
+      </thead>
+      {rows.map((row) => (
+        <tbody key={row.id}>
+          <tr className="group-row">
+            <td colSpan={2}>
+              <span className="group-title">
+                <strong>{row.label}</strong>
+                <span className="mono faint">{short(row.id)}</span>
+                <DetailsToggle row={row} expanded={expanded} toggle={toggle} />
+              </span>
+            </td>
+            <td className="right numeric">
+              {row.valueUsd != null && formatUsd(row.valueUsd)}
+            </td>
+          </tr>
+          {expanded === row.id && <DetailRow row={row} labels={labels} span={3} />}
+          {[row.assets, row.debts].map((legs, i) =>
+            legs.length ? (
+              <Fragment key={i}>
+                {sections[i] && (
+                  <tr className="section-row">
+                    <th colSpan={3} scope="rowgroup" className="label-mono">
+                      {sections[i]}
+                    </th>
+                  </tr>
+                )}
+                {legs.map((leg, j) => (
+                  <tr className="leg-row" key={j}>
+                    <td>
+                      {legName(leg, labels)}
+                      {leg.qualifier && (
+                        <span className="faint small"> · {leg.qualifier}</span>
+                      )}
+                    </td>
+                    <td className="numeric">{formatAmount(leg.amount)}</td>
+                    <td className="right numeric">{formatUsd(leg.valueUsd)}</td>
+                  </tr>
+                ))}
+              </Fragment>
+            ) : null,
+          )}
+        </tbody>
+      ))}
+    </table>
   );
 }
