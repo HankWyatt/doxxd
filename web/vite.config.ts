@@ -5,6 +5,7 @@ import { readExecutionProfile } from "./scripts/execution-profile.mjs";
 import { configureToolEnvironment } from "./scripts/tool-environment.mjs";
 import { sites } from "./scripts/vite/sites-vite-plugin";
 import { connectorPreview } from "./scripts/vite/connector-preview-plugin.mjs";
+import { ssrStubPlugin } from "./lib/actions/ssr-stub-plugin";
 
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
   "00000000-0000-4000-8000-000000000000";
@@ -35,6 +36,8 @@ const localBindingConfig = {
       "DMND_ALLOWED_WALLETS",
       "DMND_REQUEST_BUDGET",
       "DMND_ACCEPTANCE_PROXY_TOKEN",
+      "DOXXD_ACTIONS_ENABLED",
+      "SOLANA_RPC_URL",
     ],
   },
   d1_databases: d1
@@ -75,6 +78,8 @@ export default defineConfig(async ({ command }) => {
         : {}),
     },
     plugins: [
+      // Keeps web3.js and the SDKs out of the Worker bundle (see the plugin).
+      ssrStubPlugin(),
       vinext(),
       sites({ mockAuth: !managedLinux }),
       connectorPreview(),

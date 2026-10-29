@@ -6,6 +6,8 @@ declare namespace Cloudflare {
     DMND_ALLOWED_WALLETS?: string;
     DMND_REQUEST_BUDGET?: string;
     DMND_ACCEPTANCE_PROXY_TOKEN?: string;
+    DOXXD_ACTIONS_ENABLED?: string;
+    SOLANA_RPC_URL?: string;
     DB?: D1Database;
     BUCKET?: R2Bucket;
   }

@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Layers3 } from "lucide-react";
 import { useWalletResource } from "@/lib/use-wallet-resource";
+import { ActionsAvailabilityProvider } from "@/lib/actions/availability";
 import { useWalletPositions } from "@/lib/use-wallet-positions";
 import {
   LIVE_MODE,
@@ -23,14 +24,18 @@ import { RecoveryNotice } from "./recovery-notice";
 export function Portfolio({
   address,
   mode = LIVE_MODE,
+  actionsEnabled = false,
 }: {
   address: string;
   mode?: WalletDataMode;
+  actionsEnabled?: boolean;
 }) {
   return (
-    <WalletFrame address={address} mode={mode}>
-      <PortfolioContent address={address} mode={mode} />
-    </WalletFrame>
+    <ActionsAvailabilityProvider enabled={actionsEnabled}>
+      <WalletFrame address={address} mode={mode}>
+        <PortfolioContent address={address} mode={mode} />
+      </WalletFrame>
+    </ActionsAvailabilityProvider>
   );
 }
 function PortfolioContent({

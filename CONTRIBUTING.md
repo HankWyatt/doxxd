@@ -55,6 +55,18 @@ Changing or regenerating `web/package-lock.json` needs npm 11 or newer, for exam
 | `miniflare` -> `sharp` 0.35.5 | miniflare pins `sharp` 0.35.2, which has a published advisory. | A stable miniflare depends on `sharp` 0.35.5 or newer. |
 | `@esbuild-kit/core-utils` -> `esbuild` 0.25.12 | `drizzle-kit` (used only by `npm run db:generate`) still depends on the deprecated `@esbuild-kit` loader, which pins `esbuild` 0.18.20. | `drizzle-kit` drops `@esbuild-kit`, or `@esbuild-kit/core-utils` allows `esbuild` 0.25 or newer. |
 | `vinext` -> `image-size` 2.0.3 | vinext 1.0.0-beta.5 pins `image-size` 2.0.2, which has a published advisory. | The vinext version in use depends on `image-size` 2.0.3 or newer. |
+| `@coral-xyz/anchor` -> `toml` 5.0.1 | The Meteora SDK's Anchor 0.31.1 pins `toml` ^3.0.0, which has published advisories. Anchor only parses `Anchor.toml` in its Node workspace helper, which Doxxd does not call. | Anchor depends on `toml` 5.0.1 or newer. |
+| `jayson` -> `uuid` 11.1.1 | `@solana/web3.js` 1.99.0 uses `jayson` 4.3.0, which pins `uuid` ^8.3.2 (advisory for versions below 11.1.1). The browser build of web3.js uses only `uuid.v4()`, which 11.1.1 keeps. | `@solana/web3.js` or `jayson` depends on `uuid` 11.1.1 or newer. |
+
+### Accepted advisories
+
+On-site LP actions add the Solana SDKs, which bring transitive findings that have no compatible patched release. They are listed here instead of being hidden. Re-check each condition whenever the SDKs are bumped. This code ships only in the lazy action chunk (`web/lib/actions/build`); the Worker bundle gets a stub instead (`web/lib/actions/ssr-stub-plugin.ts`), and the browser loads the chunk only when a visitor starts an action.
+
+| Finding | Path | Reachability | Remove when |
+| --- | --- | --- | --- |
+| `bigint-buffer` (high, buffer overflow in `toBigIntLE`; no patched release exists), reported again on `@solana/buffer-layout-utils`, `@solana/spl-token`, `@meteora-ag/cp-amm-sdk` and `@raydium-io/raydium-sdk-v2` | SDKs -> `@solana/spl-token` -> `@solana/buffer-layout-utils` -> `bigint-buffer` | Not in the Worker (stubbed). In the browser the package's `browser` field selects its pure-JavaScript implementation, not the native binding; the input is token and pool account data the visitor's own browser reads from the chain. | `bigint-buffer` publishes a patched release, or `@solana/spl-token` and the SDKs drop it. |
+| `stream-json` (moderate, DoS and prototype pollution; fixed only in 3.6.0, an ESM-only major with a different API), reported again on `jayson`, `@solana/web3.js`, `@coral-xyz/borsh`, `@solana/spl-token-group` and `@solana/spl-token-metadata` | `@solana/web3.js` -> `jayson` -> `stream-json` | Not overridden: `jayson` 4.3.0 loads it with `require` and the 3.x API differs. Only `jayson/lib/utils.js` (Node stream helpers) uses it. web3.js's browser build imports `jayson/lib/client/browser`, which never loads it, and the Worker gets the stub. | `@solana/web3.js` drops `jayson`, or `jayson` moves to a patched `stream-json`. |
+| `@vercel/og`, `satori` and `vinext` (moderate, SVG escaping) | `vinext` -> `@vercel/og` -> `satori` | Present before LP actions. Doxxd renders no OG images. | A vinext release depends on a patched `@vercel/og`. |
 
 ## Pull requests
 

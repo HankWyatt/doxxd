@@ -1,5 +1,6 @@
 import { Activity } from "@/components/activity/feed";
 import { activityPageInput } from "@/lib/activity/window";
+import { actionsEnabledFromEnv } from "@/lib/actions/enabled";
 import { walletHref } from "@/lib/address";
 export const dynamic = "force-dynamic";
 export default async function ActivityPage({
@@ -26,5 +27,11 @@ export default async function ActivityPage({
         </div>
       </main>
     );
-  return <Activity address={address} {...query} />;
+  return (
+    <Activity
+      address={address}
+      actionsEnabled={actionsEnabledFromEnv(process.env)}
+      {...query}
+    />
+  );
 }
