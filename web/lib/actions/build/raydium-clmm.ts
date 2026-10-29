@@ -45,12 +45,8 @@ import {
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
   calculateEpochFee,
-  createAssociatedTokenAccountIdempotentInstruction,
-  createCloseAccountInstruction,
-  getAssociatedTokenAddressSync,
   getTransferFeeConfig,
   unpackAccount,
-  unpackMint,
 } from "@solana/spl-token";
 import { PublicKey, type AccountInfo, type TransactionInstruction } from "@solana/web3.js";
 import BN from "bn.js";
@@ -58,6 +54,7 @@ import { GroupTooLargeError, partitionGroups, type InstructionGroup } from "../p
 import type { ActionRpc } from "../rpc";
 import { ACTION_PROGRAM_IDS, type ClmmTarget } from "../types";
 import type { Expectation } from "../verify";
+import { ataCreates, ataOf, existingAtas, liveMint, wsolUnwraps } from "./atas";
 import {
   ataSize,
   attempt,
@@ -128,19 +125,6 @@ function decodeClmm<T>(
   if (!info || !info.owner.equals(CLMM) || info.data.length !== layout.span) return null;
   if (!info.data.subarray(0, 8).equals(discriminator)) return null;
   return attempt(() => layout.decode(info.data));
-}
-
-/** The mint at `address` with its live token program, or null. */
-function liveMint(address: PublicKey, info: Account | null | undefined): LiveMint | null {
-  if (!info) return null;
-  const program = info.owner.equals(TOKEN_PROGRAM_ID)
-    ? TOKEN_PROGRAM_ID
-    : info.owner.equals(TOKEN_2022_PROGRAM_ID)
-      ? TOKEN_2022_PROGRAM_ID
-      : null;
-  if (!program) return null;
-  const mint = attempt(() => unpackMint(address, info, program));
-  return mint && { address, program, mint };
 }
 
 /**
@@ -301,34 +285,6 @@ function paidMints(live: Live): LiveMint[] {
   return [...out.values()];
 }
 
-const ataOf = (wallet: PublicKey, mint: LiveMint) =>
-  getAssociatedTokenAddressSync(mint.address, wallet, false, mint.program);
-
-/**
- * The wallet's ATAs (of `lives`' paid mints) that need no create: an
- * initialized token account the mint's token program owns, of that mint,
- * whose owner field is the wallet. Anything else keeps its idempotent
- * create, which fails safely on an account that is not the wallet's (ruling
- * R-T9b). The wSOL ATA is never "existing": every group that unwraps it
- * closes it, so the next group must create it again.
- */
-async function existingAtas(rpc: ActionRpc, wallet: PublicKey, lives: Live[]): Promise<Set<string>> {
-  const mints = new Map<string, LiveMint>();
-  for (const mint of lives.flatMap(paidMints)) mints.set(ataOf(wallet, mint).toBase58(), mint);
-  const accounts = await readAccounts(rpc, [...mints.keys()]);
-  const out = new Set<string>();
-  for (const [ata, mint] of mints) {
-    const info = accounts.get(ata);
-    if (mint.address.equals(NATIVE_MINT) || !info || !info.owner.equals(mint.program)) continue;
-    // Lamports sent to an ATA address do not make it a token account, and a
-    // token account whose owner was reassigned is not the wallet's.
-    const account = attempt(() => unpackAccount(new PublicKey(ata), info, mint.program));
-    if (account && account.isInitialized && account.owner.equals(wallet) && account.mint.equals(mint.address))
-      out.add(ata);
-  }
-  return out;
-}
-
 /** True when `group` fits one transaction, sized exactly as packGroups sizes it. */
 function fitsAlone(wallet: PublicKey, group: InstructionGroup): boolean {
   try {
@@ -359,11 +315,7 @@ function positionInstructions(
   const nftAccount = new PublicKey(target.positionNftAccount);
   const personalPosition = new PublicKey(target.position);
   const mints = paidMints(live);
-  const creates = mints
-    .filter((mint) => !existing.has(ataOf(wallet, mint).toBase58()))
-    .map((mint) =>
-      createAssociatedTokenAccountIdempotentInstruction(wallet, ataOf(wallet, mint), wallet, mint.address, mint.program),
-    );
+  const creates = ataCreates(wallet, mints, existing);
   const decrease = ClmmInstrument.decreaseLiquidityV2Instruction(
     CLMM,
     wallet,
@@ -402,9 +354,7 @@ function positionInstructions(
         ),
       ]
     : [];
-  const unwraps = mints
-    .filter((mint) => mint.address.equals(NATIVE_MINT))
-    .map((mint) => createCloseAccountInstruction(ataOf(wallet, mint), wallet, wallet, [], mint.program));
+  const unwraps = wsolUnwraps(wallet, mints);
   return [...creates, decrease, ...closeIxs, ...unwraps];
 }
 
@@ -443,7 +393,7 @@ export async function buildClmmClaimGroups(
   const existing = await existingAtas(
     rpc,
     wallet,
-    loaded.flatMap((r) => (r.ok ? [r.live] : [])),
+    loaded.flatMap((r) => (r.ok ? paidMints(r.live) : [])),
   );
 
   const groups: InstructionGroup[] = [];
@@ -571,7 +521,7 @@ async function planWithdraw(
 
   // Rent for ATAs the transaction creates and keeps (a wSOL ATA is closed
   // again): exactly the creates the group will carry.
-  const existing = await existingAtas(rpc, wallet, [live]);
+  const existing = await existingAtas(rpc, wallet, paidMints(live));
   const missing = paidMints(live).filter(
     (m) => !m.address.equals(NATIVE_MINT) && !existing.has(ataOf(wallet, m).toBase58()),
   );

@@ -140,6 +140,16 @@ export const SYNTHETIC = {
     ownerLp: new BN("100000000000"),
     reserveWsol: new BN("100000000000"),
     reserveSynb: new BN("5000000000"),
+    // A second pool, SYNT (Token-2022, 1% transfer fee) / SYNA, whose vaults
+    // also hold creator fees.
+    transferFee: {
+      lpSupply: new BN("2000000000000"),
+      ownerLp: new BN("400000000000"),
+      reserveSynt: new BN("3000000000"),
+      reserveSyna: new BN("6000000000000"),
+      creatorFeeSynt: new BN(3_000_000),
+      creatorFeeSyna: new BN(4_000_000),
+    },
   },
   ammV4: {
     lpSupply: new BN("1000000000"),
@@ -198,8 +208,23 @@ export type SyntheticChain = {
       rewardVaults: string[];
     };
   };
-  cpmm: { pool: string; lpMint: string; config: string; authority: string };
-  ammV4: { pool: string; lpMint: string; market: string; authority: string; marketAuthority: string };
+  // `lpAccount`: the owner's LP token account (its ATA of the LP mint).
+  cpmm: {
+    pool: string;
+    lpMint: string;
+    lpAccount: string;
+    config: string;
+    authority: string;
+    transferFee: { pool: string; lpMint: string; lpAccount: string };
+  };
+  ammV4: {
+    pool: string;
+    lpMint: string;
+    lpAccount: string;
+    market: string;
+    authority: string;
+    marketAuthority: string;
+  };
 };
 
 const seeded = (byte: number) => Keypair.fromSeed(new Uint8Array(32).fill(byte));
@@ -941,12 +966,60 @@ export function chainFixture(): SyntheticChain {
   ] as const)
     putTokenAccount(vault, mint, cpmmKeys.authority, fees.reserve.add(fees.protocol).add(fees.fund));
   put(cpmmKeys.lpMint, PROGRAM_IDS.token, mintData({ decimals: 9, supply: P.lpSupply, authority: cpmmKeys.authority }));
-  putTokenAccount(
-    getAssociatedTokenAddressSync(cpmmKeys.lpMint, wallet, false, token),
-    cpmmKeys.lpMint,
-    wallet,
-    P.ownerLp,
+  const cpmmLpAccount = getAssociatedTokenAddressSync(cpmmKeys.lpMint, wallet, false, token);
+  putTokenAccount(cpmmLpAccount, cpmmKeys.lpMint, wallet, P.ownerLp);
+
+  // The transfer-fee pool: same config, SYNT and SYNA, with creator fees.
+  const T = P.transferFee;
+  const [feeMintA, feeMintB] = ordered(synt, syna);
+  const feeKeys = getCreatePoolKeys({ programId: cpmmProgram, configId: cpmmConfig, mintA: feeMintA, mintB: feeMintB });
+  const feePoolFees = new Map([
+    [String(synt), { protocol: new BN(1_000_000), fund: new BN(2_000_000), creator: T.creatorFeeSynt, reserve: T.reserveSynt }],
+    [String(syna), { protocol: new BN(5_000_000), fund: new BN(6_000_000), creator: T.creatorFeeSyna, reserve: T.reserveSyna }],
+  ]);
+  const feeA = feePoolFees.get(String(feeMintA))!;
+  const feeB = feePoolFees.get(String(feeMintB))!;
+  put(
+    feeKeys.poolId,
+    PROGRAM_IDS.cpmm,
+    encodeLayout(
+      CpmmPoolInfoLayout,
+      {
+        configId: cpmmConfig,
+        poolCreator: key(63),
+        vaultA: feeKeys.vaultA,
+        vaultB: feeKeys.vaultB,
+        mintLp: feeKeys.lpMint,
+        mintA: feeMintA,
+        mintB: feeMintB,
+        mintProgramA: new PublicKey(programOf(feeMintA)),
+        mintProgramB: new PublicKey(programOf(feeMintB)),
+        observationId: feeKeys.observationId,
+        bump: getPdaPoolAuthority(cpmmProgram).nonce,
+        status: 0,
+        lpDecimals: 9,
+        mintDecimalA: decimals.get(String(feeMintA)),
+        mintDecimalB: decimals.get(String(feeMintB)),
+        lpAmount: T.lpSupply,
+        protocolFeesMintA: feeA.protocol,
+        protocolFeesMintB: feeB.protocol,
+        fundFeesMintA: feeA.fund,
+        fundFeesMintB: feeB.fund,
+        enableCreatorFee: true,
+        creatorFeesMintA: feeA.creator,
+        creatorFeesMintB: feeB.creator,
+      },
+      "PoolState",
+    ),
   );
+  for (const [mint, vault, fees] of [
+    [feeMintA, feeKeys.vaultA, feeA],
+    [feeMintB, feeKeys.vaultB, feeB],
+  ] as const)
+    putTokenAccount(vault, mint, feeKeys.authority, fees.reserve.add(fees.protocol).add(fees.fund).add(fees.creator));
+  put(feeKeys.lpMint, PROGRAM_IDS.token, mintData({ decimals: 9, supply: T.lpSupply, authority: feeKeys.authority }));
+  const feeLpAccount = getAssociatedTokenAddressSync(feeKeys.lpMint, wallet, false, token);
+  putTokenAccount(feeLpAccount, feeKeys.lpMint, wallet, T.ownerLp);
 
   // --- Raydium AMM v4 and its OpenBook market ------------------------------
   const A = SYNTHETIC.ammV4;
@@ -1012,7 +1085,8 @@ export function chainFixture(): SyntheticChain {
   putTokenAccount(ammKeys.baseVault, sync, ammKeys.authority, A.reserveSync.add(basePnl));
   putTokenAccount(ammKeys.quoteVault, wsol, ammKeys.authority, A.reserveWsol.add(quotePnl));
   put(ammKeys.lpMint, PROGRAM_IDS.token, mintData({ decimals: 6, supply: A.lpSupply, authority: ammKeys.authority }));
-  putTokenAccount(getAssociatedTokenAddressSync(ammKeys.lpMint, wallet, false, token), ammKeys.lpMint, wallet, A.ownerLp);
+  const ammLpAccount = getAssociatedTokenAddressSync(ammKeys.lpMint, wallet, false, token);
+  putTokenAccount(ammLpAccount, ammKeys.lpMint, wallet, A.ownerLp);
 
   const marketSigner = Market.getAssociatedAuthority({ programId: openBook, marketId: market });
   const marketBaseVault = key(66);
@@ -1075,12 +1149,19 @@ export function chainFixture(): SyntheticChain {
     cpmm: {
       pool: String(cpmmKeys.poolId),
       lpMint: String(cpmmKeys.lpMint),
+      lpAccount: String(cpmmLpAccount),
       config: String(cpmmConfig),
       authority: String(cpmmKeys.authority),
+      transferFee: {
+        pool: String(feeKeys.poolId),
+        lpMint: String(feeKeys.lpMint),
+        lpAccount: String(feeLpAccount),
+      },
     },
     ammV4: {
       pool: String(ammKeys.id),
       lpMint: String(ammKeys.lpMint),
+      lpAccount: String(ammLpAccount),
       market: String(market),
       authority: String(ammKeys.authority),
       marketAuthority: String(marketSigner.publicKey),

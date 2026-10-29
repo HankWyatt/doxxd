@@ -364,11 +364,11 @@ describe("buildClaimGroups (Meteora DAMM v2)", () => {
     expect(expectation.positions).toHaveLength(1);
   });
 
-  it("does not build other protocols yet", async () => {
+  it("refuses to claim CPMM positions, whose fees are inside the LP tokens", async () => {
     const chain = chainFixture();
     const cpmm = { protocol: "raydium-cpmm", id: "c" } as FungibleTarget;
     await expect(buildClaimGroups(mockActionRpc(chain), chain.owner.publicKey.toBase58(), [cpmm])).rejects.toThrow(
-      "not implemented",
+      "claim not supported",
     );
   });
 });

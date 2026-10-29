@@ -1,7 +1,7 @@
 import "./buffer-polyfill";
 import type { InstructionGroup } from "../pack";
 import type { ActionRpc } from "../rpc";
-import type { ActionTarget, ClmmTarget, DammV2Target } from "../types";
+import type { ActionTarget, ClmmTarget, DammV2Target, FungibleTarget } from "../types";
 import type { Expectation } from "../verify";
 import {
   buildDammV2ClaimGroups,
@@ -10,7 +10,9 @@ import {
   type ClaimBuild,
 } from "./meteora-damm-v2";
 import type { WithdrawQuote } from "./quote";
+import { buildAmmV4WithdrawGroups, quoteAmmV4Withdraw } from "./raydium-amm-v4";
 import { buildClmmClaimGroups, buildClmmWithdrawGroups, quoteClmmWithdraw } from "./raydium-clmm";
+import { buildCpmmWithdrawGroups, quoteCpmmWithdraw } from "./raydium-cpmm";
 
 export { createActionRpc, isRpcBusy, RpcBusyError } from "../rpc";
 export type { ActionRpc, SimulatedAccount } from "../rpc";
@@ -23,12 +25,14 @@ export type { ActionStep, RunOptions, StepStatus } from "../run";
 export { AmountTooSmallError, NothingToWithdrawError, PositionGoneError } from "./quote";
 export type { SkipReason, TokenAmount, WithdrawQuote } from "./quote";
 
-function notImplemented(): never {
-  throw new Error("not implemented");
+function unknownProtocol(): never {
+  throw new Error("unknown protocol");
 }
 
 const isDammV2 = (t: ActionTarget): t is DammV2Target => t.protocol === "meteora-damm-v2";
 const isClmm = (t: ActionTarget): t is ClmmTarget => t.protocol === "raydium-clmm";
+const isCpmm = (t: ActionTarget): t is FungibleTarget => t.protocol === "raydium-cpmm";
+const isAmmV4 = (t: ActionTarget): t is FungibleTarget => t.protocol === "raydium-amm-v4";
 
 /**
  * One claim build from per-protocol builds: groups and skips in the order of
@@ -68,8 +72,9 @@ export async function buildClaimGroups(
   skipped: ClaimBuild["skipped"];
   expectation: Expectation;
 }> {
-  // Raydium CPMM and AMM v4 (Task 10) are not built yet.
-  if (!targets.every((t) => isDammV2(t) || isClmm(t))) notImplemented();
+  // Raydium CPMM and AMM v4 fees are inside the LP tokens: withdraw only.
+  if (targets.some((t) => isCpmm(t) || isAmmV4(t))) throw new Error("claim not supported");
+  if (!targets.every((t) => isDammV2(t) || isClmm(t))) unknownProtocol();
   const damm = targets.filter(isDammV2);
   const clmm = targets.filter(isClmm);
   const builds: ClaimBuild[] = [];
@@ -88,7 +93,9 @@ export async function quoteWithdraw(
 ): Promise<WithdrawQuote> {
   if (isDammV2(target)) return quoteDammV2Withdraw(rpc, owner, target, bps, slippageBps);
   if (isClmm(target)) return quoteClmmWithdraw(rpc, owner, target, bps, slippageBps);
-  return notImplemented();
+  if (isCpmm(target)) return quoteCpmmWithdraw(rpc, owner, target, bps, slippageBps);
+  if (isAmmV4(target)) return quoteAmmV4Withdraw(rpc, owner, target, bps, slippageBps);
+  return unknownProtocol();
 }
 
 /**
@@ -105,5 +112,7 @@ export async function buildWithdrawGroups(
 ): Promise<{ groups: InstructionGroup[]; expectation: Expectation; closes: boolean }> {
   if (isDammV2(target)) return buildDammV2WithdrawGroups(rpc, owner, target, bps, slippageBps);
   if (isClmm(target)) return buildClmmWithdrawGroups(rpc, owner, target, bps, slippageBps);
-  return notImplemented();
+  if (isCpmm(target)) return buildCpmmWithdrawGroups(rpc, owner, target, bps, slippageBps);
+  if (isAmmV4(target)) return buildAmmV4WithdrawGroups(rpc, owner, target, bps, slippageBps);
+  return unknownProtocol();
 }
