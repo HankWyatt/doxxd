@@ -50,6 +50,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npx playwright install --with-deps --only-shell chromium
       # Starts its own dev server on 127.0.0.1:4318 with a synthetic key and an invalid upstream.
+      # Also starts a synthetic Solana RPC helper for the wallet-action flows on 127.0.0.1:4319.
       - run: npm run test:e2e
       - uses: actions/upload-artifact@v4
         if: failure()

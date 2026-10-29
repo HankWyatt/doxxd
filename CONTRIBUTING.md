@@ -37,7 +37,7 @@ npm run test:e2e
 npm run build
 ```
 
-The browser suite starts its own server on `127.0.0.1:4318` with a synthetic key and a deliberately invalid upstream, so it cannot reach DMND. Vinext allows one development server per checkout, so stop your own `npm run dev` first. On Linux hosts with container network churn, Chromium may abort loopback requests with `ERR_NETWORK_CHANGED`; running the suite in a disposable network namespace avoids it:
+The browser suite starts its own server on `127.0.0.1:4318` with a synthetic key and a deliberately invalid upstream, so it cannot reach DMND. It also starts a synthetic Solana RPC helper for the wallet-action flows on `127.0.0.1:4319`. Vinext allows one development server per checkout, so stop your own `npm run dev` first. On Linux hosts with container network churn, Chromium may abort loopback requests with `ERR_NETWORK_CHANGED`; running the suite in a disposable network namespace avoids it:
 
 ```sh
 unshare --user --map-root-user --net sh -c 'ip link set lo up && npm run test:e2e'

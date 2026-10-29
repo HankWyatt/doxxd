@@ -64,7 +64,7 @@ When the server enables them, a visitor can connect their own Solana wallet on t
 - **Pre-sign check.** Before the wallet sees a transaction, and again after it signs, Doxxd checks the message and refuses anything that could do more than the action chosen:
   - every account is listed in the message (no lookup tables);
   - the connected wallet pays the fee and is the only signer;
-  - only the LP programs, the token programs, the associated-token program, compute budget and memo appear, never the System program;
+  - only the LP programs, the token programs, the associated-token program, compute budget and memo are called directly; the System program never is (it appears only as an account that creating a token account needs);
   - compute limit and priority fee are capped;
   - new token accounts are only the wallet's own, for the tokens it should receive, and only those may be closed, back to the wallet;
   - protocol instructions come from a fixed list, with their payout accounts and position NFTs checked;

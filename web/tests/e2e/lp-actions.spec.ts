@@ -6,20 +6,10 @@ import { installMockWallet } from "./mock-wallet-standard";
 import { waitForWalletHydration } from "./mock-wallet-resources";
 
 // Synthetic only: the chain owner, its DMND rows and the RPC answers all come
-// from tests/fixtures/actions-chain.ts (served by action-rpc-server.mjs). The mock wallet signs slot 0 with a
-// fixed 64-byte pattern and never changes the message.
+// from tests/fixtures/actions-chain.ts (served by action-rpc-server.mjs). The
+// mock wallet signs slot 0 with a fixed 64-byte pattern and never changes the
+// message.
 const MOCK_SIGNATURE = bs58.encode(Uint8Array.from({ length: 64 }, (_, i) => (i * 3 + 1) & 0xff));
-
-// The pages run under a nonce-based script-src; the wallet flows load the lazy
-// action chunk. Chromium reports any blocked script on the console.
-let cspViolations: string[] = [];
-test.beforeEach(({ page }) => {
-  cspViolations = [];
-  page.on("console", (message) => {
-    if (/Content Security Policy/i.test(message.text())) cspViolations.push(message.text());
-  });
-});
-test.afterEach(() => expect(cspViolations).toEqual([]));
 
 async function openOwnWallet(page: Page, signBehavior: "sign" | "reject") {
   const owner = await mockLpActionsWallet(page, await actionChain());
@@ -42,16 +32,15 @@ test("security headers on pages and API responses", async ({ page, request }) =>
   expect(headers["referrer-policy"]).toBe("strict-origin-when-cross-origin");
   expect(headers["x-frame-options"]).toBe("DENY");
   expect(headers["permissions-policy"]).toBe("camera=(), microphone=(), geolocation=()");
-  const csp = headers["content-security-policy"];
-  expect(csp).toMatch(
-    /^frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self' 'nonce-[A-Za-z0-9+/]+=*' 'strict-dynamic'$/,
+  expect(headers["content-security-policy"]).toBe(
+    "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'",
   );
-  // Every inline or module script the page was served carries the nonce.
-  const nonce = /'nonce-([^']+)'/.exec(csp)![1];
-  const html = await response!.text();
-  const scripts = html.match(/<script\b[^>]*>/g) ?? [];
-  expect(scripts.length).toBeGreaterThan(0);
-  for (const tag of scripts) expect(tag).toContain(`nonce="${nonce}"`);
+
+  // A client-sent CSP never reaches vinext (which would read a script nonce
+  // from it): the page renders normally, with no nonce on its scripts.
+  const forged = await request.get("/", { headers: { "Content-Security-Policy": "script-src 'nonce-<x>'" } });
+  expect(forged.status()).toBe(200);
+  expect(await forged.text()).not.toContain("nonce=");
 
   // A method outside the allowlist: refused before any upstream call.
   const api = await request.post("/api/rpc", { data: { jsonrpc: "2.0", id: 1, method: "getHealth" } });
