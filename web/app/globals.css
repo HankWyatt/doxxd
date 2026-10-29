@@ -243,7 +243,7 @@ a svg {
   font-size: 13px;
 }
 .search-box input::placeholder {
-  color: #788696;
+  color: var(--faint);
 }
 .search-box button {
   border: 0;
@@ -472,7 +472,7 @@ a svg {
 }
 .button:hover {
   color: var(--text);
-  border-color: #46515e;
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
 }
 .button.ghost {
   background: transparent;
@@ -615,6 +615,7 @@ a svg {
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--panel);
+  box-shadow: 0 0 40px -24px var(--glow);
   overflow: hidden;
 }
 .table-scroll {
@@ -627,25 +628,26 @@ table {
 }
 th {
   text-align: left;
-  font-size: 10px;
+  font: 9px ui-monospace, SFMono-Regular, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   color: var(--faint);
-  font-weight: 450;
   padding: 13px 20px;
-  background: #131a21;
+  background: var(--raised);
   border-bottom: 1px solid var(--line);
   white-space: nowrap;
 }
 td {
   padding: 14px 20px;
   font-size: 12px;
-  border-bottom: 1px solid #202832;
+  border-bottom: 1px solid var(--line);
   vertical-align: middle;
 }
 tbody tr:last-child td {
   border-bottom: 0;
 }
 tbody tr.data-row:hover {
-  background: #161e26;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
 }
 .asset {
   display: flex;
@@ -662,14 +664,14 @@ tbody tr.data-row:hover {
   width: 30px;
   height: 30px;
   flex-shrink: 0;
-  border: 1px solid #2d3945;
+  border: 1px solid var(--line);
   border-radius: 50%;
   display: grid;
   place-items: center;
   font-size: 10px;
   font-weight: 650;
-  color: #c3d2df;
-  background: #202b36;
+  color: var(--muted);
+  background: var(--raised);
   overflow: hidden;
 }
 .asset-icon img {
@@ -707,7 +709,7 @@ tbody tr.data-row:hover {
 }
 .detail-row td {
   padding: 16px 22px;
-  background: #0e141a;
+  background: color-mix(in srgb, var(--bg) 70%, var(--panel));
 }
 .detail-grid {
   display: grid;
@@ -947,7 +949,7 @@ tbody tr.data-row:hover {
   line-height: 1.7;
 }
 .skeleton {
-  background: #1b242e;
+  background: var(--raised);
   border-radius: 4px;
   height: 14px;
   display: block;
@@ -1262,7 +1264,7 @@ tbody tr.data-row:hover {
   width: 30px;
   height: 30px;
   border-radius: 8px;
-  background: #1c2b2a;
+  background: color-mix(in srgb, var(--accent) 12%, var(--raised));
   color: var(--accent);
   display: grid;
   place-items: center;
