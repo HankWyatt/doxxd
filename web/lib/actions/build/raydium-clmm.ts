@@ -607,7 +607,19 @@ export async function buildClmmWithdrawGroups(
       kind: "withdraw",
       owner,
       mints: mintExpectations([plan.live]),
-      positions: [positionExpectation(target)],
+      // What this build computed: the pre-sign check holds the decrease (and
+      // the close) to it.
+      positions: [
+        {
+          ...positionExpectation(target),
+          withdraw: {
+            pool: target.pool,
+            amount: plan.liquidity.toString(),
+            minimums: [minA.toString(), minB.toString()],
+            closes: plan.quote.closes,
+          },
+        },
+      ],
     },
     closes: plan.quote.closes,
   };

@@ -158,7 +158,20 @@ describe("quoteWithdraw / buildWithdrawGroups (Raydium AMM v4)", () => {
         { mint: chain.mints.sync, tokenProgram: PROGRAM_IDS.token },
         { mint: chain.mints.wsol, tokenProgram: PROGRAM_IDS.token },
       ],
-      positions: [{ position: t.pool, nftAccount: t.lpAccount, protocol: "raydium-amm-v4" }],
+      positions: [
+        {
+          position: t.pool,
+          nftAccount: t.lpAccount,
+          protocol: "raydium-amm-v4",
+          withdraw: {
+            pool: t.pool,
+            lpAccount: t.lpAccount,
+            amount: lp.toString(),
+            minimums: quote.minimums.map((m) => m.atoms),
+            closes: false,
+          },
+        },
+      ],
     });
     expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
   });

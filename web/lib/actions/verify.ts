@@ -3,7 +3,8 @@
 // can do nothing but the allowed LP actions for the connected wallet:
 // - no address-table lookups, so every account is visible here;
 // - the wallet is the fee payer and the only signer;
-// - only the programs in ./programs.ts at the top level (never System);
+// - only the programs in ./programs.ts at the top level (never System or
+//   Memo);
 // - capped compute budget;
 // - ATA creates only of the wallet's own ATAs of expected mints;
 // - Token / Token-2022 only CloseAccount of those ATAs, to the wallet;
@@ -11,7 +12,12 @@
 //   paid-out tokens, rent and position NFTs checked by role;
 // - only the instructions the visitor's action kind allows: a claim only
 //   collects (no liquidity removed, no position closed), and every
-//   withdrawal that removes liquidity carries a non-zero minimum.
+//   withdrawal that removes liquidity carries a non-zero minimum;
+// - in a withdraw, each liquidity removal takes exactly what the visitor
+//   chose: the expected pool (and LP account, for CPMM and AMM v4), the
+//   exact amount (or all, for remove_all_liquidity) and the exact minimums,
+//   at most once per position; a position is closed only when the
+//   withdrawal closes it.
 // The wallet's ATAs are derived here from the expected mints, never taken
 // from the builder.
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
@@ -27,13 +33,13 @@ import {
   COMPUTE_BUDGET_PROGRAM,
   MAX_COMPUTE_UNIT_LIMIT,
   MAX_COMPUTE_UNIT_PRICE,
-  MEMO_PROGRAM,
   SET_COMPUTE_UNIT_LIMIT,
   SET_COMPUTE_UNIT_PRICE,
   TOKEN_2022_PROGRAM,
   TOKEN_CLOSE_ACCOUNT,
   TOKEN_PROGRAM,
   TOKEN_PROGRAMS,
+  type AccountRole,
   type ActionKind,
   type InstructionArgs,
   type InstructionSpec,
@@ -48,7 +54,31 @@ export type Expectation = {
   /** Mints the wallet may receive, each with its token program. */
   mints: { mint: string; tokenProgram: string }[];
   /** Positions the transaction may act on. */
-  positions: { position: string; nftAccount: string; protocol: ActionProtocol }[];
+  positions: ExpectedPosition[];
+};
+
+export type ExpectedPosition = {
+  position: string;
+  nftAccount: string;
+  protocol: ActionProtocol;
+  /**
+   * In a withdraw: exactly what the visitor chose, filled by the builder
+   * from its own computed values (never read back from an instruction).
+   * A liquidity removal or close of a position without it is refused.
+   */
+  withdraw?: WithdrawExpectation;
+};
+
+export type WithdrawExpectation = {
+  pool: string;
+  /** The LP token account burned from (CPMM and AMM v4 only). */
+  lpAccount?: string;
+  /** Exact liquidity delta (DAMM v2, CLMM) or LP amount (CPMM, AMM v4). */
+  amount: string;
+  /** DAMM v2 remove_all_liquidity instead of remove_liquidity(amount). */
+  removeAll?: boolean;
+  minimums: [string, string];
+  closes: boolean;
 };
 
 export type VerifyResult = { ok: true } | { ok: false; reason: string };
@@ -71,6 +101,10 @@ type Context = {
   nftAccounts: Map<string, Set<ActionProtocol>>;
   computeUnitLimit: boolean;
   computeUnitPrice: boolean;
+  positions: ExpectedPosition[];
+  /** Positions (protocol:nftAccount) this message already removes from or closes. */
+  removed: Set<string>;
+  closed: Set<string>;
 };
 
 const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
@@ -109,6 +143,9 @@ function check(message: VersionedMessage, expect: Expectation): void {
     nftAccounts: new Map(),
     computeUnitLimit: false,
     computeUnitPrice: false,
+    positions: expect.positions,
+    removed: new Set(),
+    closed: new Set(),
   };
   for (const { mint, tokenProgram } of expect.mints) {
     if (!TOKEN_PROGRAMS.includes(tokenProgram))
@@ -134,7 +171,6 @@ function check(message: VersionedMessage, expect: Expectation): void {
     else if (program === ATA_PROGRAM) checkAtaCreate(ctx, accounts, data);
     else if (program === TOKEN_PROGRAM || program === TOKEN_2022_PROGRAM)
       checkCloseAccount(ctx, program, accounts, data);
-    else if (program === MEMO_PROGRAM) return; // its accounts must sign, and only the owner signs
     else checkProtocol(ctx, program, ix.accountKeyIndexes, accounts, data);
   });
 }
@@ -245,7 +281,9 @@ function checkProtocol(
     const i = Number(index);
     const key = accounts[i];
     const at = `${label} account ${i} (${name})`;
-    if (role === "owner" || role === "rentReceiver") {
+    if (role === "pool" || role === "lpSource") {
+      continue; // checked against the withdraw expectation (checkWithdrawal)
+    } else if (role === "owner" || role === "rentReceiver") {
       if (key !== ctx.owner) reject(`${at} is not the connected wallet`);
       if (role === "owner" && !ctx.message.isAccountSigner(indexes[i])) reject(`${at} is not a signer`);
     } else if (role === "ownedTokenAccount") {
@@ -256,6 +294,79 @@ function checkProtocol(
   }
 
   if (spec.remaining === "clmmRewards") checkClmmRewards(ctx, label, accounts, fixed);
+  if (ctx.kind === "withdraw") checkWithdrawal(ctx, spec, label, accounts, data);
+}
+
+const roleIndex = (spec: InstructionSpec, role: AccountRole): number | null => {
+  const entry = Object.entries(spec.roles).find(([, r]) => r.role === role);
+  return entry ? Number(entry[0]) : null;
+};
+
+const amountsText = (values: readonly (bigint | string)[]) => values.map(String).join(", ");
+
+/**
+ * Ties a liquidity removal or close to the visitor's choice, the position's
+ * `withdraw` expectation. The position is the one named by the
+ * instruction's position NFT account (DAMM v2, CLMM) or, for CPMM and AMM
+ * v4, the expected withdrawal of the same protocol from that LP account
+ * (or the only one, so a different LP account is named in the refusal).
+ * A CLMM decrease of 0 liquidity is a fee collect, not a removal.
+ */
+function checkWithdrawal(ctx: Context, spec: InstructionSpec, label: string, accounts: string[], data: Uint8Array): void {
+  if (!spec.removes && !spec.closes) return;
+  const { amount, minimums } = decodeInstructionArgs(spec.args, data);
+  if (spec.removes === "amount" && amount === BigInt(0)) return;
+
+  const position = withdrawnPosition(ctx, spec, label, accounts);
+  const w = position.withdraw!;
+  const key = `${position.protocol}:${position.nftAccount}`;
+  if (spec.closes) {
+    if (!w.closes) reject(`${label} closes a position the withdrawal keeps open`);
+    if (ctx.closed.has(key)) reject(`${label} closes the same position twice`);
+    ctx.closed.add(key);
+    return;
+  }
+
+  const at = (role: AccountRole) => {
+    const i = roleIndex(spec, role)!;
+    return { i, key: accounts[i], text: `${label} account ${i} (${spec.roles[i].name})` };
+  };
+  const pool = at("pool");
+  if (pool.key !== w.pool) reject(`${pool.text} is not the pool being withdrawn from`);
+  if (roleIndex(spec, "lpSource") !== null) {
+    const lp = at("lpSource");
+    if (lp.key !== w.lpAccount) reject(`${lp.text} is not the LP account being withdrawn from`);
+  }
+  if (ctx.removed.has(key)) reject(`${label} removes liquidity from the same position twice`);
+  ctx.removed.add(key);
+
+  if (spec.removes === "all") {
+    if (!w.removeAll) reject(`${label} removes all liquidity, but the withdrawal removes ${w.amount}`);
+  } else {
+    if (w.removeAll) reject(`${label} removes ${amount}, but the withdrawal removes all liquidity`);
+    if (amount !== BigInt(w.amount)) reject(`${label} removes ${amount}; expected ${w.amount}`);
+  }
+  const expected = w.minimums.map((m) => BigInt(m));
+  if (minimums.length !== expected.length || minimums.some((m, i) => m !== expected[i]))
+    reject(`${label} minimums are ${amountsText(minimums)}; expected ${amountsText(w.minimums)}`);
+}
+
+function withdrawnPosition(ctx: Context, spec: InstructionSpec, label: string, accounts: string[]): ExpectedPosition {
+  const own = ctx.positions.filter((p) => p.protocol === spec.protocol);
+  const nft = roleIndex(spec, "positionNftAccount");
+  let found: ExpectedPosition | undefined;
+  if (nft !== null) {
+    const named = own.filter((p) => p.nftAccount === accounts[nft]);
+    found = named.find((p) => p.withdraw) ?? named[0];
+  } else {
+    const lp = roleIndex(spec, "lpSource");
+    const withdrawals = own.filter((p) => p.withdraw);
+    found =
+      withdrawals.find((p) => lp !== null && p.withdraw!.lpAccount === accounts[lp]) ??
+      (withdrawals.length === 1 ? withdrawals[0] : undefined);
+  }
+  if (!found?.withdraw) reject(`${label} acts on a position the visitor did not choose to withdraw from`);
+  return found;
 }
 
 export type DecodedArgs = { amount: bigint | null; minimums: bigint[] };

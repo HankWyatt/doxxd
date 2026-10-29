@@ -20,7 +20,7 @@ import { chainFixture, SYNTHETIC, tokenAccountData, type ChainAccount, type Synt
 import { mockActionRpc, postStatesFrom, type MockActionRpcOverrides } from "@/tests/fixtures/mock-action-rpc";
 import type { InstructionGroup } from "./pack";
 import { recordPending } from "./pending";
-import { MEMO_PROGRAM, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, WSOL_MINT } from "./programs";
+import { ALLOWED_INSTRUCTIONS, CLMM_PROGRAM, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, WSOL_MINT } from "./programs";
 import { RpcBusyError } from "./rpc";
 import { runAction, type ActionStep, type RunOptions } from "./run";
 import type { Expectation } from "./verify";
@@ -33,6 +33,11 @@ vi.mock("./pending", async (importOriginal) => ({
 
 const pk = (address: string) => new PublicKey(address);
 const OTHER_WALLET = new PublicKey(new Uint8Array(32).fill(9)).toBase58();
+// The synthetic CLMM position the filler below collects from.
+const FILLER_NFT = new PublicKey(new Uint8Array(32).fill(10));
+const FILLER_POSITION = new PublicKey(new Uint8Array(32).fill(11));
+const FILLER_SHARED = new PublicKey(new Uint8Array(32).fill(12));
+const FILLER_REWARDS = 12;
 
 type Ctx = {
   chain: SyntheticChain;
@@ -56,30 +61,62 @@ function setup(): Ctx {
       kind: "claim",
       owner: owner.toBase58(),
       mints: [syna, synb, synt, sync, reward, wsol].map((mint) => ({ mint, tokenProgram: programOf(mint) })),
-      positions: [],
+      positions: [{ position: FILLER_POSITION.toBase58(), nftAccount: FILLER_NFT.toBase58(), protocol: "raydium-clmm" }],
     },
   };
 }
 
+// A key whose first two bytes are the group number and an index.
+const groupKey = (n: number, i: number) => {
+  const bytes = new Uint8Array(32).fill(13);
+  bytes[0] = n;
+  bytes[1] = i;
+  return new PublicKey(bytes);
+};
+
+// A CLMM fee collect (decrease_liquidity_v2 of 0, which the pre-sign check
+// allows in a claim) padded with reward triples whose vaults are the group's
+// own keys, so two groups never share a message and the first vault names
+// the group. The rewards pay the owner's ATA of `mint`.
+function filler(ctx: Ctx, n: number, mint: string): TransactionInstruction {
+  const decrease = ALLOWED_INSTRUCTIONS[CLMM_PROGRAM].find((s) => s.name === "decrease_liquidity_v2")!;
+  const meta = (pubkey: PublicKey, isWritable = true) => ({ pubkey, isSigner: false, isWritable });
+  const ata = ctx.ata(mint);
+  const fixed = [
+    { pubkey: ctx.owner, isSigner: true, isWritable: false },
+    meta(FILLER_NFT, false),
+    meta(FILLER_POSITION),
+    ...Array.from({ length: 6 }, () => meta(FILLER_SHARED)),
+    meta(ata),
+    meta(ata),
+    ...Array.from({ length: 5 }, () => meta(FILLER_SHARED)),
+  ];
+  const rewards = Array.from({ length: FILLER_REWARDS }, (_, i) => [meta(groupKey(n, i)), meta(ata), meta(FILLER_SHARED, false)]);
+  return new TransactionInstruction({
+    programId: pk(CLMM_PROGRAM),
+    keys: [...fixed, ...rewards.flat()],
+    data: Buffer.concat([Buffer.from(decrease.discriminator), Buffer.alloc(32)]),
+  });
+}
+
 // One group per transaction: the owner's ATA of `mint` (so the simulation
-// watches it) and a memo big enough that two groups never share a message.
+// watches it) and a collect big enough that two groups never share a message.
 function group(ctx: Ctx, n: number, mint = ctx.chain.mints.syna): InstructionGroup {
   return {
     positionIds: [`position-${n}`],
     label: `Claim ${n}`,
     instructions: [
       createAssociatedTokenAccountIdempotentInstruction(ctx.owner, ctx.ata(mint), ctx.owner, pk(mint), pk(ctx.programOf(mint))),
-      new TransactionInstruction({ programId: pk(MEMO_PROGRAM), keys: [], data: Buffer.from(`group ${n} `.padEnd(640, ".")) }),
+      filler(ctx, n, mint),
     ],
   };
 }
 const groups = (ctx: Ctx, count: number) => Array.from({ length: count }, (_, n) => group(ctx, n + 1));
 
 const groupOf = (tx: VersionedTransaction): number => {
-  const memo = tx.message.compiledInstructions.find(
-    (ix) => tx.message.staticAccountKeys[ix.programIdIndex].toBase58() === MEMO_PROGRAM,
-  );
-  return Number(/^group (\d+)/.exec(Buffer.from(memo!.data).toString())![1]);
+  const keys = tx.message.staticAccountKeys;
+  const collect = tx.message.compiledInstructions.find((ix) => keys[ix.programIdIndex].toBase58() === CLMM_PROGRAM);
+  return keys[collect!.accountKeyIndexes[16]].toBytes()[0];
 };
 
 // The owner's ATA of `mint` after a simulated claim of `atoms` more.

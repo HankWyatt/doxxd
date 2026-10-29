@@ -508,8 +508,19 @@ describe("quoteWithdraw / buildWithdrawGroups (Raydium CLMM)", () => {
     );
     expect(isUnwrap(ixs.at(-1)!)).toBe(true);
     expect(expectation.kind).toBe("withdraw");
+    // The pre-sign check holds the decrease to exactly these values.
     expect(expectation.positions).toEqual([
-      { position: t.position, nftAccount: t.positionNftAccount, protocol: "raydium-clmm" },
+      {
+        position: t.position,
+        nftAccount: t.positionNftAccount,
+        protocol: "raydium-clmm",
+        withdraw: {
+          pool: t.pool,
+          amount: liquidity.toString(),
+          minimums: quote.minimums.map((m) => m.atoms),
+          closes: false,
+        },
+      },
     ]);
     expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
   });

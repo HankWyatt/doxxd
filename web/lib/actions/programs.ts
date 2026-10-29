@@ -15,13 +15,17 @@ export const MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 export const SYSTEM_PROGRAM = "11111111111111111111111111111111";
 export const WSOL_MINT = "So11111111111111111111111111111111111111112";
 
-/** Every program a transaction may invoke at the top level. Not System. */
+/**
+ * Every program a transaction may invoke at the top level. Not System, and
+ * not Memo: no builder sends a memo, and a memo's text would show in the
+ * wallet as if Doxxd wrote it. Raydium instructions still name the Memo
+ * program as an account, which is fine.
+ */
 export const ALLOWED_PROGRAMS: readonly string[] = [
   COMPUTE_BUDGET_PROGRAM,
   ATA_PROGRAM,
   TOKEN_PROGRAM,
   TOKEN_2022_PROGRAM,
-  MEMO_PROGRAM,
   CP_AMM_PROGRAM,
   CLMM_PROGRAM,
   CPMM_PROGRAM,
@@ -52,10 +56,20 @@ export const TOKEN_CLOSE_ACCOUNT = 9;
  *   mint (derived by the check), or the wallet itself;
  * - `positionNftAccount`: the NFT account of an expected position of the
  *   instruction's protocol;
- * - `rentReceiver`: the connected wallet.
+ * - `rentReceiver`: the connected wallet;
+ * - `pool` and `lpSource` (liquidity-removing instructions only): in a
+ *   withdraw, the pool the visitor chose to withdraw from and, for CPMM and
+ *   AMM v4, the LP token account the LP tokens are burned from, both taken
+ *   from the position's `withdraw` expectation.
  * Indexes without a role are left to the program's own constraints.
  */
-export type AccountRole = "owner" | "ownedTokenAccount" | "positionNftAccount" | "rentReceiver";
+export type AccountRole =
+  | "owner"
+  | "ownedTokenAccount"
+  | "positionNftAccount"
+  | "rentReceiver"
+  | "pool"
+  | "lpSource";
 
 /**
  * Accounts after the fixed list:
@@ -95,6 +109,14 @@ export type InstructionSpec = {
    * (CLMM decrease_liquidity_v2). It needs no minimums.
    */
   collectWhenZero?: true;
+  /**
+   * Removes liquidity: by the `amount` argument, or all of it
+   * (remove_all_liquidity). In a withdraw, the pool, the amount and the
+   * minimums must equal the position's `withdraw` expectation exactly.
+   */
+  removes?: "amount" | "all";
+  /** Closes the position: allowed only when the withdraw expectation closes it. */
+  closes?: true;
   /** Length of the fixed account list. */
   accounts: number;
   remaining: RemainingAccounts;
@@ -119,6 +141,12 @@ const CP_AMM_PAYOUT_ROLES = {
   4: { role: "ownedTokenAccount", name: "token_b_account" },
   9: { role: "positionNftAccount", name: "position_nft_account" },
   10: { role: "owner", name: "signer" },
+} as const;
+
+// remove_liquidity and remove_all_liquidity also name the pool (index 1).
+const CP_AMM_REMOVAL_ROLES = {
+  1: { role: "pool", name: "pool" },
+  ...CP_AMM_PAYOUT_ROLES,
 } as const;
 
 export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionSpec[]>> = {
@@ -159,9 +187,10 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       // RemoveLiquidityParameters (dist/index.js:6482): liquidity_delta u128,
       // token_a_amount_threshold u64, token_b_amount_threshold u64.
       args: { length: 40, amount: { offset: 8, bytes: 16 }, minimums: [24, 32] },
+      removes: "amount",
       accounts: 15,
       remaining: "none",
-      roles: CP_AMM_PAYOUT_ROLES,
+      roles: CP_AMM_REMOVAL_ROLES,
     },
     {
       protocol: "meteora-damm-v2",
@@ -171,9 +200,10 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       // token_a_amount_threshold u64, token_b_amount_threshold u64
       // (dist/index.js:2397-2406). It removes all, so it has no amount.
       args: { length: 24, minimums: [8, 16] },
+      removes: "all",
       accounts: 15,
       remaining: "none",
-      roles: CP_AMM_PAYOUT_ROLES,
+      roles: CP_AMM_REMOVAL_ROLES,
     },
     {
       protocol: "meteora-damm-v2",
@@ -181,6 +211,7 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       discriminator: [123, 134, 81, 0, 49, 68, 98, 98],
       kinds: ["withdraw"],
       args: { length: 8, minimums: [] },
+      closes: true,
       // 0 position_nft_mint, 1 position_nft_account, 2 pool, 3 position,
       // 4 pool_authority, 5 rent_receiver, 6 owner, 7 token_program,
       // 8 event_authority, 9 program.
@@ -225,11 +256,13 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       // Liquidity 0 with minimums 0 is the fee and reward collect a claim uses.
       args: { length: 40, amount: { offset: 8, bytes: 16 }, minimums: [24, 32] },
       collectWhenZero: true,
+      removes: "amount",
       accounts: 16,
       remaining: "clmmRewards",
       roles: {
         0: { role: "owner", name: "nft_owner" },
         1: { role: "positionNftAccount", name: "nft_account" },
+        3: { role: "pool", name: "pool_state" },
         9: { role: "ownedTokenAccount", name: "recipient_token_account_0" },
         10: { role: "ownedTokenAccount", name: "recipient_token_account_1" },
       },
@@ -244,6 +277,7 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       discriminator: [123, 134, 81, 0, 49, 68, 98, 98],
       kinds: ["withdraw"],
       args: { length: 8, minimums: [] },
+      closes: true,
       accounts: 6,
       remaining: "optionalPool",
       roles: {
@@ -264,10 +298,15 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       kinds: ["withdraw"],
       // lpAmount u64, amountMinA u64, amountMinB u64 (instruction.ts:188).
       args: { length: 32, amount: { offset: 8, bytes: 8 }, minimums: [16, 24] },
+      removes: "amount",
       accounts: 14,
       remaining: "none",
       roles: {
         0: { role: "owner", name: "owner" },
+        // poolId and userLpAccount (instruction.ts:193-194); raydium-cp-swap
+        // calls them pool_state and owner_lp_token.
+        2: { role: "pool", name: "pool_state" },
+        3: { role: "lpSource", name: "owner_lp_token" },
         4: { role: "ownedTokenAccount", name: "token_0_account" },
         5: { role: "ownedTokenAccount", name: "token_1_account" },
       },
@@ -292,9 +331,14 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       // lpAmount u64, baseAmountMin u64, quoteAmountMin u64. The program
       // treats the minimums as optional by length; a withdraw must carry them.
       args: { length: 25, amount: { offset: 1, bytes: 8 }, minimums: [9, 17] },
+      removes: "amount",
       accounts: 22,
       remaining: "none",
       roles: {
+        // poolKeys.id (liquidity/instruction.ts:121) and
+        // userKeys.lpTokenAccount (:145).
+        1: { role: "pool", name: "amm" },
+        15: { role: "lpSource", name: "user_lp_token_account" },
         16: { role: "ownedTokenAccount", name: "user_base_token_account" },
         17: { role: "ownedTokenAccount", name: "user_quote_token_account" },
         18: { role: "owner", name: "owner" },
@@ -314,9 +358,13 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       discriminator: [4],
       kinds: ["withdraw"],
       args: { length: 25, amount: { offset: 1, bytes: 8 }, minimums: [9, 17] },
+      removes: "amount",
       accounts: 11,
       remaining: "none",
       roles: {
+        // amm_info and user's source LP account (processor.rs:1561-1590).
+        1: { role: "pool", name: "amm" },
+        7: { role: "lpSource", name: "user_lp_token_account" },
         8: { role: "ownedTokenAccount", name: "user_base_token_account" },
         9: { role: "ownedTokenAccount", name: "user_quote_token_account" },
         10: { role: "owner", name: "owner" },

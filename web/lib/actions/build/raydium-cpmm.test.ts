@@ -162,7 +162,20 @@ describe("quoteWithdraw / buildWithdrawGroups (Raydium CPMM)", () => {
         { mint: pool.mintA.toBase58(), tokenProgram: PROGRAM_IDS.token },
         { mint: pool.mintB.toBase58(), tokenProgram: PROGRAM_IDS.token },
       ],
-      positions: [{ position: t.pool, nftAccount: t.lpAccount, protocol: "raydium-cpmm" }],
+      positions: [
+        {
+          position: t.pool,
+          nftAccount: t.lpAccount,
+          protocol: "raydium-cpmm",
+          withdraw: {
+            pool: t.pool,
+            lpAccount: t.lpAccount,
+            amount: lp.toString(),
+            minimums: quote.minimums.map((m) => m.atoms),
+            closes: false,
+          },
+        },
+      ],
     });
     expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
   });

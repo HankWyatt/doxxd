@@ -198,8 +198,22 @@ export function withdrawBuild(
       owner,
       mints: legs.map((leg) => ({ mint: leg.address.toBase58(), tokenProgram: leg.program.toBase58() })),
       // The LP account stands in for a position NFT account, so the pre-sign
-      // check refuses any CloseAccount of it.
-      positions: [{ position: target.pool!, nftAccount: target.lpAccount, protocol: target.protocol }],
+      // check refuses any CloseAccount of it. `withdraw` is what this build
+      // computed: the pre-sign check holds the withdraw instruction to it.
+      positions: [
+        {
+          position: target.pool!,
+          nftAccount: target.lpAccount,
+          protocol: target.protocol,
+          withdraw: {
+            pool: target.pool!,
+            lpAccount: target.lpAccount,
+            amount: w.lp.toString(),
+            minimums: [plan.minimums[0].toString(), plan.minimums[1].toString()],
+            closes: false,
+          },
+        },
+      ],
     },
     closes: false,
   };

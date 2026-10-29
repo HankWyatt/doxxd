@@ -405,8 +405,19 @@ describe("quoteWithdraw / buildWithdrawGroups (Meteora DAMM v2)", () => {
     expect(isUnwrap(ixs.at(-1)!)).toBe(true);
 
     expect(expectation.kind).toBe("withdraw");
+    // The pre-sign check holds the removal to exactly these values.
     expect(expectation.positions).toEqual([
-      { position: t.position, nftAccount: t.positionNftAccount, protocol: "meteora-damm-v2" },
+      {
+        position: t.position,
+        nftAccount: t.positionNftAccount,
+        protocol: "meteora-damm-v2",
+        withdraw: {
+          pool: t.pool,
+          amount: withdrawable.divn(2).toString(),
+          minimums: quote.minimums.map((m) => m.atoms),
+          closes: false,
+        },
+      },
     ]);
     expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
   });
@@ -444,6 +455,13 @@ describe("quoteWithdraw / buildWithdrawGroups (Meteora DAMM v2)", () => {
     expect(quote.minimums.map((m) => m.atoms)).toEqual([u64(removeAll.data, 8).toString(), u64(removeAll.data, 16).toString()]);
     expect(isUnwrap(ixs.at(-1)!)).toBe(true);
     expect(expectation.mints.map((m) => m.mint)).toContain(chain.mints.reward);
+    expect(expectation.positions[0].withdraw).toEqual({
+      pool: t.pool,
+      amount: D.positionLiquidity.toString(),
+      removeAll: true,
+      minimums: quote.minimums.map((m) => m.atoms),
+      closes: true,
+    });
     expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
   });
 

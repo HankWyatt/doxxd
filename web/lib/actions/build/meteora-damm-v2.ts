@@ -722,7 +722,20 @@ export async function buildDammV2WithdrawGroups(
         live.pool.tokenBMint.toBase58(),
         ...plan.rewardMints,
       ]),
-      positions: [positionExpectation(target)],
+      // What this build computed: the pre-sign check holds the removal (and
+      // the close) to it. Closing removes all with remove_all_liquidity.
+      positions: [
+        {
+          ...positionExpectation(target),
+          withdraw: {
+            pool: target.pool,
+            amount: plan.liquidityDelta.toString(),
+            ...(plan.quote.closes ? { removeAll: true } : {}),
+            minimums: [minA.toString(), minB.toString()],
+            closes: plan.quote.closes,
+          },
+        },
+      ],
     },
     closes: plan.quote.closes,
   };
