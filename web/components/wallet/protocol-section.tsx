@@ -3,6 +3,7 @@ import { Fragment, useCallback, useLayoutEffect, useRef, useState } from "react"
 import { ChevronDown, ChevronUp } from "lucide-react";
 import type {
   ProtocolResource,
+  ResourceError,
   WalletDataMode,
   Schemas,
 } from "@/lib/dmnd/contracts";
@@ -22,7 +23,10 @@ import { ResourceState, LoadingRows } from "../resource-state";
 import { Amounts, PositionDetail } from "./position-detail";
 import { RecoveryNotice } from "./recovery-notice";
 
-/** Reports a card's failed request with a way to retry it, or null once it loads. */
+/**
+ * Reports a card's transient failure with a way to retry it, or null once it
+ * loads or settles on a non-transient answer.
+ */
 export type ProtocolStatus = (
   resource: ProtocolResource,
   retry: (() => void) | null,
@@ -34,6 +38,14 @@ function kindOf(resource: ProtocolResource): ProtocolKind {
   if (!kind) throw new Error("Protocol resource without a kind: " + resource);
   return kind;
 }
+// Only these may succeed on a retry; the rest are answers, not outages.
+const TRANSIENT: ResourceError["kind"][] = ["upstream", "timeout", "rate_limited"];
+// The gateway has not enabled or configured this source.
+const NOT_ENABLED: ResourceError["kind"][] = [
+  "configuration",
+  "unavailable",
+  "unsupported",
+];
 const plural = (count: number, noun: string) =>
   count + " " + noun + (count === 1 ? "" : "s");
 const legName = (a: AmountView, labels: Record<string, string>) =>
@@ -48,6 +60,7 @@ export function ProtocolSection({
   defaultOpen,
   limit = 5,
   onStatus,
+  reveal,
 }: {
   address: string;
   resource: ProtocolResource;
@@ -58,17 +71,42 @@ export function ProtocolSection({
   /** Positions shown before "Show all". */
   limit?: number;
   onStatus?: ProtocolStatus;
+  /** Each new value opens the card (a followed receipt link). */
+  reveal?: number;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const [revealed, setRevealed] = useState(reveal);
+  if (reveal !== revealed) {
+    setRevealed(reveal);
+    setOpen(true);
+  }
+  // A failure outlives a collapse: it clears only when the card loads again.
   const [failed, setFailed] = useState(false);
   const definition = resources[resource];
+  const isOpen = useRef(open);
+  const retryBody = useRef<(() => void) | null>(null);
+  useLayoutEffect(() => {
+    isOpen.current = open;
+  });
   const report = useCallback(
     (retry: (() => void) | null) => {
+      retryBody.current = retry;
       setFailed(retry !== null);
-      onStatus?.(resource, retry);
+      onStatus?.(
+        resource,
+        retry
+          ? () => {
+              // A collapsed card retries by opening, which loads it afresh.
+              if (isOpen.current) retryBody.current?.();
+              else setOpen(true);
+            }
+          : null,
+      );
     },
     [resource, onStatus],
   );
+  // Unmounting (another wallet) withdraws this card's failure.
+  useLayoutEffect(() => () => onStatus?.(resource, null), [resource, onStatus]);
   return (
     <section className="panel protocol-card" id={"protocol-" + resource}>
       <button
@@ -152,7 +190,12 @@ function ProtocolBody({
       view = null;
     }
   }
-  const failed = Boolean(request.result) && view === null;
+  // Null while loading: a reopened failed card stays failed until it settles.
+  const failed = !request.result
+    ? null
+    : request.result.ok
+      ? view === null
+      : TRANSIENT.includes(request.result.kind);
   // The hook returns a new (equivalent) refresh each render; report a stable one.
   const refresh = useRef(request.refresh);
   useLayoutEffect(() => {
@@ -160,16 +203,25 @@ function ProtocolBody({
   });
   // Before paint, so the header never shows a total beside a failed load.
   useLayoutEffect(() => {
-    report(failed ? () => refresh.current() : null);
+    if (failed !== null) report(failed ? () => refresh.current() : null);
   }, [failed, report]);
-  // A collapsed card no longer holds a failed request.
-  useLayoutEffect(() => () => report(null), [report]);
   function page(next: string | undefined) {
     setCursor(next);
     setExpanded(null);
     setShowAll(false);
   }
   if (!request.result) return <LoadingRows />;
+  if (!request.result.ok && !cursor && NOT_ENABLED.includes(request.result.kind))
+    return (
+      <>
+        <RecoveryNotice state={request.recovery} retained={Boolean(request.refreshError)} retry={request.refresh} />
+        <div className="empty-state" role="status">
+          <strong>Not available yet</strong>
+          This protocol view isn’t enabled for this connection yet. Other
+          wallet sections remain available.
+        </div>
+      </>
+    );
   if (!request.result.ok)
     return (
       <>
@@ -460,7 +512,8 @@ function LiquidityTable({ rows, resource, labels, expanded, toggle }: TableProps
                   )}
                 </td>
                 <td className="hide-mobile">
-                  <Claimable values={row.rewards} labels={labels} />
+                  {/* Fees only: rewards and raw counters stay under details. */}
+                  <Claimable values={row.fees ?? []} labels={labels} />
                 </td>
                 <td className="right numeric">{formatUsd(row.valueUsd)}</td>
               </tr>
@@ -551,9 +604,7 @@ function LegTable({
                 <DetailsToggle row={row} expanded={expanded} toggle={toggle} />
               </span>
             </td>
-            <td className="right numeric">
-              {row.valueUsd != null && formatUsd(row.valueUsd)}
-            </td>
+            <td className="right numeric">{formatUsd(row.valueUsd)}</td>
           </tr>
           {expanded === row.id && <DetailRow row={row} labels={labels} span={3} />}
           {[row.assets, row.debts].map((legs, i) =>

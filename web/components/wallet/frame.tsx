@@ -20,6 +20,11 @@ import { short } from "@/lib/portfolio/adapters/shared";
 import { avatarStyle } from "@/lib/portfolio/headline";
 const SummaryContext = createContext<ResourceData["summary"] | null>(null);
 export const usePortfolioSummary = () => useContext(SummaryContext);
+/** Whether the summary is still loading, loaded, or failed to load. */
+const SummaryStatusContext = createContext<"loading" | "ready" | "failed">(
+  "loading",
+);
+export const usePortfolioSummaryStatus = () => useContext(SummaryStatusContext);
 export function WalletFrame({
   address,
   tab = "portfolio",
@@ -134,7 +139,13 @@ function FrameContent({
       <SummaryContext.Provider
         value={summary.result?.ok ? summary.result.data : null}
       >
-        {children}
+        <SummaryStatusContext.Provider
+          value={
+            !summary.result ? "loading" : summary.result.ok ? "ready" : "failed"
+          }
+        >
+          {children}
+        </SummaryStatusContext.Provider>
       </SummaryContext.Provider>
       <footer className="footer">
         <span>Public wallet data · Read-only explorer</span>

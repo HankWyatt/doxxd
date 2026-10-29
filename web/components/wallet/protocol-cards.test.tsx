@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { ProtocolSection } from "./protocol-section";
 import { DEMO_ADDRESS, readFixture } from "@/lib/fixtures/wallet";
@@ -286,4 +286,86 @@ it("details keeps technical rows", async () => {
   expect(within(detail).getByText("Permanently locked liquidity")).toBeVisible();
   expect(within(detail).getByText("Position NFT mint")).toBeVisible();
   expect(within(detail).getByText(DAMM.pool)).toBeVisible();
+});
+
+it("claimable fees column shows only DMND claimable fees, never rewards", async () => {
+  serve("orca", fixture("orca"));
+  const { unmount } = card("orca");
+  const table = await screen.findByRole("table");
+  const row = table.querySelector<HTMLElement>("tbody tr.data-row")!;
+  // Orca has reward counters and raw fee counters only: no claimable fee amount.
+  expect(row.children[2]).toHaveTextContent(/^—$/);
+  expect(within(row).queryByText(/raw atoms/)).toBeNull();
+  unmount();
+  serve("meteora-damm-v2", dammV2Page());
+  card("meteora-damm-v2", { address: DAMM.wallet });
+  const damm = (await screen.findByRole("table")).querySelector<HTMLElement>(
+    "tbody tr.data-row",
+  )!;
+  const fees = damm.children[2] as HTMLElement;
+  expect(within(fees).getByText("1.5")).toBeVisible();
+  expect(within(fees).getByText("0.25")).toBeVisible();
+  // The claimable reward (7 units) stays under details.
+  expect(within(fees).queryByText("7")).toBeNull();
+  expect(within(fees).queryByText(short(DAMM.reward))).toBeNull();
+});
+
+it.each(["configuration", "unavailable", "unsupported"] as const)(
+  "a %s protocol shows Not available yet and is not counted as a failure",
+  async (kind) => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: false, kind })));
+    const onStatus = vi.fn();
+    const { container } = card("orca", {
+      component: component("orca_whirlpools", "1645.67"),
+      onStatus,
+    });
+    expect(await screen.findByText("Not available yet")).toBeVisible();
+    expect(container.querySelector(".protocol-value")).toHaveTextContent("$1,645.67");
+    expect(onStatus.mock.calls.some(([, retry]) => retry !== null)).toBe(false);
+  },
+);
+
+it.each(["upstream", "timeout", "rate_limited"] as const)(
+  "a transient %s failure is counted and hides the total",
+  async (kind) => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: false, kind })));
+    const onStatus = vi.fn();
+    const { container } = card("orca", {
+      component: component("orca_whirlpools", "1645.67"),
+      onStatus,
+    });
+    await waitFor(() => expect(container.querySelector(".empty-state")).not.toBeNull());
+    expect(container.querySelector(".protocol-value")).toHaveTextContent(/^—$/);
+    expect(onStatus).toHaveBeenLastCalledWith("orca", expect.any(Function));
+    expect(screen.queryByText("Not available yet")).toBeNull();
+  },
+);
+
+it("an expired cursor is not a card failure and keeps the summary total", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    if (new URL(input, "http://test").searchParams.has("cursor"))
+      return Response.json({ ok: false, kind: "invalid_input" }, { status: 400 });
+    const data = fixture("orca");
+    data.has_more = true;
+    data.cursor = "expired";
+    return Response.json({ ok: true, data });
+  }));
+  const onStatus = vi.fn();
+  const { container } = card("orca", {
+    component: component("orca_whirlpools", "1645.67"),
+    onStatus,
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "Next positions" }));
+  expect(await screen.findByText("This request couldn’t be completed")).toBeVisible();
+  expect(screen.getByRole("button", { name: "First page" })).toBeVisible();
+  expect(container.querySelector(".protocol-value")).toHaveTextContent("$1,645.67");
+  expect(onStatus.mock.calls.some(([, retry]) => retry !== null)).toBe(false);
+});
+
+it("a lending position with no row value shows — in its group row", async () => {
+  serve("kamino", fixture("kamino"));
+  const { container } = card("kamino");
+  await screen.findByRole("table");
+  const group = container.querySelector<HTMLElement>("tr.group-row")!;
+  expect(group.lastElementChild).toHaveTextContent(/^—$/);
 });

@@ -39,6 +39,8 @@ export type PositionView = {
   valueUsd: string | null;
   details: { label: string; value: string }[];
   links?: { pool?: string; position?: string; positionMint?: string };
+  /** DMND's claimable LP fees, when it reports them (Meteora DAMM v2). */
+  fees?: AmountView[];
   /** Some liquidity is permanently locked or vesting (Meteora DAMM v2). */
   locked?: boolean;
   /** Native stake: the validator vote account, when delegated. */

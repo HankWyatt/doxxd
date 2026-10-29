@@ -12,7 +12,11 @@ import { protocolResources, resources } from "@/lib/dmnd/resources";
 import { formatUsd } from "@/lib/decimal";
 import { chipModel } from "@/lib/portfolio/chips";
 import { ResourceState, LoadingRows } from "../resource-state";
-import { WalletFrame, usePortfolioSummary } from "./frame";
+import {
+  WalletFrame,
+  usePortfolioSummary,
+  usePortfolioSummaryStatus,
+} from "./frame";
 import { Holdings } from "./holdings";
 import { ProtocolSection, type ProtocolStatus } from "./protocol-section";
 import { RecoveryNotice } from "./recovery-notice";
@@ -39,14 +43,21 @@ function PortfolioContent({
   const overview = useWalletResource(address, "overview", {}, mode);
   const trading = useWalletPositions(address, mode);
   const summary = usePortfolioSummary();
+  const summaryStatus = usePortfolioSummaryStatus();
   const chips = chipModel(summary?.components ?? []);
-  // A card for every protocol with a chip (in chip order), then for every
-  // protocol a holdings receipt names, so each chip and receipt link has a target.
-  const cards: ProtocolResource[] = [];
+  // Without a summary to choose from, every protocol gets a collapsed card
+  // that loads only when opened, so positions stay reachable.
+  const unsummarised =
+    summaryStatus === "failed" ||
+    (summaryStatus === "ready" && !summary?.components.length);
+  // Otherwise a card for every protocol with a chip (in chip order), then for
+  // every protocol a holdings receipt names, so each link has a target.
+  const cards: ProtocolResource[] = unsummarised ? [...protocolResources] : [];
   for (const chip of chips.chips)
     if (chip.resource && chip.resource !== "overview" && !cards.includes(chip.resource))
       cards.push(chip.resource);
-  if (overview.result?.ok)
+  // Cards wait for the summary, so none opens (and loads) before it decides.
+  if (summaryStatus !== "loading" && overview.result?.ok)
     for (const asset of overview.result.data.assets) {
       const protocol = asset.position?.protocol;
       const resource = protocolResources.find(
@@ -69,8 +80,11 @@ function PortfolioContent({
     });
   }, []);
   const failed = Object.values(failures);
-  // A receipt link follows the anchor of its mounted card.
+  // A receipt link opens its card, then follows the card's anchor.
   const [target, setTarget] = useState<ProtocolResource | null>(null);
+  const [reveals, setReveals] = useState<
+    Partial<Record<ProtocolResource, number>>
+  >({});
   useEffect(() => {
     if (!target) return;
     const id = "protocol-" + target;
@@ -85,7 +99,12 @@ function PortfolioContent({
       ?.focus({ preventScroll: true });
   }, [target]);
   function showProtocol(resource: ProtocolResource) {
-    if (cards.includes(resource)) setTarget(resource);
+    if (!cards.includes(resource)) return;
+    setReveals((current) => ({
+      ...current,
+      [resource]: (current[resource] ?? 0) + 1,
+    }));
+    setTarget(resource);
   }
   const labels: Record<string, string> = {
     So11111111111111111111111111111111111111112: "WSOL",
@@ -163,16 +182,23 @@ function PortfolioContent({
               </span>
             </h2>
           </div>
+          {unsummarised && (
+            <p className="small faint protocol-unsummarised">
+              Portfolio summary unavailable — open a protocol to check it.
+            </p>
+          )}
           <div className="protocol-list">
             {cards.map((resource) => (
               <ProtocolSection
-                key={address + resource}
+                // A change of summary state remounts cards in the new mode.
+                key={address + resource + (unsummarised ? ":lazy" : "")}
                 address={address}
                 resource={resource}
                 mode={mode}
                 labels={labels}
-                defaultOpen
+                defaultOpen={!unsummarised}
                 onStatus={onStatus}
+                reveal={reveals[resource]}
                 component={summary?.components.find(
                   (c) => c.id === resources[resource].componentId,
                 )}

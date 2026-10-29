@@ -281,7 +281,7 @@ it.each(["claimed", "creator-supplied"])(
   },
 );
 
-it("mounts a card for a receipt's protocol and follows its link", async () => {
+it("opens a receipt's collapsed protocol card and follows its link when the summary fails", async () => {
   const fetcher = vi.fn(async (input: string) => {
     const url = new URL(input, "http://doxxd.test");
     const resource = url.pathname.split("/").at(-1) as ResourceName;
@@ -302,13 +302,20 @@ it("mounts a card for a receipt's protocol and follows its link", async () => {
   const { DEMO_ADDRESS } = await import("@/lib/fixtures/wallet");
   render(<Portfolio address={DEMO_ADDRESS} />);
   const line = (await screen.findByText(/1 LP position NFT/)).closest("p")!;
-  // No chip (the summary failed), but the receipt names the protocol.
-  expect(document.getElementById("protocol-meteora-damm-v2")).not.toBeNull();
+  const detailFetches = () =>
+    fetcher.mock.calls.filter(([input]) => String(input).includes("meteora-damm-v2")).length;
+  // The summary failed: every card is collapsed and lazy, this one included.
+  const card = document.getElementById("protocol-meteora-damm-v2")!;
+  expect(within(card).getByRole("button", { name: "Expand Meteora DAMM v2" }))
+    .toHaveAttribute("aria-expanded", "false");
+  expect(detailFetches()).toBe(0);
   fireEvent.click(within(line).getByRole("link", { name: "Meteora DAMM v2" }));
   await waitFor(() => expect(window.location.hash).toBe("#protocol-meteora-damm-v2"));
-  expect(
-    fetcher.mock.calls.filter(([input]) => String(input).includes("meteora-damm-v2")),
-  ).toHaveLength(1);
+  // Following the link opens the card, which then loads once.
+  expect(within(card).getByRole("button", { name: "Collapse Meteora DAMM v2" }))
+    .toHaveAttribute("aria-expanded", "true");
+  expect(await within(card).findByText("No positions were found in this supported scope.")).toBeVisible();
+  expect(detailFetches()).toBe(1);
 });
 
 it("labels Orca, Raydium and unknown LP receipts without valuing them", () => {
@@ -380,7 +387,10 @@ it("links a stale DAMM v2 summary component with a value to its protocol section
   expect(await screen.findByRole("link", { name: /Meteora DAMM v2/ }))
     .toHaveAttribute("href", "#protocol-meteora-damm-v2");
   expect(document.getElementById("protocol-meteora-damm-v2")).not.toBeNull();
-  await waitFor(() => expect(detailFetches()).toBe(1));
+  // Exact once the card has settled on its loaded page.
+  const card = document.getElementById("protocol-meteora-damm-v2")!;
+  expect(await within(card).findByText("No positions were found in this supported scope.")).toBeVisible();
+  expect(detailFetches()).toBe(1);
   expect(screen.getByText(/^Saved data from/)).toBeVisible();
 });
 
@@ -389,7 +399,10 @@ it("links a valued DAMM v2 component that the known total excludes", async () =>
   expect(await screen.findByRole("link", { name: /Meteora DAMM v2/ }))
     .toHaveAttribute("href", "#protocol-meteora-damm-v2");
   expect(document.getElementById("protocol-meteora-damm-v2")).not.toBeNull();
-  await waitFor(() => expect(detailFetches()).toBe(1));
+  // Exact once the card has settled on its loaded page.
+  const card = document.getElementById("protocol-meteora-damm-v2")!;
+  expect(await within(card).findByText("No positions were found in this supported scope.")).toBeVisible();
+  expect(detailFetches()).toBe(1);
 });
 
 it("gives a disabled DAMM v2 component no chip but counts it as not available", async () => {
@@ -482,6 +495,9 @@ it("moves focus to the protocol section each time a receipt link is followed", a
   const { DEMO_ADDRESS } = await import("@/lib/fixtures/wallet");
   render(<Portfolio address={DEMO_ADDRESS} />);
   await screen.findByText(/1 LP position NFT/);
+  // Collapsed under the unavailable summary until the link opens it.
+  expect(screen.getByRole("button", { name: "Expand Meteora DAMM v2" }))
+    .toHaveAttribute("aria-expanded", "false");
   const toggle = () => screen.getByRole("button", { name: "Collapse Meteora DAMM v2" });
   for (let attempt = 0; attempt < 2; attempt++) {
     const link = screen.getByRole("link", { name: "Meteora DAMM v2" });

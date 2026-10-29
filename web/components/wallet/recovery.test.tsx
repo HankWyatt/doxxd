@@ -35,6 +35,9 @@ it("replaces a queued headline and failed holdings without a click, then stops c
   expect(counts.get("summary")).toBe(2);
   expect(counts.get("overview")).toBe(2);
   expect(counts.get("positions")).toBe(1);
+  // Each open card read its pending page, then the recovered one.
+  for (const card of ["stake", "kamino", "orca"]) expect(counts.get(card), card).toBe(2);
+  expect(network).toHaveBeenCalledTimes(11);
   // Nothing, protocol cards included, keeps checking once settled.
   const settled = network.mock.calls.length;
   await act(async () => { await vi.advanceTimersByTimeAsync(150_000); });

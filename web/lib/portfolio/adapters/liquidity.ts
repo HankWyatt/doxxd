@@ -129,6 +129,10 @@ export function dammV2Rows(
       }),
     );
     const [a, b] = assets;
+    const fees = [
+      claimable(a.label, a.mint!, row.fee_a_claimable_atoms, row.token_a.decimals, "claimable fee"),
+      claimable(b.label, b.mint!, row.fee_b_claimable_atoms, row.token_b.decimals, "claimable fee"),
+    ];
     return {
       ...position(row.position, a.label + " / " + b.label),
       assets,
@@ -141,9 +145,9 @@ export function dammV2Rows(
       locked: [row.liquidity.permanent_locked, row.liquidity.vested].some(
         (units) => compareDecimalDesc(units, "0") < 0,
       ),
+      fees,
       rewards: [
-        claimable(a.label, a.mint!, row.fee_a_claimable_atoms, row.token_a.decimals, "claimable fee"),
-        claimable(b.label, b.mint!, row.fee_b_claimable_atoms, row.token_b.decimals, "claimable fee"),
+        ...fees,
         ...row.rewards.map((r) =>
           claimable(mintName(r.mint), r.mint, r.claimable_atoms, r.decimals, "claimable reward, no USD value"),
         ),

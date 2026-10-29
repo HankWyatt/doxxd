@@ -901,6 +901,9 @@ tbody tr.data-row:hover {
 .details-label {
   color: var(--accent);
 }
+.protocol-unsummarised {
+  margin: -4px 0 12px;
+}
 .protocol-failures {
   margin: 0 0 22px;
 }

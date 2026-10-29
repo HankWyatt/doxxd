@@ -4,6 +4,7 @@ import { Portfolio } from "./portfolio";
 import { readFixture, DEMO_ADDRESS } from "@/lib/fixtures/wallet";
 import type { ResourceName } from "@/lib/dmnd/contracts";
 import { validResourcePayload } from "@/lib/dmnd/validation.server";
+import { protocolResources } from "@/lib/dmnd/resources";
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 function network(summaryError = false) {
   vi.stubGlobal(
@@ -76,9 +77,15 @@ it("mounts summary navigation targets even when a component is excluded from the
   expect(screen.getByRole("button", { name: "Collapse Liquid staking" }))
     .toHaveAttribute("aria-expanded", "true");
   expect(screen.getByText("$12,345.67")).toBeVisible();
-  // Summary, overview and trading, plus one request per card.
-  await waitFor(() => expect(fetcher.mock.calls).toHaveLength(7));
-  expect(fetcher.mock.calls.filter(([input]) => input.includes("/liquid-staking"))).toHaveLength(1);
+  // Summary, overview and trading, plus one request per card, once every card
+  // has rendered its loaded page.
+  for (const id of ["stake", "kamino", "orca", "liquid-staking"])
+    expect(await within(document.getElementById("protocol-" + id)!).findByRole("table")).toBeVisible();
+  const read = (resource: string) =>
+    fetcher.mock.calls.filter(([input]) => new URL(input, "http://doxxd.test").pathname.endsWith("/" + resource)).length;
+  for (const resource of ["summary", "overview", "positions", "stake", "kamino", "orca", "liquid-staking"])
+    expect(read(resource), resource).toBe(1);
+  expect(fetcher.mock.calls).toHaveLength(7);
 });
 
 it("keeps a pending zero subtotal separate from positive holdings until the summary includes wallet balances", async () => {
@@ -319,6 +326,67 @@ it("failed card shows retry not zero", async () => {
   fireEvent.click(within(note).getByRole("button", { name: "retry" }));
   expect(await within(orca()).findByRole("table")).toBeVisible();
   expect(orca().querySelector(".protocol-value")).toHaveTextContent("$1,645.67");
+  expect(screen.queryByText(/couldn’t load ·/)).toBeNull();
+  expect(orcaReads).toBe(2);
+});
+
+it("renders every protocol card collapsed and lazy when the summary is unavailable", async () => {
+  const calls: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    const resource = new URL(input, "http://doxxd.test").pathname.split("/").at(-1) as ResourceName;
+    calls.push(resource);
+    if (resource === "summary") return Response.json({ ok: false, kind: "unavailable" });
+    return Response.json(readFixture(resource, "complete"));
+  }));
+  const { container } = render(<Portfolio address={DEMO_ADDRESS} />);
+  expect(await screen.findByText("Portfolio summary unavailable — open a protocol to check it.")).toBeVisible();
+  await screen.findByText("USD Coin");
+  const toggles = container.querySelectorAll<HTMLElement>(".protocol-toggle");
+  expect(toggles).toHaveLength(protocolResources.length);
+  for (const toggle of toggles) expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(calls.slice().sort()).toEqual(["overview", "positions", "summary"]);
+  fireEvent.click(screen.getByRole("button", { name: "Expand Kamino Lend" }));
+  expect(await screen.findByText("Lending position")).toBeVisible();
+  expect(calls.filter((r) => r === "kamino")).toHaveLength(1);
+  expect(calls).toHaveLength(4);
+});
+
+it("treats a summary with no components like an unavailable summary", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    const resource = new URL(input, "http://doxxd.test").pathname.split("/").at(-1) as ResourceName;
+    const result = readFixture(resource, "complete");
+    if (resource === "summary" && result.ok && "components" in result.data) {
+      result.data.components = [];
+      result.data.known_component_net_value_usd = null;
+    }
+    return Response.json(result);
+  }));
+  const { container } = render(<Portfolio address={DEMO_ADDRESS} />);
+  expect(await screen.findByText("Portfolio summary unavailable — open a protocol to check it.")).toBeVisible();
+  expect(container.querySelectorAll(".protocol-toggle")).toHaveLength(protocolResources.length);
+  expect(container.querySelector(".protocol-toggle[aria-expanded='true']")).toBeNull();
+});
+
+it("keeps a collapsed failed card counted until it loads", async () => {
+  let orcaReads = 0;
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    const resource = new URL(input, "http://doxxd.test").pathname.split("/").at(-1) as ResourceName;
+    if (resource === "orca" && ++orcaReads === 1) return Response.json({ ok: false, kind: "upstream" });
+    return Response.json(readFixture(resource, "complete"));
+  }));
+  const { container } = render(<Portfolio address={DEMO_ADDRESS} />);
+  expect(await screen.findByText("Couldn’t load this section")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Collapse Orca Whirlpools" }));
+  const orca = container.querySelector<HTMLElement>("#protocol-orca")!;
+  expect(within(orca).queryByText("Couldn’t load this section")).toBeNull();
+  expect(orca.querySelector(".protocol-value")).toHaveTextContent(/^—$/);
+  const note = screen.getByText(/couldn’t load ·/);
+  expect(note).toHaveTextContent("1 protocol couldn’t load · retry");
+  // Retrying a collapsed card opens it and loads it again.
+  fireEvent.click(within(note).getByRole("button", { name: "retry" }));
+  expect(await within(orca).findByRole("table")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Collapse Orca Whirlpools" })).toBeVisible();
+  expect(orca.querySelector(".protocol-value")).toHaveTextContent("$1,645.67");
   expect(screen.queryByText(/couldn’t load ·/)).toBeNull();
   expect(orcaReads).toBe(2);
 });
