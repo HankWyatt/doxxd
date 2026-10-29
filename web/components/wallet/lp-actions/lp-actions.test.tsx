@@ -342,7 +342,9 @@ describe("claiming", () => {
     const fetch = serve({ "meteora-damm-v2": first, "meteora-damm-v2c2": second });
     mount(DAMM.wallet, "meteora-damm-v2");
     const button = await screen.findByRole("button", { name: "Claim all fees" });
-    expect(screen.getByText("4 positions · fees to claim on 2")).toBeInTheDocument();
+    // Other pages may hold more fees: no count that would understate them (F-R003).
+    expect(screen.getByText("4 positions")).toBeInTheDocument();
+    expect(screen.queryByText(/fees to claim on/)).not.toBeInTheDocument();
     buildsGroups();
     heldRun();
     fireEvent.click(button);
@@ -603,7 +605,8 @@ describe("one run per page (fix round R-T11c)", () => {
     serve({ "meteora-damm-v2": first });
     mount(DAMM.wallet, "meteora-damm-v2");
     expect(await screen.findByRole("button", { name: "Claim all fees" })).toBeEnabled();
-    expect(screen.getByText("3 positions · fees to claim on 0")).toBeInTheDocument();
+    expect(screen.getByText("3 positions")).toBeInTheDocument();
+    expect(screen.queryByText(/fees to claim on/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Select" })).toBeNull();
   });
 

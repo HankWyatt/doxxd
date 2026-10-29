@@ -431,8 +431,9 @@ function ProtocolBody({
         <div className="card-summary lp-actions-head">
           <span>
             {plural(view.totalPositions ?? view.positions.length, "position") +
-              " · fees to claim on " +
-              claimable.length}
+              // Only this page's count is known: until every page is loaded,
+              // a count would understate the fees elsewhere (F-R003).
+              (allLoaded ? " · fees to claim on " + claimable.length : "")}
           </span>
           {/* Other pages may hold fees even when this one has none. */}
           {(claimable.length > 0 || !allLoaded) && (
