@@ -87,7 +87,16 @@ export type LpActions = {
 export function useLpActions(
   resource: ProtocolResource,
   rows: PositionView[],
-  { address, refresh }: { address: string; refresh: () => void },
+  {
+    address,
+    refresh,
+    loaded,
+  }: {
+    address: string;
+    refresh: () => void;
+    /** The card's rows have loaded (false while a remounted card fetches). */
+    loaded: boolean;
+  },
 ): LpActions {
   const enabled = useActionsEnabled();
   const wallet = useConnectedWallet();
@@ -162,11 +171,14 @@ export function useLpActions(
   const busy = store.run !== null && store.run.phase !== "done";
   const [startedHere, setStartedHere] = useState<number | null>(null);
 
-  // Backoff refetch: positions still pending among the loaded rows.
+  // Backoff refetch: positions still pending among the loaded rows. Until the
+  // card's rows have loaded (a remount) that is unknown, never "none".
   const refreshRef = useRef(refresh);
   const pendingIds = useRef(new Set<string>());
+  const rowsLoaded = useRef(loaded);
   useLayoutEffect(() => {
     refreshRef.current = refresh;
+    rowsLoaded.current = loaded;
     pendingIds.current = new Set(
       [...states.values()].filter((s) => s.pending !== null).map((s) => s.target.id),
     );
@@ -180,6 +192,8 @@ export function useLpActions(
       .filter((at) => at > elapsed)
       .map((at) =>
         setTimeout(() => {
+          // Still loading: that read is fresh already.
+          if (!rowsLoaded.current) return;
           if (!refetch.ids.some((id) => pendingIds.current.has(id))) {
             timers.forEach(clearTimeout);
             return;

@@ -99,7 +99,9 @@ export function ClaimProgress({
   useEffect(() => {
     if (autoFocus) heading.current?.focus();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const nothing = done && !error && !steps.some((step) => step.status === "confirmed");
+  // Only when nothing was ever sent: a sent step may still land (the runner
+  // says "nothing changed" itself, once the blockhash has expired).
+  const nothing = done && !error && !steps.some((step) => step.signature);
   return (
     <section className="claim-progress" aria-labelledby={id}>
       <strong id={id} ref={heading} tabIndex={-1}>

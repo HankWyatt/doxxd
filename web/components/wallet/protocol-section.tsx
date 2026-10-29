@@ -269,6 +269,7 @@ function ProtocolBody({
   const actions = useLpActions(resource, view?.positions ?? [], {
     address,
     refresh: refreshNow,
+    loaded: view !== null,
   });
   function page(next: string | undefined) {
     setCursor(next);
@@ -293,6 +294,8 @@ function ProtocolBody({
       <div className="lp-live" aria-live="polite">
         {actions.run && (
           <RunProgress
+            // A new run remounts the panel, so it takes focus again.
+            key={actions.run.id}
             run={actions.run}
             actions={actions}
             lookup={lookup}

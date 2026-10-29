@@ -667,3 +667,78 @@ describe("one run per page (fix round R-T11c)", () => {
     expect(screen.getByRole("button", { name: "Claim all fees (2)" })).toHaveFocus();
   });
 });
+
+describe("fix round 2 (R-101..R-103)", () => {
+  it("a sent but unconfirmed step never reads as nothing claimed", async () => {
+    await ownDamm();
+    buildsGroups();
+    const run = heldRun();
+    fireEvent.click(screen.getAllByRole("button", { name: "Claim" })[0]);
+    await waitFor(() => expect(build.runAction).toHaveBeenCalledTimes(1));
+    run.finish([
+      {
+        index: 1,
+        label: "claim",
+        positionIds: [R[0]],
+        status: "failed",
+        signature: SIG,
+        reason: "Not confirmed yet · check your wallet before retrying",
+      },
+    ]);
+    const panel = within(screen.getByRole("region", { name: /Claiming fees/ }));
+    expect(await panel.findByRole("button", { name: "Done" })).toBeInTheDocument();
+    expect(panel.getByText("Not confirmed yet · check your wallet before retrying")).toBeInTheDocument();
+    expect(panel.queryByText("Nothing was claimed")).toBeNull();
+  });
+
+  it("a new run on the same card takes focus again, even with the last panel open", async () => {
+    await ownDamm();
+    buildsGroups();
+    const run = heldRun();
+    fireEvent.click(screen.getAllByRole("button", { name: "Claim" })[0]);
+    await waitFor(() => expect(screen.getByText("Claiming fees from 1 position")).toHaveFocus());
+    run.finish([]);
+    await screen.findByRole("button", { name: "Done" });
+    const claim = screen.getAllByRole("button", { name: "Claim" })[1];
+    claim.focus();
+    fireEvent.click(claim);
+    await waitFor(() => expect(build.runAction).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByText("Claiming fees from 1 position")).toHaveFocus());
+  });
+
+  it("a card reopened just before a refetch tick keeps the backoff going", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let hold = false;
+    const held: Array<() => void> = [];
+    const fetch = vi.fn((input: string) => {
+      void input;
+      const answer = () => Response.json({ ok: true, data: dammPage() });
+      return hold ? new Promise<Response>((resolve) => held.push(() => resolve(answer()))) : Promise.resolve(answer());
+    });
+    vi.stubGlobal("fetch", fetch);
+    mount(DAMM.wallet, "meteora-damm-v2");
+    await screen.findAllByRole("button", { name: "Claim" });
+    buildsGroups();
+    build.runAction.mockImplementation(async (o: RunOptions) => {
+      recordPending({ wallet: DAMM.wallet, positionId: R[0], kind: "claim", signature: SIG, slot: 410000010, at: Date.now() });
+      const steps: ActionStep[] = [
+        { index: 1, label: "claim", positionIds: [R[0]], status: "confirmed", signature: SIG, slot: 410000010 },
+      ];
+      o.onUpdate(steps);
+      return steps;
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Claim" })[0]);
+    await screen.findByRole("button", { name: "Done" });
+    // Reopen with the rows still loading when the 5 s tick fires.
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Meteora DAMM v2" }));
+    hold = true;
+    fireEvent.click(screen.getByRole("button", { name: "Expand Meteora DAMM v2" }));
+    await act(async () => vi.advanceTimersByTime(5_000));
+    hold = false;
+    await act(async () => held.splice(0).forEach((release) => release()));
+    expect(await screen.findByText("Just claimed · updating")).toBeInTheDocument();
+    const before = fetch.mock.calls.length;
+    await act(async () => vi.advanceTimersByTime(10_000));
+    await waitFor(() => expect(fetch.mock.calls.length).toBeGreaterThan(before));
+  });
+});
