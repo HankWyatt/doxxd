@@ -104,6 +104,14 @@ export const SYNTHETIC = {
     // The vesting account: 2^102 released at a cliff already passed, then
     // 4 periods of 2^100 that start only after 2055, whatever "now" is.
     releasableVesting: pow2(102),
+    // Inner vesting (Position.inner_vesting, no Vesting account), each with
+    // 2^103 vesting liquidity, against the clock's unix time:
+    // - innerElapsed: unlocked 0; 2^102 at a passed cliff plus 4 × 2^100
+    //   periods that all ended, so everything is releasable;
+    // - innerPartial: unlocked 2^103; 2^101 at a passed cliff plus 6 × 2^100
+    //   periods of 1e8 s, one of which has passed (3 × 2^100 releasable);
+    // - innerBeforeCliff: unlocked 2^103; cliff in the future, nothing releasable.
+    innerPartialReleasable: pow2(100).muln(3),
     transferFeePoolFees: new BN(10_000_000),
   },
   clmm: {
@@ -143,9 +151,19 @@ export type SyntheticChain = {
   owner: Keypair;
   accounts: Map<string, ChainAccount>;
   mints: { syna: string; synb: string; synt: string; sync: string; reward: string; wsol: string };
-  // The top level is the unlocked position; `variants` holds all five.
+  // The top level is the unlocked position; `variants` holds all eight.
   dammV2: DammV2Fixture & {
-    variants: Record<"unlocked" | "vested" | "locked" | "noFees" | "transferFee", DammV2Fixture>;
+    variants: Record<
+      | "unlocked"
+      | "vested"
+      | "locked"
+      | "noFees"
+      | "transferFee"
+      | "innerElapsed"
+      | "innerPartial"
+      | "innerBeforeCliff",
+      DammV2Fixture
+    >;
   };
   clmm: {
     pool: string;
@@ -400,7 +418,16 @@ export function chainFixture(): SyntheticChain {
   const D = SYNTHETIC.dammV2;
   const dammConfig = key(41);
   const poolAuthority = derivePoolAuthority();
-  const positionMints = { unlocked: key(21), vested: key(22), locked: key(23), noFees: key(24), transferFee: key(25) };
+  const positionMints = {
+    unlocked: key(21),
+    vested: key(22),
+    locked: key(23),
+    noFees: key(24),
+    transferFee: key(25),
+    innerElapsed: key(27),
+    innerPartial: key(28),
+    innerBeforeCliff: key(29),
+  };
   const feeBPerLiquidity = D.feeBAccrued.shln(24); // 2^104 × (X << 24) >> 128 = X
   const rewardEnd = new BN(1_700_000_000); // in the past: no further accrual
 
@@ -487,6 +514,7 @@ export function chainFixture(): SyntheticChain {
     mint: PublicKey,
     liquidity: { unlocked: BN; vested?: BN; locked?: BN },
     fees: "earning" | "none" | "transferFee",
+    innerVesting?: Record<string, BN | number>,
   ): DammV2Fixture => {
     const position = derivePositionAddress(mint);
     const nftAccount = derivePositionNftAccount(mint);
@@ -504,6 +532,7 @@ export function chainFixture(): SyntheticChain {
         vested_liquidity: liquidity.vested ?? new BN(0),
         permanent_locked_liquidity: liquidity.locked ?? new BN(0),
         reward_infos: { 0: { reward_pendings: earning ? D.rewardPending : new BN(0) } },
+        ...(innerVesting ? { inner_vesting: innerVesting } : {}),
       }),
     );
     // Position NFTs are Token-2022 mints held in a PDA token account.
@@ -529,6 +558,27 @@ export function chainFixture(): SyntheticChain {
     locked: putDammPosition(wsolPool, positionMints.locked, { unlocked: half, locked: half }, "earning"),
     noFees: putDammPosition(wsolPool, positionMints.noFees, { unlocked: full }, "none"),
     transferFee: putDammPosition(transferFeePool, positionMints.transferFee, { unlocked: full }, "transferFee"),
+    innerElapsed: putDammPosition(wsolPool, positionMints.innerElapsed, { unlocked: new BN(0), vested: half }, "earning", {
+      cliff_point: new BN(1_700_000_000),
+      period_frequency: new BN(1_000),
+      cliff_unlock_liquidity: pow2(102),
+      liquidity_per_period: pow2(100),
+      number_of_period: 4,
+    }),
+    innerPartial: putDammPosition(wsolPool, positionMints.innerPartial, { unlocked: half, vested: half }, "earning", {
+      cliff_point: new BN(1_700_000_000),
+      period_frequency: new BN(100_000_000),
+      cliff_unlock_liquidity: pow2(101),
+      liquidity_per_period: pow2(100),
+      number_of_period: 6,
+    }),
+    innerBeforeCliff: putDammPosition(wsolPool, positionMints.innerBeforeCliff, { unlocked: half, vested: half }, "earning", {
+      cliff_point: new BN(1_900_000_000),
+      period_frequency: new BN(100_000_000),
+      cliff_unlock_liquidity: pow2(102),
+      liquidity_per_period: pow2(100),
+      number_of_period: 4,
+    }),
   };
   const vesting = key(51);
   put(

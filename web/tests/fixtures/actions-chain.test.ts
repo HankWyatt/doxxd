@@ -178,6 +178,35 @@ describe("chainFixture: Meteora DAMM v2", () => {
     ).rejects.toThrow(/Invalid params/);
   });
 
+  it("holds inner-vesting positions: fully elapsed, partly elapsed and before the cliff", async () => {
+    const chain = chainFixture();
+    const cpAmm = new CpAmm(mockActionRpc(chain).connection);
+    const { innerElapsed, innerPartial, innerBeforeCliff } = chain.dammV2.variants;
+    const now = new BN(SYNTHETIC.clock.unixTimestamp);
+    const half = SYNTHETIC.dammV2.halfLiquidity;
+    const released = [];
+    for (const variant of [innerElapsed, innerPartial, innerBeforeCliff]) {
+      const state = await cpAmm.fetchPositionState(pk(variant.position));
+      expect(state.pool.toBase58()).toBe(chain.dammV2.pool);
+      expect(state.vestedLiquidity.toString()).toBe(half.toString());
+      const { innerVesting } = state;
+      // Each schedule vests exactly the position's vested liquidity.
+      expect(
+        innerVesting.cliffUnlockLiquidity.add(innerVesting.liquidityPerPeriod.muln(innerVesting.numberOfPeriod)).toString(),
+      ).toBe(half.toString());
+      released.push(getAvailableVestingLiquidity({ innerVesting } as never, now).toString());
+    }
+    expect(released).toEqual([half.toString(), SYNTHETIC.dammV2.innerPartialReleasable.toString(), "0"]);
+    // None of them has a Vesting account.
+    const vestings = await mockActionRpc(chain).connection.getProgramAccounts(pk(PROGRAM_IDS.cpAmm), {
+      filters: [
+        { dataSize: VESTING_SIZE },
+        { memcmp: { offset: VESTING_POSITION_OFFSET, bytes: innerPartial.position } },
+      ],
+    });
+    expect(vestings).toEqual([]);
+  });
+
   it("has a Token-2022 transfer-fee mint in a second pool", async () => {
     const chain = chainFixture();
     const cpAmm = new CpAmm(mockActionRpc(chain).connection);

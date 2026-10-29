@@ -9,7 +9,12 @@ import {
   getAmountAFromLiquidityDelta,
   getAmountBFromLiquidityDelta,
 } from "@meteora-ag/cp-amm-sdk";
-import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import {
+  AccountLayout,
+  AccountState,
+  getAssociatedTokenAddressSync,
+  TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 import { Keypair, PublicKey, type TransactionInstruction } from "@solana/web3.js";
 import BN from "bn.js";
 import { describe, expect, it } from "vitest";
@@ -123,6 +128,17 @@ function addSecondReward(chain: SyntheticChain): string {
   });
   return mint.toBase58();
 }
+
+// Freezes the wSOL pool's reward-slot-0 vault (the reward cannot pay out).
+function freezeRewardVault(chain: SyntheticChain) {
+  const vault = deriveRewardVaultAddress(pk(chain.dammV2.pool), 0).toBase58();
+  const info = chain.accounts.get(vault)!;
+  const data = Buffer.from(info.data);
+  AccountLayout.encode({ ...AccountLayout.decode(data), state: AccountState.Frozen }, data);
+  chain.accounts.set(vault, { ...info, data });
+}
+
+const MISMATCH = "Position data doesn't match the pool · skipped";
 
 const discriminator = (name: string) =>
   Buffer.from(CpAmmIdl.instructions.find((ix) => ix.name === name)!.discriminator);
@@ -246,12 +262,82 @@ describe("buildClaimGroups (Meteora DAMM v2)", () => {
     expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
   });
 
-  it("refuses a target that names another program", async () => {
+  it("skips rows whose data does not match the pool and still builds the good ones", async () => {
     const chain = chainFixture();
-    const t = { ...target(chain, "unlocked"), program: PROGRAM_IDS.clmm };
-    await expect(buildClaimGroups(mockActionRpc(chain), chain.owner.publicKey.toBase58(), [t])).rejects.toThrow(
-      /program/,
-    );
+    const owner = chain.owner.publicKey.toBase58();
+    const good = target(chain, "unlocked");
+    const wrongProgram = { ...target(chain, "vested"), id: "wrong-program", program: PROGRAM_IDS.clmm };
+    // The position lives in the wSOL pool, not the one DMND names.
+    const wrongPool = { ...target(chain, "locked"), pool: chain.dammV2.variants.transferFee.pool };
+    // An NFT account whose bytes are not a token account.
+    const badNft = target(chain, "noFees");
+    const nft = chain.accounts.get(badNft.positionNftAccount)!;
+    chain.accounts.set(badNft.positionNftAccount, { ...nft, data: Buffer.alloc(3) });
+    const { groups, skipped, expectation } = await buildClaimGroups(mockActionRpc(chain), owner, [
+      wrongProgram,
+      good,
+      wrongPool,
+      badNft,
+    ]);
+    expect(groups.map((g) => g.positionIds)).toEqual([[good.id]]);
+    expect(skipped).toEqual([
+      { positionId: wrongProgram.id, reason: MISMATCH },
+      { positionId: wrongPool.id, reason: MISMATCH },
+      { positionId: badNft.id, reason: MISMATCH },
+    ]);
+    expect(expectation.positions.map((p) => p.position)).toEqual([good.position]);
+    expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
+  });
+
+  it("skips every row of a pool that is unreadable or whose mint is under another token program", async () => {
+    const chain = chainFixture();
+    const owner = chain.owner.publicKey.toBase58();
+    const wsolRow = target(chain, "unlocked");
+    const otherRow = target(chain, "transferFee");
+    // SYNA (the wSOL pool's token A) is a Token mint; claim it is Token-2022.
+    const syna = chain.accounts.get(chain.mints.syna)!;
+    chain.accounts.set(chain.mints.syna, { ...syna, owner: PROGRAM_IDS.token2022 });
+    const first = await buildClaimGroups(mockActionRpc(chain), owner, [wsolRow, otherRow]);
+    expect(first.skipped).toEqual([{ positionId: wsolRow.id, reason: MISMATCH }]);
+    expect(first.groups.map((g) => g.positionIds)).toEqual([[otherRow.id]]);
+
+    chain.accounts.set(chain.mints.syna, syna);
+    chain.accounts.delete(otherRow.pool);
+    const second = await buildClaimGroups(mockActionRpc(chain), owner, [wsolRow, otherRow]);
+    expect(second.skipped).toEqual([{ positionId: otherRow.id, reason: MISMATCH }]);
+    expect(second.groups.map((g) => g.positionIds)).toEqual([[wsolRow.id]]);
+    expect(packAndVerify(chain, second.groups, second.expectation)).toEqual([{ ok: true }]);
+  });
+
+  it("fails the whole claim only when the clock cannot be read", async () => {
+    const chain = chainFixture();
+    chain.accounts.delete(CLOCK_SYSVAR);
+    await expect(
+      buildClaimGroups(mockActionRpc(chain), chain.owner.publicKey.toBase58(), [target(chain, "unlocked")]),
+    ).rejects.toThrow(/clock/);
+  });
+
+  it("claims fees but not a reward whose vault is frozen", async () => {
+    const chain = chainFixture();
+    freezeRewardVault(chain);
+    const { groups, expectation } = await buildClaimGroups(mockActionRpc(chain), chain.owner.publicKey.toBase58(), [
+      target(chain, "unlocked"),
+    ]);
+    expect(cpAmmNames(groups[0].instructions)).toEqual(["claim_position_fee"]);
+    expect(expectation.mints.map((m) => m.mint)).not.toContain(chain.mints.reward);
+    expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
+  });
+
+  it("builds one group for a position listed twice", async () => {
+    const chain = chainFixture();
+    const t = target(chain, "unlocked");
+    const { groups, skipped, expectation } = await buildClaimGroups(mockActionRpc(chain), chain.owner.publicKey.toBase58(), [
+      t,
+      { ...t },
+    ]);
+    expect(groups.map((g) => g.positionIds)).toEqual([[t.id]]);
+    expect(skipped).toEqual([]);
+    expect(expectation.positions).toHaveLength(1);
   });
 
   it("does not build other protocols yet", async () => {
@@ -436,6 +522,80 @@ describe("quoteWithdraw / buildWithdrawGroups (Meteora DAMM v2)", () => {
     const build = buildWithdrawGroups(mockActionRpc(chain), owner, t, 5_000, 100);
     await expect(build).rejects.toBeInstanceOf(AmountTooSmallError);
     await expect(build).rejects.toThrow("Amount too small to withdraw");
+  });
+
+  it("withdraws everything but keeps the position open when a reward vault is frozen", async () => {
+    const chain = chainFixture();
+    freezeRewardVault(chain);
+    const owner = chain.owner.publicKey.toBase58();
+    const rpc = mockActionRpc(chain);
+    const t = target(chain, "unlocked");
+    const quote = await quoteWithdraw(rpc, owner, t, 10_000, 100);
+    expect(quote.closes).toBe(false);
+    expect(quote.depositRefundLamports).toBeNull();
+    expect(quote.fees.map((f) => f.mint)).not.toContain(chain.mints.reward);
+    const { groups, expectation } = await buildWithdrawGroups(rpc, owner, t, 10_000, 100);
+    const ixs = groups[0].instructions;
+    expect(cpAmmNames(ixs)).toEqual(["claim_position_fee", "remove_liquidity"]);
+    expect(u128(ixs.find((ix) => isCpAmm(ix, "remove_liquidity"))!.data, 8).toString()).toBe(
+      D.positionLiquidity.toString(),
+    );
+    expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
+  });
+
+  it("releases fully elapsed inner vesting (no Vesting account) and closes at 100%", async () => {
+    const chain = chainFixture();
+    const owner = chain.owner.publicKey.toBase58();
+    const rpc = mockActionRpc(chain);
+    const t = target(chain, "innerElapsed");
+    const quote = await quoteWithdraw(rpc, owner, t, 10_000, 100);
+    expect([quote.withdrawableBps, quote.vestingBps, quote.closes]).toEqual([10_000, 0, true]);
+    const { groups, expectation } = await buildWithdrawGroups(rpc, owner, t, 10_000, 100);
+    // The program releases inner vesting itself: no refresh_vesting.
+    expect(cpAmmNames(groups[0].instructions)).toEqual([
+      "claim_position_fee",
+      "remove_all_liquidity",
+      "claim_reward",
+      "close_position",
+    ]);
+    expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
+  });
+
+  it("withdraws only the released part of partially elapsed inner vesting", async () => {
+    const chain = chainFixture();
+    const owner = chain.owner.publicKey.toBase58();
+    const rpc = mockActionRpc(chain);
+    const t = target(chain, "innerPartial");
+    // 2^103 unlocked + 3 × 2^100 released, of 2^104: 6875 / 3125 bps.
+    const withdrawable = D.halfLiquidity.add(D.innerPartialReleasable);
+    const quote = await quoteWithdraw(rpc, owner, t, 5_000, 100);
+    expect([quote.withdrawableBps, quote.vestingBps, quote.closes]).toEqual([6_875, 3_125, false]);
+
+    const half = await buildWithdrawGroups(rpc, owner, t, 5_000, 100);
+    expect(cpAmmNames(half.groups[0].instructions)).toEqual(["claim_position_fee", "remove_liquidity"]);
+    const remove = half.groups[0].instructions.find((ix) => isCpAmm(ix, "remove_liquidity"))!;
+    expect(u128(remove.data, 8).toString()).toBe(withdrawable.divn(2).toString());
+    expect(packAndVerify(chain, half.groups, half.expectation)).toEqual([{ ok: true }]);
+
+    expect((await quoteWithdraw(rpc, owner, t, 10_000, 100)).closes).toBe(false);
+    const all = await buildWithdrawGroups(rpc, owner, t, 10_000, 100);
+    expect(cpAmmNames(all.groups[0].instructions)).toEqual(["claim_position_fee", "remove_liquidity"]);
+    expect(u128(all.groups[0].instructions.find((ix) => isCpAmm(ix, "remove_liquidity"))!.data, 8).toString()).toBe(
+      withdrawable.toString(),
+    );
+  });
+
+  it("releases nothing from inner vesting before its cliff", async () => {
+    const chain = chainFixture();
+    const owner = chain.owner.publicKey.toBase58();
+    const rpc = mockActionRpc(chain);
+    const t = target(chain, "innerBeforeCliff");
+    const quote = await quoteWithdraw(rpc, owner, t, 10_000, 100);
+    expect([quote.withdrawableBps, quote.vestingBps, quote.closes]).toEqual([5_000, 5_000, false]);
+    const { groups } = await buildWithdrawGroups(rpc, owner, t, 10_000, 100);
+    expect(u128(groups[0].instructions.find((ix) => isCpAmm(ix, "remove_liquidity"))!.data, 8).toString()).toBe(
+      D.halfLiquidity.toString(),
+    );
   });
 
   it('refuses a deleted position with "Position no longer exists"', async () => {

@@ -80,17 +80,26 @@ type Account = AccountInfo<Buffer>;
 type Clock = { slot: BN; epoch: number; unixTimestamp: BN };
 type LiveMint = { address: PublicKey; program: PublicKey; mint: Mint };
 
+/** A pool's live token mints, and the reward slots that cannot pay out now. */
+type PoolTokens = {
+  mints: Map<string, LiveMint>;
+  /** Initialized reward slots whose vault is frozen, unreadable or not as the pool records. */
+  unclaimableRewards: Set<number>;
+};
+
 type Live = {
   target: DammV2Target;
   pool: PoolState;
   position: PositionState;
+  tokens: PoolTokens;
   /** Lamports of the position, its NFT mint and NFT account (what closing returns). */
   closeLamports: number;
 };
 
-type Loaded =
-  | { ok: true; live: Live }
-  | { ok: false; reason: SkipReason };
+type Loaded = { ok: true; live: Live } | { ok: false; reason: SkipReason };
+
+const GONE: SkipReason = "Position no longer exists";
+const MISMATCH: SkipReason = "Position data doesn't match the pool · skipped";
 
 // --- Reading ---------------------------------------------------------------
 
@@ -128,15 +137,74 @@ function currentPoint(pool: PoolState, clock: Clock): BN {
   throw new Error("Unknown pool activation type.");
 }
 
-function checkTarget(target: DammV2Target) {
-  if (target.program !== CP_AMM.toBase58())
-    throw new Error("This position names an unexpected program.");
+/** `parse()`, or null when the bytes do not decode. */
+function attempt<T>(parse: () => T): T | null {
+  try {
+    return parse();
+  } catch {
+    return null;
+  }
+}
+
+const initializedRewards = (pool: PoolState) =>
+  pool.rewardInfos.flatMap((info, index) => (info.initialized ? [{ index, info }] : []));
+
+/**
+ * The live mints of each pool (token A and B, initialized rewards) and the
+ * state of its reward vaults, in one batch. A pool whose A or B mint is
+ * missing or not under the token program the pool records maps to null. A
+ * reward slot whose mint or vault is unusable, or whose vault is frozen, is
+ * unclaimable: claim_reward would fail and revert its whole group.
+ */
+async function loadPoolTokens(rpc: ActionRpc, pools: PoolState[]): Promise<Map<PoolState, PoolTokens | null>> {
+  const keys = pools.flatMap((pool) => [
+    pool.tokenAMint.toBase58(),
+    pool.tokenBMint.toBase58(),
+    ...initializedRewards(pool).flatMap(({ info }) => [info.mint.toBase58(), info.vault.toBase58()]),
+  ]);
+  const accounts = await readAccounts(rpc, keys);
+  const liveMint = (mint: PublicKey, program: PublicKey): LiveMint | null => {
+    const info = accounts.get(mint.toBase58());
+    if (!info || !info.owner.equals(program)) return null;
+    const parsed = attempt(() => unpackMint(mint, info, program));
+    return parsed && { address: mint, program, mint: parsed };
+  };
+  const out = new Map<PoolState, PoolTokens | null>();
+  for (const pool of pools) {
+    const a = liveMint(pool.tokenAMint, getTokenProgram(pool.tokenAFlag));
+    const b = liveMint(pool.tokenBMint, getTokenProgram(pool.tokenBFlag));
+    if (!a || !b) {
+      out.set(pool, null);
+      continue;
+    }
+    const mints = new Map([
+      [a.address.toBase58(), a],
+      [b.address.toBase58(), b],
+    ]);
+    const unclaimableRewards = new Set<number>();
+    for (const { index, info } of initializedRewards(pool)) {
+      const program = getTokenProgram(info.rewardTokenFlag);
+      const mint = liveMint(info.mint, program);
+      const vaultInfo = accounts.get(info.vault.toBase58());
+      const vault =
+        vaultInfo && vaultInfo.owner.equals(program) ? attempt(() => unpackAccount(info.vault, vaultInfo, program)) : null;
+      if (!mint || !vault || !vault.mint.equals(info.mint) || vault.isFrozen) unclaimableRewards.add(index);
+      else mints.set(mint.address.toBase58(), mint);
+    }
+    out.set(pool, { mints, unclaimableRewards });
+  }
+  return out;
 }
 
 /**
  * Reads the live pool, position and position NFT account of each target (and
- * the Clock) in one batch. A missing position, or an NFT account the wallet
- * no longer holds, means the position is gone for this wallet.
+ * the Clock) in one batch, then the pools' tokens. Only an unreadable Clock
+ * fails the whole read; each target's own problems become its skip reason:
+ * - "Position no longer exists": no position account, or the NFT account is
+ *   gone or no longer holds the position's NFT for this wallet;
+ * - "Position data doesn't match the pool · skipped": an unexpected program,
+ *   a position of another pool or NFT, or a pool, mint or NFT account whose
+ *   bytes are not what they should be.
  */
 async function loadPositions(
   cpAmm: CpAmm,
@@ -144,62 +212,62 @@ async function loadPositions(
   owner: PublicKey,
   targets: DammV2Target[],
 ): Promise<{ loaded: Loaded[]; clock: Clock }> {
-  targets.forEach(checkTarget);
   const accounts = await readAccounts(rpc, [
     SYSVAR_CLOCK_PUBKEY.toBase58(),
     ...targets.flatMap((t) => [t.pool, t.position, t.positionNftAccount, t.positionMint]),
   ]);
   const clock = decodeClock(accounts.get(SYSVAR_CLOCK_PUBKEY.toBase58()));
   const coder = cpAmm._program.coder.accounts;
-  const loaded = targets.map((target): Loaded => {
+  const pools = new Map<string, PoolState | null>();
+  const poolState = (address: string): PoolState | null => {
+    if (!pools.has(address)) {
+      const info = accounts.get(address);
+      pools.set(
+        address,
+        info && info.owner.equals(CP_AMM) ? attempt(() => coder.decode<PoolState>("pool", info.data)) : null,
+      );
+    }
+    return pools.get(address)!;
+  };
+
+  type Read = Omit<Live, "tokens">;
+  const read = targets.map((target): { ok: true; live: Read } | { ok: false; reason: SkipReason } => {
+    if (target.program !== CP_AMM.toBase58()) return { ok: false, reason: MISMATCH };
     const positionInfo = accounts.get(target.position);
-    if (!positionInfo || !positionInfo.owner.equals(CP_AMM))
-      return { ok: false, reason: "Position no longer exists" };
-    const position = coder.decode<PositionState>("position", positionInfo.data);
+    if (!positionInfo) return { ok: false, reason: GONE };
+    const position = positionInfo.owner.equals(CP_AMM)
+      ? attempt(() => coder.decode<PositionState>("position", positionInfo.data))
+      : null;
+    if (!position) return { ok: false, reason: MISMATCH };
     if (position.pool.toBase58() !== target.pool || position.nftMint.toBase58() !== target.positionMint)
-      throw new Error("The position does not match its pool.");
+      return { ok: false, reason: MISMATCH };
 
     const nftInfo = accounts.get(target.positionNftAccount);
-    if (!nftInfo || !(nftInfo.owner.equals(TOKEN_2022_PROGRAM_ID) || nftInfo.owner.equals(TOKEN_PROGRAM_ID)))
-      return { ok: false, reason: "Position no longer exists" };
-    const nft = unpackAccount(new PublicKey(target.positionNftAccount), nftInfo, nftInfo.owner);
-    if (!nft.mint.equals(position.nftMint) || !nft.owner.equals(owner) || nft.amount !== BigInt(1))
-      return { ok: false, reason: "Position no longer exists" };
+    if (!nftInfo) return { ok: false, reason: GONE };
+    const nft =
+      nftInfo.owner.equals(TOKEN_2022_PROGRAM_ID) || nftInfo.owner.equals(TOKEN_PROGRAM_ID)
+        ? attempt(() => unpackAccount(new PublicKey(target.positionNftAccount), nftInfo, nftInfo.owner))
+        : null;
+    if (!nft || !nft.mint.equals(position.nftMint)) return { ok: false, reason: MISMATCH };
+    if (!nft.owner.equals(owner) || nft.amount !== BigInt(1)) return { ok: false, reason: GONE };
 
-    const poolInfo = accounts.get(target.pool);
-    if (!poolInfo || !poolInfo.owner.equals(CP_AMM)) throw new Error("Could not read the pool.");
-    const pool = coder.decode<PoolState>("pool", poolInfo.data);
+    const pool = poolState(target.pool);
+    if (!pool) return { ok: false, reason: MISMATCH };
     const closeLamports =
       positionInfo.lamports + nftInfo.lamports + (accounts.get(target.positionMint)?.lamports ?? 0);
     return { ok: true, live: { target, pool, position, closeLamports } };
   });
+
+  const tokens = await loadPoolTokens(
+    rpc,
+    [...new Set(read.flatMap((r) => (r.ok ? [r.live.pool] : [])))],
+  );
+  const loaded = read.map((r): Loaded => {
+    if (!r.ok) return r;
+    const poolTokens = tokens.get(r.live.pool);
+    return poolTokens ? { ok: true, live: { ...r.live, tokens: poolTokens } } : { ok: false, reason: MISMATCH };
+  });
   return { loaded, clock };
-}
-
-const initializedRewards = (pool: PoolState) =>
-  pool.rewardInfos.flatMap((info, index) => (info.initialized ? [{ index, info }] : []));
-
-/**
- * Reads the mints of `pools` (token A and B, initialized rewards), checking
- * each against the token program the pool records for it.
- */
-async function loadMints(rpc: ActionRpc, pools: PoolState[]): Promise<Map<string, LiveMint>> {
-  const wanted = new Map<string, PublicKey>();
-  for (const pool of pools) {
-    wanted.set(pool.tokenAMint.toBase58(), getTokenProgram(pool.tokenAFlag));
-    wanted.set(pool.tokenBMint.toBase58(), getTokenProgram(pool.tokenBFlag));
-    for (const { info } of initializedRewards(pool))
-      wanted.set(info.mint.toBase58(), getTokenProgram(info.rewardTokenFlag));
-  }
-  const accounts = await readAccounts(rpc, [...wanted.keys()]);
-  const out = new Map<string, LiveMint>();
-  for (const [address, program] of wanted) {
-    const info = accounts.get(address);
-    if (!info || !info.owner.equals(program)) throw new Error("A pool token is not what the pool records.");
-    const key = new PublicKey(address);
-    out.set(address, { address: key, program, mint: unpackMint(key, info, program) });
-  }
-  return out;
 }
 
 /**
@@ -260,8 +328,10 @@ function assemble(first: TransactionInstruction[], parts: Transaction[]): Transa
 const legLabel = (leg: DammV2Target["tokenA"]) => leg.symbol ?? `${leg.mint.slice(0, 4)}…`;
 const pair = (t: DammV2Target) => `${legLabel(t.tokenA)} + ${legLabel(t.tokenB)}`;
 
-function mintExpectations(mints: Map<string, LiveMint>, addresses: string[]): Expectation["mints"] {
-  return [...new Set(addresses)].map((mint) => ({ mint, tokenProgram: mints.get(mint)!.program.toBase58() }));
+function mintExpectations(lives: Live[], addresses: string[]): Expectation["mints"] {
+  const program = (mint: string) =>
+    lives.map((l) => l.tokens.mints.get(mint)).find((m) => m)!.program.toBase58();
+  return [...new Set(addresses)].map((mint) => ({ mint, tokenProgram: program(mint) }));
 }
 
 const positionExpectation = (t: DammV2Target): Expectation["positions"][number] => ({
@@ -270,8 +340,8 @@ const positionExpectation = (t: DammV2Target): Expectation["positions"][number] 
   protocol: "meteora-damm-v2",
 });
 
-function feeAccounts(live: Live, mints: Map<string, LiveMint>) {
-  const { pool, target } = live;
+function feeAccounts(live: Live) {
+  const { pool, target, tokens } = live;
   return {
     pool: new PublicKey(target.pool),
     position: new PublicKey(target.position),
@@ -280,8 +350,8 @@ function feeAccounts(live: Live, mints: Map<string, LiveMint>) {
     tokenBMint: pool.tokenBMint,
     tokenAVault: pool.tokenAVault,
     tokenBVault: pool.tokenBVault,
-    tokenAProgram: mints.get(pool.tokenAMint.toBase58())!.program,
-    tokenBProgram: mints.get(pool.tokenBMint.toBase58())!.program,
+    tokenAProgram: tokens.mints.get(pool.tokenAMint.toBase58())!.program,
+    tokenBProgram: tokens.mints.get(pool.tokenBMint.toBase58())!.program,
   };
 }
 
@@ -295,23 +365,24 @@ export type ClaimBuild = {
 
 /**
  * One group per position with something claimable live: fees (always
- * claimed together) and each initialized reward slot with a pending amount.
+ * claimed together) and each initialized reward slot with a pending amount
+ * whose vault can pay out. Targets repeating an earlier id are ignored.
  */
 export async function buildDammV2ClaimGroups(
   rpc: ActionRpc,
   owner: string,
-  targets: DammV2Target[],
+  requested: DammV2Target[],
 ): Promise<ClaimBuild> {
+  const seen = new Set<string>();
+  const targets = requested.filter((t) => !seen.has(t.id) && seen.add(t.id));
   const wallet = new PublicKey(owner);
   const cpAmm = new CpAmm(rpc.connection);
   const { loaded, clock } = await loadPositions(cpAmm, rpc, wallet, targets);
-  const lives = loaded.flatMap((l) => (l.ok ? [l.live] : []));
-  const mints = await loadMints(rpc, lives.map((l) => l.pool));
 
   const groups: InstructionGroup[] = [];
   const skipped: ClaimBuild["skipped"] = [];
+  const built: Live[] = [];
   const expectedMints: string[] = [];
-  const positions: Expectation["positions"] = [];
   for (const [i, result] of loaded.entries()) {
     const target = targets[i];
     if (!result.ok) {
@@ -320,12 +391,14 @@ export async function buildDammV2ClaimGroups(
     }
     const live = result.live;
     const pending = getUnClaimLpFee(live.pool, live.position, clock.unixTimestamp);
-    const rewards = initializedRewards(live.pool).filter(({ index }) => pending.rewards[index].gt(ZERO));
+    const rewards = initializedRewards(live.pool).filter(
+      ({ index }) => pending.rewards[index].gt(ZERO) && !live.tokens.unclaimableRewards.has(index),
+    );
     if (pending.feeTokenA.isZero() && pending.feeTokenB.isZero() && rewards.length === 0) {
       skipped.push({ positionId: target.id, reason: "Nothing to claim" });
       continue;
     }
-    const fee = await cpAmm.claimPositionFee2({ owner: wallet, receiver: wallet, ...feeAccounts(live, mints) });
+    const fee = await cpAmm.claimPositionFee2({ owner: wallet, receiver: wallet, ...feeAccounts(live) });
     const rewardTxs = [];
     for (const { index } of rewards)
       rewardTxs.push(
@@ -344,17 +417,22 @@ export async function buildDammV2ClaimGroups(
       instructions: assemble([], [fee, ...rewardTxs]),
       label: `Claim ${pair(target)}`,
     });
+    built.push(live);
     expectedMints.push(
       live.pool.tokenAMint.toBase58(),
       live.pool.tokenBMint.toBase58(),
       ...rewards.map(({ info }) => info.mint.toBase58()),
     );
-    positions.push(positionExpectation(target));
   }
   return {
     groups,
     skipped,
-    expectation: { kind: "claim", owner, mints: mintExpectations(mints, expectedMints), positions },
+    expectation: {
+      kind: "claim",
+      owner,
+      mints: mintExpectations(built, expectedMints),
+      positions: built.map((l) => positionExpectation(l.target)),
+    },
   };
 }
 
@@ -396,7 +474,6 @@ function closeClaimsReward(pool: PoolState, position: PositionState, index: numb
 type WithdrawPlan = {
   quote: WithdrawQuote;
   live: Live;
-  mints: Map<string, LiveMint>;
   vestings: { account: PublicKey; vestingState: VestingState }[];
   point: BN;
   withdrawable: BN;
@@ -409,13 +486,19 @@ type WithdrawPlan = {
 /**
  * Live withdraw state for `bps` of the withdrawable liquidity.
  *
- * Withdrawable = unlocked + vesting releasable now, mirroring cp-amm's
- * refresh_vesting: each vesting account releases
+ * Withdrawable = unlocked + vesting releasable now. Vesting comes in two
+ * places, both released by the program before it removes liquidity:
+ * - Vesting accounts, released by refresh_vesting (built first);
+ * - the position's own inner_vesting (DBC migrations), which
+ *   remove_liquidity and remove_all_liquidity release themselves
+ *   (refresh_inner_vesting), so it needs no instruction.
+ * Each schedule releases
  *   cliff_unlock + min((now − cliff_point) / period_frequency, periods) × per_period
  *   − already_released
- * once now ≥ cliff_point (the SDK's getAvailableVestingLiquidity), where
- * "now" is the pool's activation point type (slot or unix time) from the
- * Clock sysvar. Liquidity removed is withdrawable × bps / 10,000.
+ * once now ≥ cliff_point (the SDK's getAvailableVestingLiquidity, which
+ * reads only `innerVesting`), where "now" is the pool's activation point
+ * type (slot or unix time) from the Clock sysvar. An empty (all-zero) inner
+ * schedule releases 0. Liquidity removed is withdrawable × bps / 10,000.
  */
 async function planWithdraw(
   rpc: ActionRpc,
@@ -430,24 +513,38 @@ async function planWithdraw(
     loaded: [result],
     clock,
   } = await loadPositions(cpAmm, rpc, wallet, [target]);
-  if (!result.ok) throw new PositionGoneError();
+  if (!result.ok) {
+    if (result.reason === GONE) throw new PositionGoneError();
+    throw new Error("Position data doesn't match the pool");
+  }
   const live = result.live;
   const { pool, position } = live;
-  const [mints, vestings] = await Promise.all([loadMints(rpc, [pool]), loadVestings(cpAmm, rpc, live)]);
+  const mints = live.tokens.mints;
+  const vestings = await loadVestings(cpAmm, rpc, live);
   const point = currentPoint(pool, clock);
 
-  const available = vestings.reduce((sum, v) => sum.add(getAvailableVestingLiquidity(v.vestingState, point)), new BN(0));
+  // getAvailableVestingLiquidity and isVestingComplete read only `innerVesting`.
+  const schedules = [
+    ...vestings.map((v) => v.vestingState),
+    { innerVesting: position.innerVesting } as unknown as VestingState,
+  ];
+  const available = schedules.reduce((sum, v) => sum.add(getAvailableVestingLiquidity(v, point)), new BN(0));
   const releasable = BN.min(available, position.vestedLiquidity);
   const withdrawable = position.unlockedLiquidity.add(releasable);
   const stillVesting = position.vestedLiquidity.sub(releasable);
   const total = position.unlockedLiquidity.add(position.vestedLiquidity).add(position.permanentLockedLiquidity);
   const liquidityDelta = withdrawable.muln(bps).divn(BPS);
+  // Closing claims every reward slot the SDK picks; one it cannot pay out
+  // (frozen vault) would revert the close, and skipping it would forfeit the
+  // rewards, so such a position is withdrawn but kept open.
+  const closeRewards = initializedRewards(pool).filter(({ index }) => closeClaimsReward(pool, position, index));
   const closes =
     bps === BPS &&
     !withdrawable.isZero() &&
     position.permanentLockedLiquidity.isZero() &&
     stillVesting.isZero() &&
-    vestings.every((v) => isVestingComplete(v.vestingState, point));
+    schedules.every((v) => isVestingComplete(v, point)) &&
+    closeRewards.every(({ index }) => !live.tokens.unclaimableRewards.has(index));
 
   const mintA = mints.get(pool.tokenAMint.toBase58())!;
   const mintB = mints.get(pool.tokenBMint.toBase58())!;
@@ -471,7 +568,7 @@ async function planWithdraw(
   // Fees are always claimed with a withdrawal; rewards only when it closes.
   const pending = getUnClaimLpFee(pool, position, clock.unixTimestamp);
   const net = (amount: BN, mint: LiveMint) => calculateTransferFeeExcludedAmount(amount, mint.mint, clock.epoch).amount;
-  const rewards = closes ? initializedRewards(pool).filter(({ index }) => closeClaimsReward(pool, position, index)) : [];
+  const rewards = closes ? closeRewards : [];
   const amount = (mint: LiveMint, atoms: BN): TokenAmount => {
     const address = mint.address.toBase58();
     const leg = [target.tokenA, target.tokenB].find((l) => l.mint === address);
@@ -512,7 +609,6 @@ async function planWithdraw(
       vestingBps: toBps(stillVesting, total),
     },
     live,
-    mints,
     vestings,
     point,
     withdrawable,
@@ -558,8 +654,8 @@ export async function buildDammV2WithdrawGroups(
 
   const wallet = new PublicKey(owner);
   const cpAmm = new CpAmm(rpc.connection);
-  const { live, mints, vestings, point } = plan;
-  const accounts = feeAccounts(live, mints);
+  const { live, vestings, point } = plan;
+  const accounts = feeAccounts(live);
   // The SDK builders get no vestings: refresh_vesting is built once, first.
   const first = vestings.length
     ? (
@@ -604,7 +700,7 @@ export async function buildDammV2WithdrawGroups(
     expectation: {
       kind: "withdraw",
       owner,
-      mints: mintExpectations(mints, [
+      mints: mintExpectations([live], [
         live.pool.tokenAMint.toBase58(),
         live.pool.tokenBMint.toBase58(),
         ...plan.rewardMints,

@@ -28,7 +28,10 @@ export type WithdrawQuote = {
 };
 
 /** Why a position gets no claim transaction. */
-export type SkipReason = "Nothing to claim" | "Position no longer exists";
+export type SkipReason =
+  | "Nothing to claim"
+  | "Position no longer exists"
+  | "Position data doesn't match the pool · skipped";
 
 /** No liquidity can be withdrawn now: everything is locked or still vesting. */
 export class NothingToWithdrawError extends Error {
