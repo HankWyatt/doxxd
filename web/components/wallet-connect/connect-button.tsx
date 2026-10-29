@@ -1,11 +1,20 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type Ref } from "react";
 import { useConnect, useWallets, type UiWallet } from "@wallet-standard/react-core";
 import { isSolanaSigner } from "@/lib/actions/wallet-session";
 import { useWalletConnectControls } from "./provider";
 
-/** `onChosen` runs after the visitor picks a wallet and it connects (never on a silent reconnect). */
-export function ConnectButton({ onChosen }: { onChosen?(name: string): void } = {}) {
+/**
+ * `onChosen` runs after the visitor picks a wallet and it connects, with the
+ * account the wallet returned (never on a silent reconnect).
+ */
+export function ConnectButton({
+  onChosen,
+  buttonRef,
+}: {
+  onChosen?(name: string, address: string): void;
+  buttonRef?: Ref<HTMLButtonElement>;
+} = {}) {
   const { ready } = useWalletConnectControls();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLSpanElement>(null);
@@ -26,6 +35,7 @@ export function ConnectButton({ onChosen }: { onChosen?(name: string): void } = 
   return (
     <span className="wallet-connect" ref={root}>
       <button
+        ref={buttonRef}
         type="button"
         className="button primary"
         disabled={!ready}
@@ -45,7 +55,7 @@ function WalletPicker({
   onChosen,
 }: {
   onDone(): void;
-  onChosen?(name: string): void;
+  onChosen?(name: string, address: string): void;
 }) {
   const wallets = useWallets().filter(isSolanaSigner);
   return (
@@ -73,7 +83,7 @@ function WalletOption({
 }: {
   wallet: UiWallet;
   onDone(): void;
-  onChosen?(name: string): void;
+  onChosen?(name: string, address: string): void;
 }) {
   const { choose } = useWalletConnectControls();
   const [connecting, connect] = useConnect(wallet);
@@ -90,7 +100,7 @@ function WalletOption({
             const accounts = await connect();
             if (accounts.length === 0) return setFailed(true);
             choose(wallet.name);
-            onChosen?.(wallet.name);
+            onChosen?.(wallet.name, accounts[0].address);
             onDone();
           } catch {
             setFailed(true);

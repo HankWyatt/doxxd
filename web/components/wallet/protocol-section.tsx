@@ -33,6 +33,7 @@ import { short } from "@/lib/portfolio/adapters/shared";
 import { loadAllPages } from "@/lib/actions/load-all-pages";
 import type { ActionTarget } from "@/lib/actions/types";
 import { useConnectedWallet } from "@/components/wallet-connect/provider";
+import { LoadBoundary } from "../load-boundary";
 import { ResourceState, LoadingRows } from "../resource-state";
 import { Amounts, PositionDetail } from "./position-detail";
 import { RecoveryNotice } from "./recovery-notice";
@@ -225,15 +226,23 @@ export function ProtocolSection({
       )}
       {/* Only while your own wallet stays connected; a run it started lives on in the card. */}
       {withdrawTarget && wallet && wallet.address === address && (
-        <Suspense fallback={null}>
-          <WithdrawDialog
-            target={withdrawTarget}
-            wallet={wallet}
-            lookup={mintLookup([withdrawTarget], labels)}
-            onClose={() => setWithdrawTarget(null)}
-            onDone={() => setWithdrawTarget(null)}
-          />
-        </Suspense>
+        <LoadBoundary
+          fallback={
+            <p className="small withdraw-load-error" role="alert">
+              Couldn’t load · reload the page
+            </p>
+          }
+        >
+          <Suspense fallback={null}>
+            <WithdrawDialog
+              target={withdrawTarget}
+              wallet={wallet}
+              lookup={mintLookup([withdrawTarget], labels)}
+              onClose={() => setWithdrawTarget(null)}
+              onDone={() => setWithdrawTarget(null)}
+            />
+          </Suspense>
+        </LoadBoundary>
       )}
     </section>
   );

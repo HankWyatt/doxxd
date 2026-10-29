@@ -195,7 +195,10 @@ describe("HeaderAccount", () => {
     await user.click(await connectedPill());
     const card = await screen.findByRole("dialog", { name: "Wallet account" });
     await within(card).findByText("$12,345.67");
-    await user.click(within(card).getByRole("button", { name: "Hide amounts" }));
+    const eye = within(card).getByRole("button", { name: "Hide amounts" });
+    expect(eye).toHaveAttribute("aria-pressed", "false");
+    await user.click(eye);
+    expect(eye).toHaveAttribute("aria-pressed", "true");
     expect(within(card).getByText("••••")).toBeInTheDocument();
     expect(within(card).queryByText("$12,345.67")).toBeNull();
     expect(window.localStorage.getItem(HIDE_AMOUNTS_KEY)).toBe("1");
@@ -209,7 +212,10 @@ describe("HeaderAccount", () => {
     await user.click(await connectedPill());
     const again = await screen.findByRole("dialog", { name: "Wallet account" });
     expect(await within(again).findByText("••••")).toBeInTheDocument();
-    await user.click(within(again).getByRole("button", { name: "Show amounts" }));
+    const pressed = within(again).getByRole("button", { name: "Hide amounts" });
+    expect(pressed).toHaveAttribute("aria-pressed", "true");
+    await user.click(pressed);
+    expect(pressed).toHaveAttribute("aria-pressed", "false");
     expect(await within(again).findByText("$12,345.67")).toBeInTheDocument();
     expect(window.localStorage.getItem(HIDE_AMOUNTS_KEY)).toBeNull();
   });
@@ -229,6 +235,8 @@ describe("HeaderAccount", () => {
     await user.click(within(card).getByRole("button", { name: "Copy" }));
     expect(await navigator.clipboard.readText()).toBe(DEMO_ADDRESS);
     expect(within(card).getByRole("button", { name: "Copied" })).toBeInTheDocument();
+    // Announced politely, outside the button so its name stays "Copied".
+    expect(within(card).getByRole("status")).toHaveTextContent("Address copied");
   });
 
   it("disconnects from the card", async () => {
@@ -244,7 +252,8 @@ describe("HeaderAccount", () => {
     await user.click(await connectedPill());
     const card = await screen.findByRole("dialog", { name: "Wallet account" });
     await user.click(within(card).getByRole("button", { name: "Disconnect" }));
-    expect(await screen.findByRole("button", { name: "Connect wallet" })).toBeInTheDocument();
+    const connect = await screen.findByRole("button", { name: "Connect wallet" });
+    await waitFor(() => expect(connect).toHaveFocus());
     expect(window.localStorage.getItem(WALLET_KEY)).toBeNull();
     expect(fake.wallet.accounts).toEqual([]);
   });
@@ -303,6 +312,31 @@ describe("HeaderAccount", () => {
     await userEvent.click(await screen.findByRole("button", { name: /Phantom/ }));
     await connectedPill(OTHER);
     expect(push).not.toHaveBeenCalled();
+  });
+
+  it("navigates a returning visitor whose silent reconnect failed, and never on a later account switch", async () => {
+    window.history.replaceState(null, "", "/");
+    serveSummary(summaryWith());
+    const fake = track(createFakeWallet({ name: "Phantom", address: OTHER, authorized: false }));
+    remember("Phantom");
+    render(
+      <Shell>
+        <HeaderAccount />
+      </Shell>,
+    );
+    await waitFor(() => expect(fake.connectCalls).toEqual([{ silent: true }]));
+    await userEvent.click(await screen.findByRole("button", { name: "Connect wallet" }));
+    await userEvent.click(await screen.findByRole("button", { name: /Phantom/ }));
+    await connectedPill(OTHER);
+    await waitFor(() => expect(push).toHaveBeenCalledWith(`/wallet/${OTHER}`));
+    expect(push).toHaveBeenCalledTimes(1);
+    const third = bs58.encode(new Uint8Array(32).fill(9));
+    act(() => fake.switchAccount(third));
+    await connectedPill(third);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(push).toHaveBeenCalledTimes(1);
   });
 
   it("does not navigate after a silent reconnect on the homepage", async () => {

@@ -4,6 +4,7 @@ import { ChevronDown } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { pillAddress } from "@/lib/actions/account";
 import { walletHref } from "@/lib/address";
+import { LoadBoundary } from "../load-boundary";
 import { ConnectButton } from "./connect-button";
 import { useWalletConnectControls } from "./provider";
 import { WalletIcon } from "./wallet-icon";
@@ -22,24 +23,28 @@ const AccountMenu = lazy(() =>
 export function HeaderAccount() {
   const { ready, connected } = useWalletConnectControls();
   const router = useRouter();
-  // Set when the visitor picks a wallet on the homepage; a silent reconnect
-  // never picks one, so it never navigates.
-  const goToPortfolio = useRef(false);
+  const connectButton = useRef<HTMLButtonElement>(null);
+  // After Disconnect, focus moves to the Connect wallet button that replaces the pill.
+  const focusConnect = useRef(false);
   useEffect(() => {
-    if (!connected || !goToPortfolio.current) return;
-    goToPortfolio.current = false;
-    router.push(walletHref(connected.address, "portfolio"));
-  }, [connected, router]);
+    if (connected || !focusConnect.current) return;
+    focusConnect.current = false;
+    connectButton.current?.focus();
+  }, [connected]);
   if (!ready) return null;
   if (!connected)
     return (
       <ConnectButton
-        onChosen={() => {
-          goToPortfolio.current = window.location.pathname === "/";
+        buttonRef={connectButton}
+        // Only a wallet the visitor picked, with the account it returned: a
+        // silent reconnect or a later account switch never navigates.
+        onChosen={(_name, address) => {
+          if (window.location.pathname === "/")
+            router.push(walletHref(address, "portfolio"));
         }}
       />
     );
-  // The same pill, inert, while the card's code loads.
+  // The same pill, inert, while the card's code loads (or if it cannot).
   const placeholder = (
     <span className="account-pill" aria-hidden="true">
       <WalletIcon wallet={connected} size={20} />
@@ -48,8 +53,15 @@ export function HeaderAccount() {
     </span>
   );
   return (
-    <Suspense fallback={placeholder}>
-      <AccountMenu wallet={connected} />
-    </Suspense>
+    <LoadBoundary fallback={placeholder}>
+      <Suspense fallback={placeholder}>
+        <AccountMenu
+          wallet={connected}
+          onDisconnect={() => {
+            focusConnect.current = true;
+          }}
+        />
+      </Suspense>
+    </LoadBoundary>
   );
 }

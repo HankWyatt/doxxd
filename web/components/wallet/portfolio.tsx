@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { Layers3 } from "lucide-react";
 import { useWalletResource } from "@/lib/use-wallet-resource";
 import { useWalletPositions } from "@/lib/use-wallet-positions";
@@ -136,6 +136,20 @@ function PortfolioContent({
   // A link from another page (the header's "Claim LP fees") can name a card
   // before the summary has mounted it; follow the anchor once, when it does.
   const arrival = useRef<string | null | undefined>(undefined);
+  const [, followHash] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    // A link on this page (that card on your own portfolio, or a chip) only
+    // changes the hash. A hash showProtocol set itself already has the focus
+    // inside its card, so it is not followed twice.
+    const onHash = () => {
+      const id = window.location.hash.slice(1);
+      if (document.getElementById(id)?.contains(document.activeElement)) return;
+      arrival.current = id || null;
+      followHash();
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
   useEffect(() => {
     if (arrival.current === undefined)
       arrival.current = window.location.hash.slice(1) || null;
@@ -144,7 +158,7 @@ function PortfolioContent({
     arrival.current = null;
     showProtocol(resource);
   });
-  const card =(resource: ProtocolResource) => (
+  const card = (resource: ProtocolResource) => (
     <ProtocolSection
       key={address + resource}
       address={address}

@@ -71,6 +71,17 @@ test("the header's Claim LP fees link opens the DAMM v2 card from another page",
   await expect(damm).toBeInViewport();
 });
 
+test("on your own portfolio, Claim LP fees reopens and focuses the collapsed DAMM v2 card", async ({ page }) => {
+  const { damm } = await openOwnWallet(page, "sign");
+  await damm.getByRole("button", { name: "Collapse Meteora DAMM v2" }).click();
+  const toggle = damm.getByRole("button", { name: "Expand Meteora DAMM v2" });
+  await expect(toggle).toBeVisible();
+  await page.getByRole("button", { name: /^Connected wallet / }).click();
+  await page.getByRole("dialog", { name: "Wallet account" }).getByRole("link", { name: /Claim LP fees/ }).click();
+  await expect(damm.getByRole("button", { name: "Collapse Meteora DAMM v2" })).toBeFocused();
+  await expect(damm).toBeInViewport();
+});
+
 test("claim all fees on the synthetic DAMM v2 wallet", async ({ page }) => {
   const { rpc, damm } = await openOwnWallet(page, "sign");
   await damm.getByRole("button", { name: "Claim all fees (2)" }).click();

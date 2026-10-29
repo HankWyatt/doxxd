@@ -67,7 +67,7 @@ test("connect from the header on the homepage, keep the wallet across pages, dis
 
   await pill(page).click();
   await card.getByRole("button", { name: "Disconnect" }).click();
-  await expect(header.getByRole("button", { name: "Connect wallet" })).toBeVisible();
+  await expect(header.getByRole("button", { name: "Connect wallet" })).toBeFocused();
   await expect(page.getByText("Your wallet · Mock")).toHaveCount(0);
   await page.reload();
   await waitForWalletHydration(page);

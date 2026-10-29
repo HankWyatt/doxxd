@@ -21,7 +21,7 @@ export default function HomePage() {
             <div className="landing-search" id="explore-wallet">
               <AddressSearch />
               <p className="landing-search-note">
-                <span><Check size={13} /> No wallet connection.</span>
+                <span><Check size={13} /> No wallet connection needed.</span>
                 <span><Check size={13} /> Just an address.</span>
               </p>
             </div>

@@ -1983,3 +1983,4 @@ tbody tr.data-row:hover {
 .withdraw-actions .action-pill { justify-content: center; min-height: 32px; font-size: 12px; }
 .withdraw-actions .action-pill:first-child { flex: 1; }
 .withdraw-actions .action-pill.primary { flex: 2; }
+.withdraw-load-error { margin: 0 18px 14px; color: var(--negative); }

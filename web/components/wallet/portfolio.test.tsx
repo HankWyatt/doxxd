@@ -500,3 +500,22 @@ it("opens and focuses the card a link's #protocol- anchor names once the card ap
     window.history.replaceState(null, "", "/");
   }
 });
+
+it("opens and focuses a collapsed card when a link on the same page changes the hash", async () => {
+  // The header's "Claim LP fees" on your own portfolio only changes the hash.
+  window.history.replaceState(null, "", `/wallet/${DEMO_ADDRESS}`);
+  try {
+    network();
+    render(<Portfolio address={DEMO_ADDRESS} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Collapse Kamino Lend" }));
+    const toggle = screen.getByRole("button", { name: "Expand Kamino Lend" });
+    toggle.blur();
+    act(() => {
+      window.location.hash = "protocol-kamino";
+    });
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-expanded", "true"));
+    await waitFor(() => expect(toggle).toHaveFocus());
+  } finally {
+    window.history.replaceState(null, "", "/");
+  }
+});
