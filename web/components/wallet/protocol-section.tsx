@@ -1,6 +1,8 @@
 "use client";
 import {
   Fragment,
+  lazy,
+  Suspense,
   useCallback,
   useLayoutEffect,
   useRef,
@@ -30,6 +32,7 @@ import { compareDecimalDesc, formatAmount, formatUsd } from "@/lib/decimal";
 import { short } from "@/lib/portfolio/adapters/shared";
 import { loadAllPages } from "@/lib/actions/load-all-pages";
 import type { ActionTarget } from "@/lib/actions/types";
+import { useConnectedWallet } from "@/components/wallet-connect/provider";
 import { ResourceState, LoadingRows } from "../resource-state";
 import { Amounts, PositionDetail } from "./position-detail";
 import { RecoveryNotice } from "./recovery-notice";
@@ -43,6 +46,12 @@ import {
   type LpActions,
   type LpRun,
 } from "./lp-actions/use-lp-actions";
+
+// Loaded on the first Withdraw click, so the dialog (and Radix) stay out of
+// the page's main bundle.
+const WithdrawDialog = lazy(() =>
+  import("./lp-actions/withdraw-dialog").then((m) => ({ default: m.WithdrawDialog })),
+);
 
 /**
  * Reports a card's transient failure with a way to retry it, or null once it
@@ -121,7 +130,8 @@ export function ProtocolSection({
   // A failure outlives a collapse: it clears only when the card loads again.
   const [failed, setFailed] = useState(false);
   // The position whose Withdraw was clicked; the withdraw dialog reads it.
-  const [, setWithdrawTarget] = useState<ActionTarget | null>(null);
+  const [withdrawTarget, setWithdrawTarget] = useState<ActionTarget | null>(null);
+  const wallet = useConnectedWallet();
   const definition = resources[resource];
   // DMND reports "0" for sources it has not finished: only a chip or a
   // confirmed-complete source has a total worth showing.
@@ -203,6 +213,18 @@ export function ProtocolSection({
             cardHeading={toggleButton}
           />
         </div>
+      )}
+      {/* Only while your own wallet stays connected; a run it started lives on in the card. */}
+      {withdrawTarget && wallet && wallet.address === address && (
+        <Suspense fallback={null}>
+          <WithdrawDialog
+            target={withdrawTarget}
+            wallet={wallet}
+            lookup={mintLookup([withdrawTarget], labels)}
+            onClose={() => setWithdrawTarget(null)}
+            onDone={() => setWithdrawTarget(null)}
+          />
+        </Suspense>
       )}
     </section>
   );
@@ -589,9 +611,11 @@ function RunProgress({
   return (
     <ClaimProgress
       title={
-        run.count === null
-          ? "Claiming fees from all positions"
-          : `Claiming fees from ${plural(run.count, "position")}`
+        run.kind === "withdraw"
+          ? `Withdraw from ${positionName(run.targets[0], lookup)}`
+          : run.count === null
+            ? "Claiming fees from all positions"
+            : `Claiming fees from ${plural(run.count, "position")}`
       }
       walletName={run.walletName}
       steps={run.steps}
@@ -609,6 +633,7 @@ function RunProgress({
       done={run.phase === "done"}
       stopping={run.stopping}
       autoFocus={actions.focusRun}
+      nothingLine={run.kind === "withdraw" ? "Nothing was withdrawn" : undefined}
       onStop={actions.stop}
       onDone={onDone}
     />

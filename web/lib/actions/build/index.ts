@@ -14,13 +14,13 @@ import { buildAmmV4WithdrawGroups, quoteAmmV4Withdraw } from "./raydium-amm-v4";
 import { buildClmmClaimGroups, buildClmmWithdrawGroups, quoteClmmWithdraw } from "./raydium-clmm";
 import { buildCpmmWithdrawGroups, quoteCpmmWithdraw } from "./raydium-cpmm";
 
-export { createActionRpc, isRpcBusy, RpcBusyError } from "../rpc";
+export { cachedReads, createActionRpc, isRpcBusy, RpcBusyError } from "../rpc";
 export type { ActionRpc, SimulatedAccount } from "../rpc";
 export { verifyMessage } from "../verify";
 export type { Expectation, VerifyResult } from "../verify";
 export { GroupTooLargeError, packGroups } from "../pack";
 export type { InstructionGroup, PackedMessage } from "../pack";
-export { runAction } from "../run";
+export { computeUnitPrice, runAction } from "../run";
 export type { ActionStep, RunOptions, StepStatus } from "../run";
 export { AmountTooSmallError, NothingToWithdrawError, PositionGoneError } from "./quote";
 export type { SkipReason, TokenAmount, WithdrawQuote } from "./quote";

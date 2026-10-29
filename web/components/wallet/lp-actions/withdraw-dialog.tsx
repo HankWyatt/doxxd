@@ -1,0 +1,392 @@
+"use client";
+// The withdraw dialog: a live quote for a share of one position's withdrawable
+// part, the price-move limit, and "Review in wallet", which rebuilds from
+// fresh reads and runs through the page's one run (./run-store.ts). During and
+// after the run the body is the progress panel; the run outlives the dialog.
+//
+// web3.js and the SDKs load only through `await import("@/lib/actions/build")`
+// (ruling R-P4).
+import { Dialog } from "radix-ui";
+import { X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import type { ActionRpc } from "@/lib/actions/rpc";
+import type { TokenAmount, WithdrawQuote } from "@/lib/actions/build/quote";
+import { WSOL_MINT } from "@/lib/actions/programs";
+import type { ActionTarget } from "@/lib/actions/types";
+import type { ConnectedWallet } from "@/lib/actions/wallet-session";
+import { useCurrentAddress } from "@/components/wallet-connect/provider";
+import { formatAtoms, mintLookup, positionName, type MintLookup } from "./amounts";
+import { ClaimProgress } from "./claim-progress";
+import { dismissRun, startWithdrawRun, stopRun, useLpRunStore, withdrawErrorText } from "./run-store";
+
+type Actions = typeof import("@/lib/actions/build");
+
+const SHARE_PRESETS = [2_500, 5_000, 7_500, 10_000];
+// Price-move limit (Global Constraints): 0.5%, 1% (default), 2%, or custom up to 5%.
+const SLIPPAGE_PRESETS = [50, 100, 200];
+const DEFAULT_SLIPPAGE_BPS = 100;
+const MAX_SLIPPAGE_BPS = 500;
+// Presets and the custom percent re-quote from reads this fresh (ruling R-P5).
+const QUOTE_CACHE_MS = 30_000;
+const BASE_FEE_LAMPORTS = 5_000;
+// The fee estimate's compute: a typical withdrawal. The runner sets the real
+// limit from simulation, so the fee it pays is usually lower.
+const ESTIMATED_UNITS = 200_000;
+const MICRO = 1_000_000;
+
+const SHARE_ERROR = "Enter a whole percent from 1 to 100";
+const SLIPPAGE_ERROR = "Enter a price move above 0% and up to 5%";
+
+type Choice = { preset: number } | { custom: string };
+
+/** A custom whole percent 1–100 as bps of the withdrawable part, or null. */
+function shareBps(choice: Choice): number | null {
+  if ("preset" in choice) return choice.preset;
+  const text = choice.custom.trim();
+  if (!/^\d+$/.test(text)) return null;
+  const percent = Number(text);
+  return percent >= 1 && percent <= 100 ? percent * 100 : null;
+}
+
+/** A custom price move above 0% and up to 5% as bps, or null. */
+function slippageBps(choice: Choice): number | null {
+  if ("preset" in choice) return choice.preset;
+  const text = choice.custom.trim();
+  if (!text) return null;
+  const bps = Math.round(Number(text) * 100);
+  return Number.isFinite(bps) && bps >= 1 && bps <= MAX_SLIPPAGE_BPS ? bps : null;
+}
+
+const percent = (bps: number) => String(Number((bps / 100).toFixed(2)));
+
+/** The accounts a withdrawal writes that best predict its priority fee. */
+function feeAccounts(target: ActionTarget): string[] {
+  if ("lpAccount" in target) return [target.pool, target.lpAccount].filter((a): a is string => a !== null);
+  return [target.pool, target.position];
+}
+
+const legMints = (target: ActionTarget) =>
+  "legs" in target ? target.legs.map((l) => l.mint) : [target.tokenA.mint, target.tokenB.mint];
+
+export function WithdrawDialog({
+  target,
+  wallet,
+  lookup: pageLookup,
+  onClose,
+  onDone,
+}: {
+  target: ActionTarget;
+  wallet: ConnectedWallet;
+  /** Token names from the page; defaults to the target's own symbols. */
+  lookup?: MintLookup;
+  /** Cancel, Esc or ✕. A run going on carries on in the card. */
+  onClose(): void;
+  /** Done after a finished run. */
+  onDone(): void;
+}) {
+  const lookup = pageLookup ?? mintLookup([target], {});
+  const title = `Withdraw from ${positionName(target, lookup)}`;
+  const currentAddress = useCurrentAddress();
+  const store = useLpRunStore();
+
+  const [share, setShare] = useState<Choice>({ preset: 10_000 });
+  const [slippage, setSlippage] = useState<Choice>({ preset: DEFAULT_SLIPPAGE_BPS });
+  // Bumped to re-quote the same inputs: `attempt` after a failure; `epoch`
+  // with fresh reads, after the pool changed.
+  const [attempt, setAttempt] = useState(0);
+  const [epoch, setEpoch] = useState(0);
+  const [result, setResult] = useState<{ key: string; quote: WithdrawQuote | null; error: string | null } | null>(null);
+  // µlamports per compute unit; undefined while loading, null if unknown.
+  const [unitPrice, setUnitPrice] = useState<number | null | undefined>(undefined);
+  const [changed, setChanged] = useState(false);
+  const [runId, setRunId] = useState<number | null>(null);
+
+  const bps = shareBps(share);
+  const slip = slippageBps(slippage);
+  const key = bps !== null && slip !== null ? `${bps}|${slip}|${epoch}|${attempt}` : null;
+
+  // One module and uncached rpc per dialog; one read cache per epoch.
+  const live = useRef<Promise<{ actions: Actions; rpc: ActionRpc }> | null>(null);
+  const cache = useRef<{ epoch: number; rpc: ActionRpc } | null>(null);
+  const load = () => {
+    if (!live.current) {
+      const loading = (async () => {
+        const actions = await import("@/lib/actions/build");
+        return { actions, rpc: actions.createActionRpc(new URL("/api/rpc", window.location.origin).href) };
+      })();
+      live.current = loading;
+      loading.catch(() => {
+        if (live.current === loading) live.current = null;
+      });
+    }
+    return live.current;
+  };
+  const loadRef = useRef(load);
+  useEffect(() => {
+    loadRef.current = load;
+  });
+
+  useEffect(() => {
+    let current = true;
+    void (async () => {
+      try {
+        const { actions, rpc } = await loadRef.current();
+        const fees = await rpc.priorityFees(feeAccounts(target));
+        if (current) setUnitPrice(actions.computeUnitPrice(fees));
+      } catch {
+        if (current) setUnitPrice(null);
+      }
+    })();
+    return () => {
+      current = false;
+    };
+  }, [target]);
+
+  useEffect(() => {
+    if (key === null || bps === null || slip === null) return;
+    let current = true;
+    void (async () => {
+      let actions: Actions | undefined;
+      try {
+        const loaded = await loadRef.current();
+        actions = loaded.actions;
+        if (cache.current?.epoch !== epoch)
+          cache.current = { epoch, rpc: actions.cachedReads(loaded.rpc, QUOTE_CACHE_MS) };
+        const quote = await actions.quoteWithdraw(cache.current.rpc, wallet.address, target, bps, slip);
+        if (current) setResult({ key, quote, error: null });
+      } catch (error) {
+        if (current) setResult({ key, quote: null, error: withdrawErrorText(error, actions?.isRpcBusy) });
+      }
+    })();
+    return () => {
+      current = false;
+    };
+  }, [key, bps, slip, epoch, wallet.address, target]);
+
+  const run = store.run !== null && store.run.id === runId ? store.run : null;
+  const prompting = run?.steps.some((s) => s.status === "awaiting-approval") ?? false;
+  const loading = key !== null && result?.key !== key;
+  const quote = result?.quote ?? null;
+  const error = !loading && result?.key === key ? result.error : null;
+  const busy = store.run !== null && store.run.phase !== "done";
+  const canReview = key !== null && !loading && quote !== null && !busy && runId === null;
+
+  const chooseShare = (choice: Choice) => {
+    if ("preset" in choice && "preset" in share && share.preset === choice.preset && error) setAttempt((a) => a + 1);
+    setShare(choice);
+  };
+  const chooseSlippage = (choice: Choice) => {
+    if ("preset" in choice && "preset" in slippage && slippage.preset === choice.preset && error) setAttempt((a) => a + 1);
+    setSlippage(choice);
+  };
+
+  const reviewInWallet = () => {
+    if (!canReview || bps === null || slip === null || !quote) return;
+    const id = startWithdrawRun({
+      wallet,
+      resource: target.protocol,
+      target,
+      bps,
+      slippageBps: slip,
+      closes: quote.closes,
+      currentAddress,
+      onChanged: () => {
+        setRunId(null);
+        setChanged(true);
+        setEpoch((e) => e + 1);
+      },
+    });
+    if (id === null) return;
+    setRunId(id);
+    setChanged(false);
+  };
+
+  // Names from the page, decimals from the live quote.
+  const show = (amounts: TokenAmount[]) =>
+    amounts
+      .map((a) => formatAtoms(a.mint, a.atoms, (mint) => ({ decimals: a.decimals, name: lookup(mint).name })))
+      .join(" + ");
+  const sol = (lamports: bigint) => formatAtoms(WSOL_MINT, lamports.toString(), lookup);
+  const networkFee =
+    quote && typeof unitPrice === "number" && /^\d+$/.test(quote.rentLamports)
+      ? "~" +
+        sol(
+          BigInt(BASE_FEE_LAMPORTS) +
+            BigInt(Math.ceil((unitPrice * ESTIMATED_UNITS) / MICRO)) +
+            BigInt(quote.rentLamports),
+        )
+      : "—";
+  const vesting = quote && (quote.vestingBps > 0 || quote.withdrawableBps < 10_000);
+  const wrappedSol = legMints(target).includes(WSOL_MINT);
+  // An emptied field waits quietly; anything else out of range says why.
+  const shareInvalid = "custom" in share && share.custom.trim() !== "" && bps === null;
+  const slippageInvalid = "custom" in slippage && slippage.custom.trim() !== "" && slip === null;
+
+  return (
+    <Dialog.Root
+      open
+      onOpenChange={(open) => {
+        if (!open && !prompting) onClose();
+      }}
+    >
+      <Dialog.Portal>
+        <Dialog.Overlay className="withdraw-overlay" />
+        <Dialog.Content
+          className="withdraw-dialog"
+          aria-describedby={undefined}
+          onEscapeKeyDown={(event) => {
+            // Never close over an open wallet prompt.
+            if (prompting) event.preventDefault();
+          }}
+          onInteractOutside={(event) => {
+            if (prompting) event.preventDefault();
+          }}
+        >
+          <div className="withdraw-head">
+            <Dialog.Title className={run ? "sr-only" : undefined}>{title}</Dialog.Title>
+            {!prompting && (
+              <Dialog.Close className="withdraw-close" aria-label="Close">
+                <X size={14} aria-hidden="true" />
+              </Dialog.Close>
+            )}
+          </div>
+          {run ? (
+            <ClaimProgress
+              title={title}
+              walletName={run.walletName}
+              steps={run.steps}
+              lookup={lookup}
+              waiting={run.phase === "building" ? "Checking live pool data…" : null}
+              error={run.error}
+              done={run.phase === "done"}
+              stopping={run.stopping}
+              autoFocus
+              nothingLine="Nothing was withdrawn"
+              onStop={stopRun}
+              onDone={() => {
+                dismissRun(run.id);
+                onDone();
+              }}
+            />
+          ) : (
+            <>
+              <div className="withdraw-presets" role="group" aria-label="Share to withdraw">
+                {SHARE_PRESETS.map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    aria-pressed={"preset" in share && share.preset === preset}
+                    onClick={() => chooseShare({ preset })}
+                  >
+                    {percent(preset)}%
+                  </button>
+                ))}
+              </div>
+              <label className="withdraw-custom faint small">
+                or type a percent of the withdrawable part
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={100}
+                  step={1}
+                  aria-label="Percent to withdraw"
+                  aria-invalid={shareInvalid}
+                  value={"custom" in share ? share.custom : ""}
+                  onChange={(e) => chooseShare({ custom: e.target.value })}
+                />
+                %
+              </label>
+              {shareInvalid && <p className="withdraw-invalid">{SHARE_ERROR}</p>}
+              {vesting && (
+                <p className="withdraw-note">
+                  {percent(quote.vestingBps)}% is still vesting. You can withdraw up to{" "}
+                  {percent(quote.withdrawableBps)}% now; the rest unlocks over time.
+                </p>
+              )}
+              <dl className={"withdraw-rows" + (loading ? " loading" : "")} aria-busy={loading}>
+                <div>
+                  <dt>You receive (about)</dt>
+                  <dd className="numeric">{quote ? show(quote.receive) : "—"}</dd>
+                </div>
+                <div>
+                  <dt>Includes fees</dt>
+                  <dd className="numeric">
+                    {!quote ? "—" : quote.fees.length ? show(quote.fees) : "Included in your LP tokens"}
+                  </dd>
+                </div>
+                {quote?.closes && (
+                  <div>
+                    <dt>Closes position, returns deposit</dt>
+                    <dd className="numeric">
+                      {quote.depositRefundLamports && /^\d+$/.test(quote.depositRefundLamports)
+                        ? "+" + sol(BigInt(quote.depositRefundLamports))
+                        : "—"}
+                    </dd>
+                  </div>
+                )}
+                <div>
+                  <dt>Minimum you&apos;ll accept</dt>
+                  <dd className="numeric">
+                    {quote ? show(quote.minimums) : "—"}
+                    <span className="withdraw-chips" role="group" aria-label="Price move limit">
+                      {SLIPPAGE_PRESETS.map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          aria-pressed={"preset" in slippage && slippage.preset === preset}
+                          onClick={() => chooseSlippage({ preset })}
+                        >
+                          {percent(preset)}%
+                        </button>
+                      ))}
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min={0.01}
+                        max={5}
+                        step={0.1}
+                        placeholder="up to 5"
+                        aria-label="Custom price move"
+                        aria-invalid={slippageInvalid}
+                        value={"custom" in slippage ? slippage.custom : ""}
+                        onChange={(e) => chooseSlippage({ custom: e.target.value })}
+                      />
+                      <span className="faint">% price move</span>
+                    </span>
+                    {slippageInvalid && <span className="withdraw-invalid">{SLIPPAGE_ERROR}</span>}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Network fee</dt>
+                  <dd className="numeric">{networkFee}</dd>
+                </div>
+              </dl>
+              {wrappedSol && <p className="withdraw-note">Wrapped SOL in your wallet comes back as SOL too.</p>}
+              {changed && (
+                <p className="withdraw-note" role="status">
+                  The pool changed · review the new amounts
+                </p>
+              )}
+              {error && (
+                <p className="withdraw-error" role="alert">
+                  {error}
+                </p>
+              )}
+              <div className="withdraw-actions">
+                <Dialog.Close asChild>
+                  <button type="button" className="action-pill">
+                    Cancel
+                  </button>
+                </Dialog.Close>
+                <button type="button" className="action-pill primary" disabled={!canReview} onClick={reviewInWallet}>
+                  Review in wallet
+                </button>
+              </div>
+            </>
+          )}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}

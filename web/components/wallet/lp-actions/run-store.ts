@@ -19,12 +19,36 @@ export const RUN_ERRORS = {
   unexpected: "Something went wrong · check your wallet before retrying",
 } as const;
 
+// The builders' typed refusals, shown as they are (lib/actions/build/quote.ts,
+// fungible.ts and the per-protocol builders).
+const WITHDRAW_REFUSALS: readonly string[] = [
+  "Nothing to withdraw yet",
+  "Amount too small to withdraw",
+  "Position no longer exists",
+  "Position data doesn't match the pool",
+  "Withdrawals are paused for this pool",
+];
+
+/**
+ * Plain words for a failed withdraw quote or build: a builder's refusal, a
+ * busy network, or that live pool data couldn't be loaded.
+ */
+export function withdrawErrorText(error: unknown, isRpcBusy?: (error: unknown) => boolean): string {
+  try {
+    if (isRpcBusy?.(error)) return "Network busy · try again";
+  } catch {
+    // Treated as any other failure.
+  }
+  const message = error instanceof Error ? error.message : "";
+  return WITHDRAW_REFUSALS.includes(message) ? message : RUN_ERRORS.build;
+}
+
 export type LpRun = {
   id: number;
   /** The connected wallet the run signs with (your own wallet's page). */
   wallet: string;
   resource: ProtocolResource;
-  kind: "claim";
+  kind: "claim" | "withdraw";
   /** Positions asked for; null while every page is still loading. */
   count: number | null;
   phase: "loading" | "building" | "running" | "done";
@@ -179,6 +203,103 @@ export function startClaimRun({
         groups: built.groups,
         expectation: built.expectation,
         intent: "claim",
+        wallet,
+        currentAddress,
+        rpc,
+        onUpdate: (next) => patch(id, { steps: next }),
+        shouldStop: stopping,
+      });
+      touched = steps.filter((s) => s.status === "confirmed").flatMap((s) => s.positionIds);
+      patch(id, { steps, phase: "done" });
+    } catch {
+      patch(id, { phase: "done", error: RUN_ERRORS.unexpected });
+    } finally {
+      if (touched.length) requestRefetch(wallet.address, resource, touched);
+    }
+  })();
+  return id;
+}
+
+/**
+ * Withdraws `bps` of `target`'s withdrawable part with the connected wallet:
+ * re-reads live state, rebuilds, and runs only when the build still does
+ * what the dialog promised (`closes`, and a group to sign). Otherwise the run
+ * is dropped before any wallet prompt and `onChanged` is called, so the
+ * dialog can show the new amounts. Returns the run's id, or null when another
+ * run is going.
+ */
+export function startWithdrawRun({
+  wallet,
+  resource,
+  target,
+  bps,
+  slippageBps,
+  closes,
+  currentAddress,
+  onChanged,
+}: {
+  wallet: ConnectedWallet;
+  resource: ProtocolResource;
+  target: ActionTarget;
+  /** Share of the live withdrawable part, 1–10,000. */
+  bps: number;
+  slippageBps: number;
+  /** Whether the quote the visitor saw closes the position. */
+  closes: boolean;
+  /** The wallet's live account (useCurrentAddress). */
+  currentAddress: () => string | null;
+  onChanged: () => void;
+}): number | null {
+  if (runActive()) return null;
+  const id = nextId++;
+  set({
+    ...state,
+    run: {
+      id,
+      wallet: wallet.address,
+      resource,
+      kind: "withdraw",
+      count: 1,
+      phase: "building",
+      targets: [target],
+      steps: [],
+      skipped: [],
+      error: null,
+      stopping: false,
+      walletName: wallet.walletName,
+    },
+  });
+  const stopping = () => state.run?.id !== id || state.run.stopping;
+  void (async () => {
+    let touched: string[] = [];
+    try {
+      let actions: typeof import("@/lib/actions/build") | undefined;
+      let rpc: ReturnType<(typeof import("@/lib/actions/build"))["createActionRpc"]>;
+      let built: Awaited<ReturnType<(typeof import("@/lib/actions/build"))["buildWithdrawGroups"]>>;
+      try {
+        actions = await import("@/lib/actions/build");
+        // Uncached: what the wallet signs is built from fresh reads.
+        rpc = actions.createActionRpc(new URL("/api/rpc", window.location.origin).href);
+        built = await actions.buildWithdrawGroups(rpc, wallet.address, target, bps, slippageBps);
+      } catch (error) {
+        patch(id, { phase: "done", error: withdrawErrorText(error, actions?.isRpcBusy) });
+        return;
+      }
+      if (stopping()) {
+        patch(id, { phase: "done" });
+        return;
+      }
+      // Ruling R-T9b: the pool changed since the quote. Nothing was signed.
+      if (built.groups.length === 0 || built.closes !== closes) {
+        if (state.run?.id === id) set({ ...state, run: null });
+        onChanged();
+        return;
+      }
+      patch(id, { phase: "running" });
+      const steps = await actions.runAction({
+        groups: built.groups,
+        expectation: built.expectation,
+        intent: "withdraw",
         wallet,
         currentAddress,
         rpc,

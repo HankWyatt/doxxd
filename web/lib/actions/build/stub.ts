@@ -5,12 +5,14 @@ function browserOnly(): never {
   throw new Error("Action builders only run in the browser.");
 }
 
+export const cachedReads = browserOnly;
 export const createActionRpc = browserOnly;
 export const RpcBusyError = browserOnly;
 export const isRpcBusy = browserOnly;
 export const verifyMessage = browserOnly;
 export const packGroups = browserOnly;
 export const GroupTooLargeError = browserOnly;
+export const computeUnitPrice = browserOnly;
 export const runAction = browserOnly;
 export const AmountTooSmallError = browserOnly;
 export const NothingToWithdrawError = browserOnly;

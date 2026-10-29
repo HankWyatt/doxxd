@@ -16,7 +16,7 @@ vi.mock("@solana/web3.js", () => {
   const browserBuild = "@solana/web3.js/lib/index.browser.esm.js";
   return import(/* @vite-ignore */ browserBuild);
 });
-import { RpcBusyError, createActionRpc, isRpcBusy } from "./rpc";
+import { RpcBusyError, cachedReads, createActionRpc, isRpcBusy } from "./rpc";
 
 // Synthetic keys only: fixed seeds of repeated bytes.
 const payer = Keypair.fromSeed(new Uint8Array(32).fill(7));
@@ -241,5 +241,85 @@ describe("createActionRpc", () => {
     const watch = Array.from({ length: 17 }, (_, i) => key(i + 1).toBase58());
     await expect(rpc.simulate(signedTransaction(), watch)).rejects.toThrow(/16/);
     expect(seen).toHaveLength(0);
+  });
+});
+
+// Answers by method, so one test can mix account reads with other calls.
+function byMethod(fail: Set<string> = new Set()) {
+  const seen: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_input: unknown, init?: { body?: unknown }) => {
+      const body = JSON.parse(String(init?.body)) as Body;
+      seen.push(body.method);
+      if (fail.has(body.method)) return new Response("nope", { status: 400 });
+      const result =
+        body.method === "getProgramAccounts"
+          ? []
+          : body.method === "getMultipleAccounts"
+            ? ctx(body.params[0] instanceof Array ? body.params[0].map(() => null) : [])
+            : body.method === "getEpochInfo"
+              ? { epoch: 7, slotIndex: 0, slotsInEpoch: 432_000, absoluteSlot: 1_000, blockHeight: 1_000 }
+              : body.method === "getLatestBlockhash"
+                ? blockhashResult
+                : ctx(null);
+      return Response.json({ jsonrpc: "2.0", id: body.id, result });
+    }),
+  );
+  return seen;
+}
+
+describe("cachedReads", () => {
+  it("memoizes account reads for the TTL, per method and arguments", async () => {
+    const seen = byMethod();
+    const rpc = cachedReads(createActionRpc(ENDPOINT), 30_000);
+    const reads = () =>
+      Promise.all([
+        rpc.connection.getAccountInfo(key(1)),
+        rpc.connection.getAccountInfo(key(2)),
+        rpc.connection.getMultipleAccountsInfo([key(1), key(2)]),
+        rpc.connection.getProgramAccounts(key(3), { filters: [{ dataSize: 8 }] }),
+      ]);
+    await reads();
+    expect(seen).toEqual(["getAccountInfo", "getAccountInfo", "getMultipleAccounts", "getProgramAccounts"]);
+    await vi.advanceTimersByTimeAsync(29_999);
+    await reads();
+    expect(seen).toHaveLength(4);
+    await vi.advanceTimersByTimeAsync(1);
+    await reads();
+    expect(seen).toHaveLength(8);
+  });
+
+  it("passes everything else through, every time", async () => {
+    const seen = byMethod();
+    const base = createActionRpc(ENDPOINT);
+    const rpc = cachedReads(base, 30_000);
+    await rpc.connection.getEpochInfo("confirmed");
+    await rpc.connection.getEpochInfo("confirmed");
+    await rpc.latestBlockhash();
+    await rpc.latestBlockhash();
+    expect(seen).toEqual(["getEpochInfo", "getEpochInfo", "getLatestBlockhash", "getLatestBlockhash"]);
+    expect(rpc.simulate).toBe(base.simulate);
+    expect(rpc.send).toBe(base.send);
+    expect(rpc.connection.rpcEndpoint).toBe(base.connection.rpcEndpoint);
+  });
+
+  it("never caches a failed read", async () => {
+    const seen = byMethod(new Set(["getAccountInfo"]));
+    const rpc = cachedReads(createActionRpc(ENDPOINT), 30_000);
+    await expect(rpc.connection.getAccountInfo(key(1))).rejects.toThrow();
+    await expect(rpc.connection.getAccountInfo(key(1))).rejects.toThrow();
+    expect(seen).toEqual(["getAccountInfo", "getAccountInfo"]);
+  });
+
+  it("leaves the wrapped rpc uncached", async () => {
+    const seen = byMethod();
+    const base = createActionRpc(ENDPOINT);
+    const rpc = cachedReads(base, 30_000);
+    await rpc.connection.getMultipleAccountsInfo([key(4)]);
+    await rpc.connection.getMultipleAccountsInfo([key(4)]);
+    await base.connection.getMultipleAccountsInfo([key(4)]);
+    await base.connection.getMultipleAccountsInfo([key(4)]);
+    expect(seen).toEqual(["getMultipleAccounts", "getMultipleAccounts", "getMultipleAccounts"]);
   });
 });

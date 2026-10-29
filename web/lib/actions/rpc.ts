@@ -203,3 +203,49 @@ export function createActionRpc(endpoint: string): ActionRpc {
     }),
   );
 }
+
+// Connection methods whose results are account state (ruling R-P5).
+const ACCOUNT_READS = new Set([
+  "getAccountInfo",
+  "getAccountInfoAndContext",
+  "getParsedAccountInfo",
+  "getMultipleAccountsInfo",
+  "getMultipleAccountsInfoAndContext",
+  "getMultipleParsedAccounts",
+  "getProgramAccounts",
+  "getParsedProgramAccounts",
+]);
+
+/**
+ * `rpc` with its account reads (getAccountInfo, getMultipleAccounts and
+ * getProgramAccounts, through any of the Connection's methods for them)
+ * memoized per method and arguments for `ttlMs`, so a withdraw dialog can
+ * re-quote presets from the state it already loaded. A failed read is never
+ * kept. Everything else, including simulate and send, passes through, and
+ * `rpc` itself stays uncached.
+ */
+export function cachedReads(rpc: ActionRpc, ttlMs: number): ActionRpc {
+  const cache = new Map<string, { at: number; result: Promise<unknown> }>();
+  const connection = new Proxy(rpc.connection, {
+    get(target, property) {
+      const value: unknown = Reflect.get(target, property, target);
+      if (typeof value !== "function") return value;
+      const method = value as (...args: unknown[]) => unknown;
+      if (typeof property !== "string" || !ACCOUNT_READS.has(property)) return method.bind(target);
+      return (...args: unknown[]) => {
+        // PublicKey serializes to base58, so equal addresses share a key.
+        const key = property + JSON.stringify(args);
+        const now = Date.now();
+        const hit = cache.get(key);
+        if (hit && now - hit.at < ttlMs) return hit.result;
+        const result = Promise.resolve(method.apply(target, args));
+        cache.set(key, { at: now, result });
+        result.catch(() => {
+          if (cache.get(key)?.result === result) cache.delete(key);
+        });
+        return result;
+      };
+    },
+  });
+  return { ...rpc, connection };
+}
