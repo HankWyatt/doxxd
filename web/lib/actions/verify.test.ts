@@ -43,7 +43,7 @@ import { describe, expect, it } from "vitest";
 import { chainFixture, PROGRAM_IDS, SYNTHETIC, type DammV2Fixture, type SyntheticChain } from "@/tests/fixtures/actions-chain";
 import { MOCK_BLOCKHASH, mockConnection } from "@/tests/fixtures/mock-action-rpc";
 import { ALLOWED_INSTRUCTIONS, ATA_PROGRAM, MEMO_PROGRAM } from "./programs";
-import { verifyMessage, type Expectation } from "./verify";
+import { decodeInstructionArgs, verifyMessage, type Expectation } from "./verify";
 
 const pk = (address: string) => new PublicKey(address);
 const seededKey = (byte: number) => Keypair.fromSeed(new Uint8Array(32).fill(byte)).publicKey;
@@ -67,6 +67,7 @@ function setup(): Ctx {
   const programOf = (mint: string) => (mint === chain.mints.synt ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID);
   const { syna, synb, synt, sync, reward, wsol } = chain.mints;
   const expectation: Expectation = {
+    kind: "claim",
     owner: owner.toBase58(),
     mints: [syna, synb, synt, sync, reward, wsol].map((mint) => ({
       mint,
@@ -102,6 +103,8 @@ function compile(
     instructions,
   }).compileToV0Message(opts.lookups);
 }
+
+const withdrawing = (ctx: Ctx): Expectation => ({ ...ctx.expectation, kind: "withdraw" });
 
 const budget = () => [
   ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
@@ -161,7 +164,11 @@ async function dammClaimReward(ctx: Ctx) {
 
 const now = () => new BN(SYNTHETIC.clock.unixTimestamp);
 
-async function dammRemoveVested(ctx: Ctx) {
+type Mins = { a?: BN; b?: BN };
+const minA = (m: Mins) => m.a ?? new BN(1);
+const minB = (m: Mins) => m.b ?? new BN(1);
+
+async function dammRemoveVested(ctx: Ctx, opts: Mins & { delta?: BN } = {}) {
   const v = ctx.chain.dammV2.variants.vested;
   const { accounts } = await dammAccounts(ctx, v);
   // The SDK's getAllVestingsByPosition uses a filter the pass-through
@@ -170,21 +177,21 @@ async function dammRemoveVested(ctx: Ctx) {
   const vestings = [{ account: pk(v.vesting!), vestingState }];
   const tx = await ctx.cpAmm.removeLiquidity({
     ...accounts,
-    liquidityDelta: new BN(1).shln(100),
-    tokenAAmountThreshold: new BN(0),
-    tokenBAmountThreshold: new BN(0),
+    liquidityDelta: opts.delta ?? new BN(1).shln(100),
+    tokenAAmountThreshold: minA(opts),
+    tokenBAmountThreshold: minB(opts),
     vestings,
     currentPoint: now(),
   });
   return tx.instructions;
 }
 
-async function dammRemoveAll(ctx: Ctx) {
+async function dammRemoveAll(ctx: Ctx, opts: Mins = {}) {
   const { accounts } = await dammAccounts(ctx);
   const tx = await ctx.cpAmm.removeAllLiquidity({
     ...accounts,
-    tokenAAmountThreshold: new BN(0),
-    tokenBAmountThreshold: new BN(0),
+    tokenAAmountThreshold: minA(opts),
+    tokenBAmountThreshold: minB(opts),
     vestings: [],
     currentPoint: now(),
   });
@@ -221,7 +228,7 @@ type RewardAccounts = { poolRewardVault: PublicKey; ownerRewardVault: PublicKey;
 
 function clmmDecrease(
   ctx: Ctx,
-  opts: { recipientA?: PublicKey; rewards?: RewardAccounts; bitmap?: boolean } = {},
+  opts: { recipientA?: PublicKey; rewards?: RewardAccounts; bitmap?: boolean; liquidity?: BN } & Mins = {},
 ) {
   const c = ctx.chain.clmm;
   const { program, pool, protocolPosition, bitmap } = clmmKeys(ctx);
@@ -241,9 +248,9 @@ function clmmDecrease(
     pool.mintA,
     pool.mintB,
     opts.rewards ?? [],
-    new BN(0),
-    new BN(0),
-    new BN(0),
+    opts.liquidity ?? new BN(0),
+    opts.a ?? new BN(0),
+    opts.b ?? new BN(0),
     opts.bitmap === false ? undefined : bitmap,
   );
 }
@@ -267,7 +274,7 @@ function clmmClose(ctx: Ctx) {
   );
 }
 
-function cpmmWithdraw(ctx: Ctx) {
+function cpmmWithdraw(ctx: Ctx, opts: Mins & { lp?: BN } = {}) {
   const c = ctx.chain.cpmm;
   const pool = CpmmPoolInfoLayout.decode(ctx.chain.accounts.get(c.pool)!.data);
   return makeWithdrawCpmmInInstruction(
@@ -283,13 +290,13 @@ function cpmmWithdraw(ctx: Ctx) {
     pool.mintA,
     pool.mintB,
     pool.mintLp,
-    SYNTHETIC.cpmm.ownerLp.divn(2),
-    new BN(1),
-    new BN(1),
+    opts.lp ?? SYNTHETIC.cpmm.ownerLp.divn(2),
+    minA(opts),
+    minB(opts),
   );
 }
 
-function ammV4Withdraw(ctx: Ctx) {
+function ammV4Withdraw(ctx: Ctx, opts: Mins & { lp?: BN } = {}) {
   const a = ctx.chain.ammV4;
   const amm = liquidityStateV4Layout.decode(ctx.chain.accounts.get(a.pool)!.data);
   const market = MARKET_STATE_LAYOUT_V3.decode(ctx.chain.accounts.get(a.market)!.data);
@@ -319,9 +326,9 @@ function ammV4Withdraw(ctx: Ctx) {
       quoteTokenAccount: ctx.ata(ctx.chain.mints.wsol),
       owner: ctx.owner,
     },
-    lpAmount: SYNTHETIC.ammV4.ownerLp.divn(2),
-    baseAmountMin: new BN(1),
-    quoteAmountMin: new BN(1),
+    lpAmount: opts.lp ?? SYNTHETIC.ammV4.ownerLp.divn(2),
+    baseAmountMin: minA(opts),
+    quoteAmountMin: minB(opts),
   });
 }
 
@@ -447,7 +454,7 @@ describe("verifyMessage accepts", () => {
       [...spec(PROGRAM_IDS.cpAmm, "remove_liquidity").discriminator],
     ]);
     expect(cpAmmIxs[0].keys).toHaveLength(5); // 4 fixed + 1 vesting account
-    expect(verifyMessage(compile(ctx, [...budget(), ...ixs]), ctx.expectation)).toEqual(OK);
+    expect(verifyMessage(compile(ctx, [...budget(), ...ixs]), withdrawing(ctx))).toEqual(OK);
   });
 
   it("a cp-amm refresh_vesting on its own", async () => {
@@ -460,7 +467,7 @@ describe("verifyMessage accepts", () => {
       pool: pk(v.pool),
       vestingAccounts: [pk(v.vesting!)],
     });
-    expect(verifyMessage(compile(ctx, tx.instructions), ctx.expectation)).toEqual(OK);
+    expect(verifyMessage(compile(ctx, tx.instructions), withdrawing(ctx))).toEqual(OK);
   });
 
   it("a cp-amm remove_all_liquidity", async () => {
@@ -469,12 +476,12 @@ describe("verifyMessage accepts", () => {
     expect(only(ixs, PROGRAM_IDS.cpAmm)[0].data.subarray(0, 8)).toEqual(
       Buffer.from(spec(PROGRAM_IDS.cpAmm, "remove_all_liquidity").discriminator),
     );
-    expect(verifyMessage(compile(ctx, ixs), ctx.expectation)).toEqual(OK);
+    expect(verifyMessage(compile(ctx, ixs), withdrawing(ctx))).toEqual(OK);
   });
 
   it("a cp-amm close_position", async () => {
     const ctx = setup();
-    expect(verifyMessage(compile(ctx, await dammClose(ctx)), ctx.expectation)).toEqual(OK);
+    expect(verifyMessage(compile(ctx, await dammClose(ctx)), withdrawing(ctx))).toEqual(OK);
   });
 
   it("the SDK's combined remove-all-and-close transaction", async () => {
@@ -488,13 +495,13 @@ describe("verifyMessage accepts", () => {
       positionNftAccount: pk(v.positionNftAccount),
       poolState,
       positionState,
-      tokenAAmountThreshold: new BN(0),
-      tokenBAmountThreshold: new BN(0),
+      tokenAAmountThreshold: new BN(1),
+      tokenBAmountThreshold: new BN(1),
       vestings: [],
       currentPoint: now(),
     });
     expect(only(tx.instructions, PROGRAM_IDS.cpAmm).length).toBeGreaterThanOrEqual(3);
-    expect(verifyMessage(compile(ctx, tx.instructions), ctx.expectation)).toEqual(OK);
+    expect(verifyMessage(compile(ctx, tx.instructions), withdrawing(ctx))).toEqual(OK);
   });
 
   it("a Token-2022 fee claim", async () => {
@@ -517,9 +524,10 @@ describe("verifyMessage accepts", () => {
     expect(verifyMessage(compile(ctx, [clmmDecrease(ctx, { bitmap: false })]), ctx.expectation)).toEqual(OK);
   });
 
-  it("a Raydium CLMM close_position", () => {
+  it("a Raydium CLMM full decrease with minimums, then close_position", () => {
     const ctx = setup();
-    expect(verifyMessage(compile(ctx, [clmmDecrease(ctx), clmmClose(ctx)]), ctx.expectation)).toEqual(OK);
+    const decrease = clmmDecrease(ctx, { liquidity: SYNTHETIC.clmm.liquidity, a: new BN(1) });
+    expect(verifyMessage(compile(ctx, [decrease, clmmClose(ctx)]), withdrawing(ctx))).toEqual(OK);
   });
 
   it("a Raydium CPMM withdraw with idempotent ATA creates and the wSOL unwrap", () => {
@@ -532,7 +540,7 @@ describe("verifyMessage accepts", () => {
       cpmmWithdraw(ctx),
       createCloseAccountInstruction(ctx.ata(wsol), ctx.owner, ctx.owner),
     ];
-    expect(verifyMessage(compile(ctx, ixs), ctx.expectation)).toEqual(OK);
+    expect(verifyMessage(compile(ctx, ixs), withdrawing(ctx))).toEqual(OK);
   });
 
   it("a Raydium AMM v4 withdraw, a plain ATA create and a Token-2022 close", () => {
@@ -543,7 +551,7 @@ describe("verifyMessage accepts", () => {
       ammV4Withdraw(ctx),
       createCloseAccountInstruction(ctx.ata(synt), ctx.owner, ctx.owner, [], TOKEN_2022_PROGRAM_ID),
     ];
-    expect(verifyMessage(compile(ctx, ixs), ctx.expectation)).toEqual(OK);
+    expect(verifyMessage(compile(ctx, ixs), withdrawing(ctx))).toEqual(OK);
   });
 });
 
@@ -818,8 +826,8 @@ describe("verifyMessage also rejects", () => {
       ],
     ];
     for (const [ixs, reason] of cases)
-      expect(verifyMessage(compile(ctx, [...ixs, clmmClose(ctx)]), ctx.expectation)).toEqual(rejected(reason));
-    const atCap = [ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }), clmmClose(ctx)];
+      expect(verifyMessage(compile(ctx, [...ixs, clmmDecrease(ctx)]), ctx.expectation)).toEqual(rejected(reason));
+    const atCap = [ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }), clmmDecrease(ctx)];
     expect(verifyMessage(compile(ctx, atCap), ctx.expectation)).toEqual(OK);
   });
 
@@ -922,14 +930,14 @@ describe("verifyMessage also rejects", () => {
   it("a cp-amm close_position whose rent receiver is a stranger", async () => {
     const ctx = setup();
     const [close] = await dammClose(ctx);
-    expect(verifyMessage(compile(ctx, [withKey(close, 5, STRANGER)]), ctx.expectation)).toEqual(
+    expect(verifyMessage(compile(ctx, [withKey(close, 5, STRANGER)]), withdrawing(ctx))).toEqual(
       rejected("meteora-damm-v2 close_position account 5 (rent_receiver) is not the connected wallet"),
     );
   });
 
   it("a protocol instruction whose owner account is someone else", () => {
     const ctx = setup();
-    expect(verifyMessage(compile(ctx, [withKey(cpmmWithdraw(ctx), 0, STRANGER)]), ctx.expectation)).toEqual(
+    expect(verifyMessage(compile(ctx, [withKey(cpmmWithdraw(ctx), 0, STRANGER)]), withdrawing(ctx))).toEqual(
       rejected("raydium-cpmm withdraw account 0 (owner) is not the connected wallet"),
     );
   });
@@ -937,11 +945,11 @@ describe("verifyMessage also rejects", () => {
   it("CPMM and AMM v4 withdrawals paying a stranger", () => {
     const ctx = setup();
     expect(
-      verifyMessage(compile(ctx, [withKey(cpmmWithdraw(ctx), 5, STRANGER)]), ctx.expectation),
+      verifyMessage(compile(ctx, [withKey(cpmmWithdraw(ctx), 5, STRANGER)]), withdrawing(ctx)),
     ).toEqual(rejected("raydium-cpmm withdraw account 5 (token_1_account) is not the connected wallet's own token account"));
     const strangerWsol = ctx.ata(ctx.chain.mints.wsol, STRANGER);
     expect(
-      verifyMessage(compile(ctx, [withKey(ammV4Withdraw(ctx), 17, strangerWsol)]), ctx.expectation),
+      verifyMessage(compile(ctx, [withKey(ammV4Withdraw(ctx), 17, strangerWsol)]), withdrawing(ctx)),
     ).toEqual(
       rejected(
         "raydium-amm-v4 withdraw account 17 (user_quote_token_account) is not the connected wallet's own token account",
@@ -963,12 +971,12 @@ describe("verifyMessage also rejects", () => {
     );
     const amm = ammV4Withdraw(ctx);
     const short = new TransactionInstruction({ programId: amm.programId, keys: amm.keys.slice(0, 21), data: amm.data });
-    expect(verifyMessage(compile(ctx, [short]), ctx.expectation)).toEqual(
+    expect(verifyMessage(compile(ctx, [short]), withdrawing(ctx))).toEqual(
       rejected("raydium-amm-v4 withdraw has 21 accounts; expected 22"),
     );
     const close = clmmClose(ctx);
     const long = new TransactionInstruction({ programId: close.programId, keys: [...close.keys, extra], data: close.data });
-    expect(verifyMessage(compile(ctx, [long]), ctx.expectation)).toEqual(
+    expect(verifyMessage(compile(ctx, [long]), withdrawing(ctx))).toEqual(
       rejected("raydium-clmm close_position has 8 accounts; expected 6 or 7"),
     );
   });
@@ -1015,5 +1023,163 @@ describe("verifyMessage also rejects", () => {
     expect(verifyMessage(compile(ctx, [late]), ctx.expectation)).toEqual(
       rejected("raydium-clmm decrease_liquidity_v2 has the tick-array bitmap extension out of place"),
     );
+  });
+});
+
+// --- Action kinds and instruction arguments (ruling R-T6b) -------------------
+
+describe("verifyMessage by action kind", () => {
+  const big = (n: BN | number) => BigInt(n.toString());
+  const cpAmmIxs = async (ixs: Promise<TransactionInstruction[]>) => only(await ixs, PROGRAM_IDS.cpAmm);
+
+  it("rejects a claim that is really a full CLMM withdrawal with no minimums, then a close", () => {
+    const ctx = setup();
+    const attack = [clmmDecrease(ctx, { liquidity: new BN(1).shln(127) }), clmmClose(ctx)];
+    expect(verifyMessage(compile(ctx, attack), ctx.expectation)).toEqual(
+      rejected("raydium-clmm decrease_liquidity_v2 in a claim must remove 0 liquidity with 0 minimums"),
+    );
+    expect(verifyMessage(compile(ctx, attack), withdrawing(ctx))).toEqual(
+      rejected("raydium-clmm decrease_liquidity_v2 has no minimum amounts"),
+    );
+  });
+
+  it("rejects a CLMM collect in a claim that sets a minimum", () => {
+    const ctx = setup();
+    expect(verifyMessage(compile(ctx, [clmmDecrease(ctx, { b: new BN(1) })]), ctx.expectation)).toEqual(
+      rejected("raydium-clmm decrease_liquidity_v2 in a claim must remove 0 liquidity with 0 minimums"),
+    );
+  });
+
+  it("rejects every removal and close instruction in a claim, and allows each in a withdraw", async () => {
+    const ctx = setup();
+    const [refresh, remove] = await cpAmmIxs(dammRemoveVested(ctx));
+    const cases: [TransactionInstruction, string][] = [
+      [refresh, "meteora-damm-v2 refresh_vesting"],
+      [remove, "meteora-damm-v2 remove_liquidity"],
+      [(await cpAmmIxs(dammRemoveAll(ctx)))[0], "meteora-damm-v2 remove_all_liquidity"],
+      [(await dammClose(ctx))[0], "meteora-damm-v2 close_position"],
+      [clmmClose(ctx), "raydium-clmm close_position"],
+      [cpmmWithdraw(ctx), "raydium-cpmm withdraw"],
+      [ammV4Withdraw(ctx), "raydium-amm-v4 withdraw"],
+    ];
+    for (const [ix, label] of cases) {
+      expect(verifyMessage(compile(ctx, [ix]), ctx.expectation)).toEqual(
+        rejected(`${label} is not allowed in a claim`),
+      );
+      expect(verifyMessage(compile(ctx, [ix]), withdrawing(ctx)), label).toEqual(OK);
+    }
+  });
+
+  it("rejects withdrawals whose minimums are all zero, for each protocol", async () => {
+    const ctx = setup();
+    const zero = { a: new BN(0), b: new BN(0) };
+    const cases: [TransactionInstruction, string][] = [
+      [(await cpAmmIxs(dammRemoveVested(ctx, zero)))[1], "meteora-damm-v2 remove_liquidity"],
+      [(await cpAmmIxs(dammRemoveAll(ctx, zero)))[0], "meteora-damm-v2 remove_all_liquidity"],
+      [clmmDecrease(ctx, { liquidity: SYNTHETIC.clmm.liquidity, ...zero }), "raydium-clmm decrease_liquidity_v2"],
+      [cpmmWithdraw(ctx, zero), "raydium-cpmm withdraw"],
+      [ammV4Withdraw(ctx, zero), "raydium-amm-v4 withdraw"],
+    ];
+    for (const [ix, label] of cases)
+      expect(verifyMessage(compile(ctx, [ix]), withdrawing(ctx))).toEqual(
+        rejected(`${label} has no minimum amounts`),
+      );
+    // One non-zero minimum is enough (a single-sided position).
+    const oneSided = cpmmWithdraw(ctx, { a: new BN(0), b: new BN(5) });
+    expect(verifyMessage(compile(ctx, [oneSided]), withdrawing(ctx))).toEqual(OK);
+  });
+
+  it("rejects zero-amount removals but allows the CLMM zero-liquidity collect in both kinds", async () => {
+    const ctx = setup();
+    // The SDK refuses a zero liquidity delta, so zero it in the encoded data.
+    const remove = (await cpAmmIxs(dammRemoveVested(ctx)))[1];
+    const data = Buffer.from(remove.data);
+    data.fill(0, 8, 24);
+    const zeroRemove = new TransactionInstruction({ programId: remove.programId, keys: remove.keys, data });
+    const cases: [TransactionInstruction, string][] = [
+      [zeroRemove, "meteora-damm-v2 remove_liquidity removes nothing"],
+      [cpmmWithdraw(ctx, { lp: new BN(0) }), "raydium-cpmm withdraw removes nothing"],
+      [ammV4Withdraw(ctx, { lp: new BN(0) }), "raydium-amm-v4 withdraw removes nothing"],
+    ];
+    for (const [ix, reason] of cases)
+      expect(verifyMessage(compile(ctx, [ix]), withdrawing(ctx))).toEqual(rejected(reason));
+    expect(verifyMessage(compile(ctx, [clmmDecrease(ctx)]), withdrawing(ctx))).toEqual(OK);
+    expect(verifyMessage(compile(ctx, [clmmDecrease(ctx)]), ctx.expectation)).toEqual(OK);
+  });
+
+  it("rejects allowed instructions whose data has the wrong length", async () => {
+    const ctx = setup();
+    const claim = (await cpAmmIxs(dammClaim(ctx)))[0];
+    const padded = new TransactionInstruction({
+      programId: claim.programId,
+      keys: claim.keys,
+      data: Buffer.concat([claim.data, Buffer.from([0])]),
+    });
+    expect(verifyMessage(compile(ctx, [padded]), ctx.expectation)).toEqual(
+      rejected("meteora-damm-v2 claim_position_fee has 9 data bytes; expected 8"),
+    );
+    // An AMM v4 withdraw without its optional minimums.
+    const amm = ammV4Withdraw(ctx);
+    const noMinimums = new TransactionInstruction({ programId: amm.programId, keys: amm.keys, data: amm.data.subarray(0, 9) });
+    expect(verifyMessage(compile(ctx, [noMinimums]), withdrawing(ctx))).toEqual(
+      rejected("raydium-amm-v4 withdraw has 9 data bytes; expected 25"),
+    );
+    const decrease = clmmDecrease(ctx);
+    const short = new TransactionInstruction({
+      programId: decrease.programId,
+      keys: decrease.keys,
+      data: decrease.data.subarray(0, 24),
+    });
+    expect(verifyMessage(compile(ctx, [short]), ctx.expectation)).toEqual(
+      rejected("raydium-clmm decrease_liquidity_v2 has 24 data bytes; expected 40"),
+    );
+  });
+
+  it("rejects an unknown action kind", () => {
+    const ctx = setup();
+    const expectation = { ...ctx.expectation, kind: "swap" } as unknown as Expectation;
+    expect(verifyMessage(compile(ctx, [clmmDecrease(ctx)]), expectation)).toEqual(rejected("unknown action kind"));
+  });
+
+  it("decodes arguments exactly as the SDK builders encode them", async () => {
+    const ctx = setup();
+    const decode = (program: string, name: string, ix: TransactionInstruction) => {
+      const s = spec(program, name);
+      expect(ix.data.length, name).toBe(s.args.length);
+      return decodeInstructionArgs(s.args, ix.data);
+    };
+    const delta = new BN(1).shln(100).addn(5);
+    const [, remove] = await cpAmmIxs(dammRemoveVested(ctx, { delta, a: new BN(111), b: new BN(222) }));
+    expect(decode(PROGRAM_IDS.cpAmm, "remove_liquidity", remove)).toEqual({
+      amount: big(delta),
+      minimums: [big(111), big(222)],
+    });
+    const [removeAll] = await cpAmmIxs(dammRemoveAll(ctx, { a: new BN(333), b: new BN(444) }));
+    expect(decode(PROGRAM_IDS.cpAmm, "remove_all_liquidity", removeAll)).toEqual({
+      amount: null,
+      minimums: [big(333), big(444)],
+    });
+    const liquidity = new BN(1).shln(127).addn(9);
+    const decrease = clmmDecrease(ctx, { liquidity, a: new BN(555), b: new BN(666) });
+    expect(decode(PROGRAM_IDS.clmm, "decrease_liquidity_v2", decrease)).toEqual({
+      amount: big(liquidity),
+      minimums: [big(555), big(666)],
+    });
+    const cpmm = cpmmWithdraw(ctx, { lp: new BN(12_345), a: new BN(777), b: new BN(888) });
+    expect(decode(PROGRAM_IDS.cpmm, "withdraw", cpmm)).toEqual({
+      amount: big(12_345),
+      minimums: [big(777), big(888)],
+    });
+    const amm = ammV4Withdraw(ctx, { lp: new BN(54_321), a: new BN(999), b: new BN(1_010) });
+    expect(decode(PROGRAM_IDS.ammV4, "withdraw", amm)).toEqual({
+      amount: big(54_321),
+      minimums: [big(999), big(1_010)],
+    });
+    // Instructions without amounts still have exactly the encoded length.
+    decode(PROGRAM_IDS.cpAmm, "claim_position_fee", (await cpAmmIxs(dammClaim(ctx)))[0]);
+    decode(PROGRAM_IDS.cpAmm, "claim_reward", (await cpAmmIxs(dammClaimReward(ctx)))[0]);
+    decode(PROGRAM_IDS.cpAmm, "refresh_vesting", (await cpAmmIxs(dammRemoveVested(ctx)))[0]);
+    decode(PROGRAM_IDS.cpAmm, "close_position", (await dammClose(ctx))[0]);
+    decode(PROGRAM_IDS.clmm, "close_position", clmmClose(ctx));
   });
 });

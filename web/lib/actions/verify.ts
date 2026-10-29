@@ -8,7 +8,10 @@
 // - ATA creates only of the wallet's own ATAs of expected mints;
 // - Token / Token-2022 only CloseAccount of those ATAs, to the wallet;
 // - protocol instructions only from ALLOWED_INSTRUCTIONS, with their
-//   paid-out tokens, rent and position NFTs checked by role.
+//   paid-out tokens, rent and position NFTs checked by role;
+// - only the instructions the visitor's action kind allows: a claim only
+//   collects (no liquidity removed, no position closed), and every
+//   withdrawal that removes liquidity carries a non-zero minimum.
 // The wallet's ATAs are derived here from the expected mints, never taken
 // from the builder.
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
@@ -31,11 +34,15 @@ import {
   TOKEN_CLOSE_ACCOUNT,
   TOKEN_PROGRAM,
   TOKEN_PROGRAMS,
+  type ActionKind,
+  type InstructionArgs,
   type InstructionSpec,
 } from "./programs";
 import type { ActionProtocol } from "./types";
 
 export type Expectation = {
+  /** What the visitor asked for. */
+  kind: ActionKind;
   /** The connected wallet. */
   owner: string;
   /** Mints the wallet may receive, each with its token program. */
@@ -54,6 +61,7 @@ function reject(reason: string): never {
 
 type Context = {
   message: VersionedMessage;
+  kind: ActionKind;
   keys: string[];
   owner: string;
   mints: Set<string>;
@@ -81,6 +89,7 @@ export function verifyMessage(message: VersionedMessage, expect: Expectation): V
 
 function check(message: VersionedMessage, expect: Expectation): void {
   if (message.addressTableLookups.length > 0) reject("address-table lookups are not allowed");
+  if (expect.kind !== "claim" && expect.kind !== "withdraw") reject("unknown action kind");
 
   const owner = parseOwner(expect.owner);
   const keys = message.staticAccountKeys.map((key) => key.toBase58());
@@ -92,6 +101,7 @@ function check(message: VersionedMessage, expect: Expectation): void {
 
   const ctx: Context = {
     message,
+    kind: expect.kind,
     keys,
     owner: owner.toBase58(),
     mints: new Set(expect.mints.map((m) => m.mint)),
@@ -210,6 +220,11 @@ function checkProtocol(
 ): void {
   const spec = findSpec(program, data);
   const label = `${spec.protocol} ${spec.name}`;
+  if (data.length !== spec.args.length)
+    reject(`${label} has ${data.length} data bytes; expected ${spec.args.length}`);
+  if (!spec.kinds.includes(ctx.kind)) reject(`${label} is not allowed in a ${ctx.kind}`);
+  checkArgs(ctx.kind, spec, label, data);
+
   const n = accounts.length;
   const fixed = spec.accounts;
   if (spec.remaining === "none" && n !== fixed) reject(`${label} has ${n} accounts; expected ${fixed}`);
@@ -232,6 +247,37 @@ function checkProtocol(
   }
 
   if (spec.remaining === "clmmRewards") checkClmmRewards(ctx, label, accounts, fixed);
+}
+
+export type DecodedArgs = { amount: bigint | null; minimums: bigint[] };
+
+/** Decodes an allowed instruction's amount and minimums; the length must already match. */
+export function decodeInstructionArgs(args: InstructionArgs, data: Uint8Array): DecodedArgs {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const u64 = (offset: number) => view.getBigUint64(offset, true);
+  let amount: bigint | null = null;
+  if (args.amount) {
+    const { offset, bytes } = args.amount;
+    amount = bytes === 8 ? u64(offset) : u64(offset) | (u64(offset + 8) << BigInt(64));
+  }
+  return { amount, minimums: args.minimums.map(u64) };
+}
+
+function checkArgs(kind: ActionKind, spec: InstructionSpec, label: string, data: Uint8Array): void {
+  if (!spec.args.amount && spec.args.minimums.length === 0) return;
+  const { amount, minimums } = decodeInstructionArgs(spec.args, data);
+  const zero = BigInt(0);
+  const noMinimum = minimums.every((m) => m === zero);
+  if (kind === "claim") {
+    // Only a pure collect reaches here (see `kinds` in ./programs.ts).
+    if (amount !== zero || !noMinimum) reject(`${label} in a claim must remove 0 liquidity with 0 minimums`);
+    return;
+  }
+  if (amount === zero) {
+    if (spec.collectWhenZero) return;
+    reject(`${label} removes nothing`);
+  }
+  if (noMinimum) reject(`${label} has no minimum amounts`);
 }
 
 const isOwned = (ctx: Context, key: string) => key === ctx.owner || ctx.ownerAtas.has(key);

@@ -67,11 +67,34 @@ export type AccountRole = "owner" | "ownedTokenAccount" | "positionNftAccount" |
  */
 export type RemainingAccounts = "none" | "vestings" | "optionalPool" | "clmmRewards";
 
+/** What the visitor asked for. Set by the UI from the visitor's intent. */
+export type ActionKind = "claim" | "withdraw";
+
+/**
+ * An instruction's data, decoded with an exact length:
+ * - `length`: the whole data length, discriminator included;
+ * - `amount`: the liquidity or LP amount removed, little-endian at `offset`;
+ * - `minimums`: offsets of the u64 little-endian minimum outputs.
+ */
+export type InstructionArgs = {
+  length: number;
+  amount?: { offset: number; bytes: 8 | 16 };
+  minimums: readonly number[];
+};
+
 export type InstructionSpec = {
   protocol: ActionProtocol;
   name: string;
   /** The 8-byte Anchor discriminator, or AMM v4's 1-byte tag. */
   discriminator: readonly number[];
+  /** The kinds of action this instruction may appear in. */
+  kinds: readonly ActionKind[];
+  args: InstructionArgs;
+  /**
+   * A zero amount collects fees and rewards without removing liquidity
+   * (CLMM decrease_liquidity_v2). It needs no minimums.
+   */
+  collectWhenZero?: true;
   /** Length of the fixed account list. */
   accounts: number;
   remaining: RemainingAccounts;
@@ -104,6 +127,8 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       protocol: "meteora-damm-v2",
       name: "claim_position_fee", // dist/index.js:181
       discriminator: [180, 38, 154, 17, 133, 33, 162, 211],
+      kinds: ["claim", "withdraw"],
+      args: { length: 8, minimums: [] },
       accounts: 15,
       remaining: "none",
       roles: CP_AMM_PAYOUT_ROLES,
@@ -112,6 +137,9 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       protocol: "meteora-damm-v2",
       name: "claim_reward", // dist/index.js:367
       discriminator: [149, 95, 181, 242, 94, 90, 158, 162],
+      kinds: ["claim", "withdraw"],
+      // reward_index: u8, skip_reward: u8 (dist/index.js:427-438).
+      args: { length: 10, minimums: [] },
       // 0 pool_authority, 1 pool, 2 position, 3 reward_vault, 4 reward_mint,
       // 5 user_token_account, 6 position_nft_account, 7 signer,
       // 8 token_program, 9 event_authority, 10 program.
@@ -127,6 +155,10 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       protocol: "meteora-damm-v2",
       name: "remove_liquidity", // dist/index.js:2409
       discriminator: [80, 85, 209, 72, 24, 206, 177, 108],
+      kinds: ["withdraw"],
+      // RemoveLiquidityParameters (dist/index.js:6482): liquidity_delta u128,
+      // token_a_amount_threshold u64, token_b_amount_threshold u64.
+      args: { length: 40, amount: { offset: 8, bytes: 16 }, minimums: [24, 32] },
       accounts: 15,
       remaining: "none",
       roles: CP_AMM_PAYOUT_ROLES,
@@ -135,6 +167,10 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       protocol: "meteora-damm-v2",
       name: "remove_all_liquidity", // dist/index.js:2286
       discriminator: [10, 51, 61, 35, 112, 105, 24, 85],
+      kinds: ["withdraw"],
+      // token_a_amount_threshold u64, token_b_amount_threshold u64
+      // (dist/index.js:2397-2406). It removes all, so it has no amount.
+      args: { length: 24, minimums: [8, 16] },
       accounts: 15,
       remaining: "none",
       roles: CP_AMM_PAYOUT_ROLES,
@@ -143,6 +179,8 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       protocol: "meteora-damm-v2",
       name: "close_position", // dist/index.js:514
       discriminator: [123, 134, 81, 0, 49, 68, 98, 98],
+      kinds: ["withdraw"],
+      args: { length: 8, minimums: [] },
       // 0 position_nft_mint, 1 position_nft_account, 2 pool, 3 position,
       // 4 pool_authority, 5 rent_receiver, 6 owner, 7 token_program,
       // 8 event_authority, 9 program.
@@ -158,6 +196,8 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       protocol: "meteora-damm-v2",
       name: "refresh_vesting", // dist/index.js:2251
       discriminator: [9, 94, 216, 14, 116, 204, 247, 0],
+      kinds: ["withdraw"],
+      args: { length: 8, minimums: [] },
       // 0 pool, 1 position, 2 position_nft_account, 3 owner, then the
       // position's vesting accounts (buildRefreshVestingInstruction,
       // dist/index.js:11955).
@@ -180,6 +220,11 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       // 12 Token-2022 program, 13 memo program, 14 mintA, 15 mintB, then an
       // optional exTickArrayBitmap and reward triples (:584-591).
       discriminator: [58, 127, 188, 62, 79, 82, 196, 96],
+      kinds: ["claim", "withdraw"],
+      // liquidity u128, amountMinA u64, amountMinB u64 (instrument.ts:564).
+      // Liquidity 0 with minimums 0 is the fee and reward collect a claim uses.
+      args: { length: 40, amount: { offset: 8, bytes: 16 }, minimums: [24, 32] },
+      collectWhenZero: true,
       accounts: 16,
       remaining: "clmmRewards",
       roles: {
@@ -197,6 +242,8 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       // 2 positionNftAccount, 3 personalPosition, 4 system program,
       // 5 token program, then the optional poolId (:358).
       discriminator: [123, 134, 81, 0, 49, 68, 98, 98],
+      kinds: ["withdraw"],
+      args: { length: 8, minimums: [] },
       accounts: 6,
       remaining: "optionalPool",
       roles: {
@@ -214,6 +261,9 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       // 5 userVaultB, 6 vaultA, 7 vaultB, 8 token program, 9 Token-2022
       // program, 10 mintA, 11 mintB, 12 lpMint, 13 memo program.
       discriminator: [183, 18, 70, 156, 148, 109, 161, 34],
+      kinds: ["withdraw"],
+      // lpAmount u64, amountMinA u64, amountMinB u64 (instruction.ts:188).
+      args: { length: 32, amount: { offset: 8, bytes: 8 }, minimums: [16, 24] },
       accounts: 14,
       remaining: "none",
       roles: {
@@ -237,6 +287,11 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       // The program also accepts shorter lists with shifted user accounts;
       // only this one is allowed.
       discriminator: [4],
+      kinds: ["withdraw"],
+      // removeLiquidityLayout (src/raydium/liquidity/layout.ts:142): tag u8,
+      // lpAmount u64, baseAmountMin u64, quoteAmountMin u64. The program
+      // treats the minimums as optional by length; a withdraw must carry them.
+      args: { length: 25, amount: { offset: 1, bytes: 8 }, minimums: [9, 17] },
       accounts: 22,
       remaining: "none",
       roles: {
