@@ -42,6 +42,8 @@ Live data comes from the [DMND API](https://docs.dmnd.dev) through a server-side
 | `DMND_ENABLED_PROTOCOLS` | Comma-separated **resource IDs** qualified by DMND for serving. Default empty. |
 | `DMND_ALLOWED_WALLETS` | Optional server allowlist of wallet addresses; omit for public arbitrary-wallet use. |
 | `DMND_REQUEST_BUDGET` | Optional per-runtime upstream request cap, integer 1-34. Omit for normal public operation. |
+| `DOXXD_ACTIONS_ENABLED` | Server-only switch for [on-site actions](#on-site-actions). Off unless exactly `1`. |
+| `SOLANA_RPC_URL` | Optional server-only Solana RPC endpoint behind `/api/rpc`; default `https://api.mainnet-beta.solana.com`. It may carry a key and never reaches the browser. |
 
 Protocol IDs: `stake`, `liquid-staking`, `kamino`, `solend`, `marginfi`, `orca`, `raydium-clmm`, `meteora`, `meteora-damm-v2`, `raydium-cpmm`, `raydium-amm-v4`, `raydium-farms`, `drift`, `velocity`. These are supported consumer views, not a claim that every upstream protocol is currently activated. Summary, overview, indexed trading positions and activity use fixed routes independently.
 
@@ -50,6 +52,24 @@ The gateway accepts only known resources and validated filters, rejects redirect
 Token images load lazily from credential-free HTTPS URLs on DNS hostnames, with no page referrer. Native IPFS image URIs resolve through HTTPS, and IPFS images can retry the same CID and path through a bounded set of public gateways. Literal IPs, local hostnames and custom ports are refused; missing or failed images fall back to initials. Native SOL uses a local vector icon. Images are loaded by the browser, never through a server proxy.
 
 Portfolio resources recheck queued or running scans and temporary request failures automatically, every five seconds after a response and respecting `Retry-After`. Checks stop when the data is ready, after twenty retries, or after two minutes; a hidden tab pauses them without extending that window. Loaded values stay visible if a refresh fails, and a status notice explains automatic checks, retained data and the manual **Check again** fallback. This applies to the overview, the summary and the first page of expanded protocol views; activity history and continuation pages keep manual refresh. Partial coverage, missing prices and disabled protocols do not start polling.
+
+## On-site actions
+
+When the server enables them, a visitor can connect their own Solana wallet on their own wallet page and **claim fees** or **withdraw** from Meteora DAMM v2 and Raydium CLMM, CPMM and AMM v4 positions: one position, a selection, or "Claim all fees" on a card. CPMM and AMM v4 fees are part of the LP tokens, so those rows offer only Withdraw. Viewing someone else's wallet never shows action buttons.
+
+**Doxxd never holds keys.** Transactions are built in the browser from live chain state and signed only by the visitor's wallet, through the Wallet Standard. Doxxd never signs, stores or sees a key and charges no fee. Card and table values still come from DMND; dialogs and progress show live quotes and simulation results.
+
+- **Off switch.** Everything is off unless the server sets `DOXXD_ACTIONS_ENABLED=1`. When off there is no Connect wallet button and no action UI, no wallet or protocol SDK code loads, and `/api/rpc` returns 404.
+- **RPC pass-through.** The browser reads chain state through the same-origin `/api/rpc` route, which forwards to `SOLANA_RPC_URL` (or the public mainnet RPC). It is not a general RPC proxy. It accepts one JSON-RPC request at a time, only the methods the builders need (account and program-account reads, blockhash, block height, slot, epoch, rent, priority fees, simulate, send and signature statuses), each in the exact shapes the client uses within size limits. It is rate-limited per runtime. The upstream URL, its errors and any key never reach a response.
+- **Pre-sign check.** Before the wallet sees a transaction, and again after it signs, Doxxd checks the message and refuses anything that could do more than the action chosen:
+  - every account is listed in the message (no lookup tables);
+  - the connected wallet pays the fee and is the only signer;
+  - only the LP programs, the token programs, the associated-token program, compute budget and memo appear, never the System program;
+  - compute limit and priority fee are capped;
+  - new token accounts are only the wallet's own, for the tokens it should receive, and only those may be closed, back to the wallet;
+  - protocol instructions come from a fixed list, with their payout accounts and position NFTs checked;
+  - a claim only collects fees and rewards; every withdrawal that removes liquidity carries a non-zero minimum amount.
+- **Then simulate, sign, send.** Each transaction is simulated, and a claim with nothing to collect is skipped. The wallet is asked to sign in prompts of up to 10. Only the exact bytes that were checked are sent, and a transaction the wallet changed is not sent. Stopping or declining leaves the rest unclaimed; nothing is lost. Confirmed rows read "Just claimed · updating" or "Withdrawn · updating" until DMND catches up.
 
 ## Scripts
 
@@ -67,7 +87,7 @@ Run these from `web/`.
 | `npm run contracts:generate` | Regenerate API types and validation schemas from the pinned contract |
 | `npm run lint` | ESLint; it currently reports existing issues and is not part of CI |
 
-After `npm run build`, `DOXXD_E2E_BUILT=1 npm run test:e2e` runs the browser tests against the compiled Worker instead of the development server.
+After `npm run build`, `DOXXD_E2E_BUILT=1 npm run test:e2e` runs the browser tests against the compiled Worker instead of the development server. The browser tests serve the app on port 4318 and a synthetic Solana RPC helper for the wallet-action flows on port 4319.
 
 `web/scripts/` also holds staged live-verification tooling (`acceptance:dmnd`, `start:dmnd`, `verify:dmnd-runtime`). It is maintainer tooling and is not needed to run, build or contribute to the application.
 
