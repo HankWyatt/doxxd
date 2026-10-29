@@ -2,7 +2,7 @@
 // The progress of a wallet action: one line per transaction, with the
 // runner's own status and reason copy. Used for claims here and for a single
 // withdrawal in the withdraw dialog.
-import { useId } from "react";
+import { useEffect, useId, useRef } from "react";
 import type { ActionStep } from "@/lib/actions/run";
 import { explorerHref } from "@/lib/safe-url";
 import { formatAmounts, type MintLookup } from "./amounts";
@@ -68,6 +68,8 @@ export function ClaimProgress({
   error,
   done,
   stopping,
+  autoFocus = false,
+  nothingLine = "Nothing was claimed",
   onStop,
   onDone,
 }: {
@@ -84,13 +86,25 @@ export function ClaimProgress({
   error?: string | null;
   done: boolean;
   stopping: boolean;
+  /** Move focus to the heading on mount (the visitor just started the run). */
+  autoFocus?: boolean;
+  /** The end line when a finished run confirmed nothing. */
+  nothingLine?: string;
   onStop(): void;
   onDone(): void;
 }) {
   const id = useId();
+  const heading = useRef<HTMLElement>(null);
+  // Mount only: a card that remounts mid-run must not steal focus.
+  useEffect(() => {
+    if (autoFocus) heading.current?.focus();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const nothing = done && !error && !steps.some((step) => step.status === "confirmed");
   return (
-    <section className="claim-progress" aria-labelledby={id} aria-live="polite">
-      <strong id={id}>{title}</strong>
+    <section className="claim-progress" aria-labelledby={id}>
+      <strong id={id} ref={heading} tabIndex={-1}>
+        {title}
+      </strong>
       {steps.length > 0 && (
         <div className="muted small">
           {plural(steps.length, "transaction")} · approve them in {walletName}
@@ -112,6 +126,7 @@ export function ClaimProgress({
         ))}
       </ol>
       {error && <p className="progress-error">{error}</p>}
+      {nothing && <p>{nothingLine}</p>}
       <p className="faint small">
         If you stop or reject one, nothing is lost: those fees just stay unclaimed.
       </p>

@@ -71,6 +71,20 @@ describe("loadAllPages", () => {
     );
   });
 
+  it("passes the abort signal to every page fetch and stops when aborted", async () => {
+    const controller = new AbortController();
+    const fetch = vi.fn(async (_input: string, init?: RequestInit) => {
+      expect(init?.signal).toBe(controller.signal);
+      controller.abort();
+      return Response.json({ ok: true, data: page(2, "c2") });
+    });
+    vi.stubGlobal("fetch", fetch);
+    await expect(
+      loadAllPages(DAMM.wallet, "meteora-damm-v2", page(1, "c1"), controller.signal),
+    ).rejects.toThrow();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("fails rather than return part of the positions", async () => {
     serve({ c1: { ok: true, data: page(2, "c2") } });
     await expect(loadAllPages(DAMM.wallet, "meteora-damm-v2", page(1, "c1"))).rejects.toThrow();

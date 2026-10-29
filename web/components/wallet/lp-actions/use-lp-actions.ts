@@ -1,10 +1,7 @@
 "use client";
 // The on-site action state for one LP card: who may act, each row's buttons
-// and pending state, the selection, and the claim run with its progress.
-//
-// Everything that loads web3.js or the SDKs is reached only through
-// `await import("@/lib/actions/build")` (ruling R-P4); the modules imported
-// here statically are pure.
+// and pending state, the selection, and this card's view of the page's one
+// claim run (./run-store.ts), which outlives the card.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ProtocolResource } from "@/lib/dmnd/contracts";
 import type { PositionView } from "@/lib/portfolio/model";
@@ -12,10 +9,20 @@ import { useActionsEnabled } from "@/lib/actions/availability";
 import { capabilities } from "@/lib/actions/capabilities";
 import { headerWalletState } from "@/lib/actions/header-state";
 import type { ActionKind } from "@/lib/actions/programs";
-import type { ActionStep } from "@/lib/actions/run";
 import { ACTION_PROGRAM_IDS, type ActionProtocol, type ActionTarget } from "@/lib/actions/types";
 import { usePendingActions } from "@/lib/actions/use-pending-actions";
 import { useConnectedWallet, useCurrentAddress } from "@/components/wallet-connect/provider";
+import {
+  dismissRun,
+  refetchKey,
+  requestRefetch,
+  startClaimRun,
+  stopRun,
+  useLpRunStore,
+  type LpRun,
+} from "./run-store";
+
+export { RUN_ERRORS, type LpRun } from "./run-store";
 
 export function isActionResource(resource: ProtocolResource): resource is ActionProtocol {
   return Object.hasOwn(ACTION_PROGRAM_IDS, resource);
@@ -39,32 +46,12 @@ export function refetchTimes(): number[] {
   }
 }
 
-export const RUN_ERRORS = {
-  load: "Couldn't load every position · try again",
-  build: "Couldn't load live pool data · try again",
-  // The runner reports its own failures per step; this is a fault in it.
-  unexpected: "Something went wrong · check your wallet before retrying",
-} as const;
-
 export type RowActionState = {
   target: ActionTarget;
   /** Offer Claim: the row may hold fees and nothing is pending for it. */
   claim: boolean;
   withdraw: "yes" | "locked" | "no";
   pending: { kind: ActionKind; stale: boolean } | null;
-};
-
-export type LpRun = {
-  kind: "claim";
-  /** Positions asked for; null while every page is still loading. */
-  count: number | null;
-  phase: "loading" | "building" | "running" | "done";
-  targets: ActionTarget[];
-  steps: ActionStep[];
-  skipped: { positionId: string; reason: string }[];
-  error: string | null;
-  stopping: boolean;
-  walletName: string;
 };
 
 export type LpActions = {
@@ -83,10 +70,13 @@ export type LpActions = {
   isSelected(id: string): boolean;
   toggle(target: ActionTarget): void;
   clear(): void;
+  /** The page's run when it belongs to this card (wallet and resource). */
   run: LpRun | null;
-  /** A run is going; no other may start. */
+  /** True when this card started `run` in this mount: its panel takes focus. */
+  focusRun: boolean;
+  /** A run is going on any card; no other may start. */
   busy: boolean;
-  start(kind: "claim", targets: ActionTarget[] | (() => Promise<ActionTarget[]>)): void;
+  start(kind: "claim", targets: ActionTarget[] | ((signal: AbortSignal) => Promise<ActionTarget[]>)): void;
   stop(): void;
   dismiss(): void;
   /** Re-read on the backoff schedule while these positions are pending. */
@@ -166,11 +156,11 @@ export function useLpActions(
   if (selection.owner !== owner) setSelection({ owner, selecting: false, targets: new Map() });
   const selected = useMemo(() => [...selection.targets.values()], [selection.targets]);
 
-  // The run.
-  const [run, setRun] = useState<LpRun | null>(null);
-  const running = useRef(false);
-  const stopRequested = useRef(false);
-  const update = (patch: Partial<LpRun>) => setRun((r) => (r ? { ...r, ...patch } : r));
+  // The page's run; this card shows it when it is for this wallet's resource.
+  const store = useLpRunStore();
+  const run = store.run && store.run.wallet === address && store.run.resource === resource ? store.run : null;
+  const busy = store.run !== null && store.run.phase !== "done";
+  const [startedHere, setStartedHere] = useState<number | null>(null);
 
   // Backoff refetch: positions still pending among the loaded rows.
   const refreshRef = useRef(refresh);
@@ -181,90 +171,35 @@ export function useLpActions(
       [...states.values()].filter((s) => s.pending !== null).map((s) => s.target.id),
     );
   });
-  const [refetch, setRefetch] = useState<{ epoch: number; ids: string[] }>({ epoch: 0, ids: [] });
+  // Kept in the store, so a card that remounts mid-window resumes it.
+  const refetch = store.refetch[refetchKey(address, resource)] ?? null;
   useEffect(() => {
-    if (refetch.epoch === 0) return;
-    const timers = refetchTimes().map((at) =>
-      setTimeout(() => {
-        if (!refetch.ids.some((id) => pendingIds.current.has(id))) {
-          timers.forEach(clearTimeout);
-          return;
-        }
-        refreshRef.current();
-      }, at),
-    );
+    if (!refetch) return;
+    const elapsed = Date.now() - refetch.endedAt;
+    const timers = refetchTimes()
+      .filter((at) => at > elapsed)
+      .map((at) =>
+        setTimeout(() => {
+          if (!refetch.ids.some((id) => pendingIds.current.has(id))) {
+            timers.forEach(clearTimeout);
+            return;
+          }
+          refreshRef.current();
+        }, at - elapsed),
+      );
     return () => timers.forEach(clearTimeout);
   }, [refetch]);
   const refetchAfterAction = useCallback(
-    (ids: string[]) => setRefetch((r) => ({ epoch: r.epoch + 1, ids: [...ids] })),
-    [],
+    (ids: string[]) => requestRefetch(address, resource, ids),
+    [address, resource],
   );
 
-  const start = (kind: "claim", source: ActionTarget[] | (() => Promise<ActionTarget[]>)) => {
-    if (running.current || !active || !wallet) return;
-    const runWallet = wallet;
-    running.current = true;
-    stopRequested.current = false;
+  const start = (kind: "claim", source: ActionTarget[] | ((signal: AbortSignal) => Promise<ActionTarget[]>)) => {
+    if (busy || !active || !wallet || kind !== "claim") return;
+    const id = startClaimRun({ wallet, resource, source, currentAddress });
+    if (id === null) return;
+    setStartedHere(id);
     setSelection((s) => ({ ...s, selecting: false, targets: new Map() }));
-    const given = Array.isArray(source) ? source : null;
-    setRun({
-      kind,
-      count: given ? given.length : null,
-      phase: given ? "building" : "loading",
-      targets: given ?? [],
-      steps: [],
-      skipped: [],
-      error: null,
-      stopping: false,
-      walletName: runWallet.walletName,
-    });
-    void (async () => {
-      let touched: string[] = [];
-      try {
-        let targets: ActionTarget[];
-        try {
-          targets = given ?? (await (source as () => Promise<ActionTarget[]>)());
-        } catch {
-          update({ phase: "done", error: RUN_ERRORS.load });
-          return;
-        }
-        // Stopped while every page loaded: nothing is built or signed.
-        if (stopRequested.current) {
-          update({ count: targets.length, targets, phase: "done" });
-          return;
-        }
-        update({ count: targets.length, targets, phase: "building" });
-        let actions: typeof import("@/lib/actions/build");
-        let rpc: ReturnType<(typeof actions)["createActionRpc"]>;
-        let built: Awaited<ReturnType<(typeof actions)["buildClaimGroups"]>>;
-        try {
-          actions = await import("@/lib/actions/build");
-          rpc = actions.createActionRpc(new URL("/api/rpc", window.location.origin).href);
-          built = await actions.buildClaimGroups(rpc, runWallet.address, targets);
-        } catch {
-          update({ phase: "done", error: RUN_ERRORS.build });
-          return;
-        }
-        update({ skipped: built.skipped, phase: "running" });
-        const steps = await actions.runAction({
-          groups: built.groups,
-          expectation: built.expectation,
-          intent: kind,
-          wallet: runWallet,
-          currentAddress,
-          rpc,
-          onUpdate: (next) => update({ steps: next }),
-          shouldStop: () => stopRequested.current,
-        });
-        touched = steps.filter((s) => s.status === "confirmed").flatMap((s) => s.positionIds);
-        update({ steps, phase: "done" });
-      } catch {
-        update({ phase: "done", error: RUN_ERRORS.unexpected });
-      } finally {
-        running.current = false;
-        if (touched.length) refetchAfterAction(touched);
-      }
-    })();
   };
 
   return {
@@ -286,13 +221,13 @@ export function useLpActions(
       }),
     clear: () => setSelection((s) => ({ ...s, targets: new Map() })),
     run,
-    busy: run !== null && run.phase !== "done",
+    focusRun: run !== null && run.id === startedHere,
+    busy,
     start,
-    stop: () => {
-      stopRequested.current = true;
-      update({ stopping: true });
+    stop: stopRun,
+    dismiss: () => {
+      if (run) dismissRun(run.id);
     },
-    dismiss: () => setRun((r) => (r && r.phase === "done" ? null : r)),
     refetchAfterAction,
     refresh: () => refreshRef.current(),
   };

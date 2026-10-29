@@ -1,5 +1,12 @@
 "use client";
-import { Fragment, useCallback, useLayoutEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { ChevronDown, ChevronUp, Info } from "lucide-react";
 import type {
   ProtocolResource,
@@ -121,6 +128,7 @@ export function ProtocolSection({
   const state = component ? componentState(component) : null;
   const totalKnown = state === "chip" || state === "empty";
   const isOpen = useRef(open);
+  const toggleButton = useRef<HTMLButtonElement>(null);
   const retryBody = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
     isOpen.current = open;
@@ -150,6 +158,7 @@ export function ProtocolSection({
   return (
     <section className="panel protocol-card" id={"protocol-" + resource}>
       <button
+        ref={toggleButton}
         type="button"
         className="protocol-toggle"
         aria-expanded={open}
@@ -191,6 +200,7 @@ export function ProtocolSection({
             limit={limit}
             report={report}
             onWithdraw={setWithdrawTarget}
+            cardHeading={toggleButton}
           />
         </div>
       )}
@@ -206,6 +216,7 @@ function ProtocolBody({
   limit,
   report,
   onWithdraw,
+  cardHeading,
 }: {
   address: string;
   resource: ProtocolResource;
@@ -214,6 +225,8 @@ function ProtocolBody({
   limit: number;
   report: (retry: (() => void) | null) => void;
   onWithdraw: (target: ActionTarget) => void;
+  /** Takes focus back when the progress panel closes without Claim all. */
+  cardHeading: RefObject<HTMLButtonElement | null>;
 }) {
   const [cursor, setCursor] = useState<string | undefined>();
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -262,7 +275,42 @@ function ProtocolBody({
     setExpanded(null);
     setShowAll(false);
   }
-  if (!request.result) return <LoadingRows />;
+  // This card's run is going: the page stays put under it.
+  const runGoing = actions.run !== null && actions.run.phase !== "done";
+  const claimAllButton = useRef<HTMLButtonElement>(null);
+  // Names and decimals for amounts in the action UI, from DMND's rows.
+  const lookup = mintLookup(
+    [
+      ...(view?.positions ?? []).flatMap((p) => (p.action ? [p.action] : [])),
+      ...(actions.run?.targets ?? []),
+    ],
+    labels,
+  );
+  // The live region stays mounted (first, in every state of the card) so the
+  // panel's arrival is announced, and the panel survives loading and errors.
+  const live =
+    actions.active || actions.run ? (
+      <div className="lp-live" aria-live="polite">
+        {actions.run && (
+          <RunProgress
+            run={actions.run}
+            actions={actions}
+            lookup={lookup}
+            onDone={() => {
+              actions.dismiss();
+              (claimAllButton.current ?? cardHeading.current)?.focus();
+            }}
+          />
+        )}
+      </div>
+    ) : null;
+  if (!request.result)
+    return (
+      <>
+        {live}
+        <LoadingRows />
+      </>
+    );
   if (
     !request.result.ok &&
     !cursor &&
@@ -271,6 +319,7 @@ function ProtocolBody({
   )
     return (
       <>
+        {live}
         <RecoveryNotice state={request.recovery} retained={Boolean(request.refreshError)} retry={request.refresh} />
         <div className="empty-state" role="status">
           <strong>Not available yet</strong>
@@ -282,12 +331,13 @@ function ProtocolBody({
   if (!request.result.ok)
     return (
       <>
+        {live}
         <RecoveryNotice state={request.recovery} retained={Boolean(request.refreshError)} retry={request.refresh} />
         <ResourceState error={request.result} retry={request.refresh} />
         {cursor && (
           <div className="paging">
             <span>Start a fresh position page.</span>
-            <button className="button" onClick={() => page(undefined)}>
+            <button className="button" disabled={runGoing} onClick={() => page(undefined)}>
               First page
             </button>
           </div>
@@ -296,10 +346,13 @@ function ProtocolBody({
     );
   if (!view)
     return (
-      <ResourceState
-        error={{ ok: false, kind: "upstream" }}
-        retry={request.refresh}
-      />
+      <>
+        {live}
+        <ResourceState
+          error={{ ok: false, kind: "upstream" }}
+          retry={request.refresh}
+        />
+      </>
     );
   const kind = kindOf(resource);
   // Array.prototype.sort is stable: unvalued rows keep source order, last.
@@ -315,35 +368,30 @@ function ProtocolBody({
     expanded,
     toggle,
   };
-  // Names and decimals for amounts in the action UI, from DMND's rows.
-  const lookup = mintLookup(
-    [
-      ...view.positions.flatMap((p) => (p.action ? [p.action] : [])),
-      ...(actions.run?.targets ?? []),
-    ],
-    labels,
-  );
   const claimable = view.positions.flatMap((p) =>
     actions.row(p)?.claim ? [p.action!] : [],
   );
   const firstPage = request.result.data;
+  // The card holds every row only on an unpaged first page.
+  const allLoaded = !cursor && !view.hasMore;
   const claimAll = () => {
-    if (!view || !isActionResource(resource)) return;
-    // The card holds every row only on an unpaged first page.
-    if (!cursor && !view.hasMore) actions.start("claim", claimable);
+    if (!isActionResource(resource)) return;
+    if (allLoaded) actions.start("claim", claimable);
     else
-      actions.start("claim", async () =>
+      actions.start("claim", async (signal) =>
         (
           await loadAllPages(
             address,
             resource,
             cursor ? null : (firstPage as ResourceData[typeof resource]),
+            signal,
           )
         ).filter(actions.canClaim),
       );
   };
   return (
     <>
+      {live}
       <RecoveryNotice state={request.recovery} retained={Boolean(request.refreshError)} retry={request.refresh} />
       {kind === "liquidity" && actions.active && actions.claimSupported ? (
         <div className="card-summary lp-actions-head">
@@ -352,25 +400,27 @@ function ProtocolBody({
               " · fees to claim on " +
               claimable.length}
           </span>
-          {claimable.length > 0 && (
+          {/* Other pages may hold fees even when this one has none. */}
+          {(claimable.length > 0 || !allLoaded) && (
             <span className="inline lp-actions-buttons">
+              {claimable.length > 0 && (
+                <button
+                  type="button"
+                  className="action-pill"
+                  aria-pressed={actions.selecting}
+                  onClick={() => actions.setSelecting(!actions.selecting)}
+                >
+                  Select
+                </button>
+              )}
               <button
-                type="button"
-                className="action-pill"
-                aria-pressed={actions.selecting}
-                onClick={() => actions.setSelecting(!actions.selecting)}
-              >
-                Select
-              </button>
-              <button
+                ref={claimAllButton}
                 type="button"
                 className="action-pill primary"
                 disabled={actions.busy}
                 onClick={claimAll}
               >
-                {!cursor && !view.hasMore
-                  ? `Claim all fees (${claimable.length})`
-                  : "Claim all fees"}
+                {allLoaded ? `Claim all fees (${claimable.length})` : "Claim all fees"}
               </button>
             </span>
           )}
@@ -439,9 +489,7 @@ function ProtocolBody({
           Show all {sorted.length}
         </button>
       )}
-      {actions.run ? (
-        <RunProgress run={actions.run} actions={actions} lookup={lookup} />
-      ) : (
+      {!actions.run &&
         actions.active &&
         actions.selecting && (
           <SelectionBar
@@ -451,8 +499,7 @@ function ProtocolBody({
             onClear={actions.clear}
             onClaim={() => actions.start("claim", actions.selected)}
           />
-        )
-      )}
+        )}
       <details className="coverage-note">
         <summary>
           <span className="details-label">
@@ -506,12 +553,12 @@ function ProtocolBody({
               </button>
             )}
             {cursor && (
-              <button className="button" onClick={() => page(undefined)}>
+              <button className="button" disabled={runGoing} onClick={() => page(undefined)}>
                 First page
               </button>
             )}
             {view.hasMore && !view.continuationUnavailable && view.cursor && (
-              <button className="button" onClick={() => page(view.cursor!)}>
+              <button className="button" disabled={runGoing} onClick={() => page(view.cursor!)}>
                 Next positions
               </button>
             )}
@@ -526,10 +573,12 @@ function RunProgress({
   run,
   actions,
   lookup,
+  onDone,
 }: {
   run: LpRun;
   actions: LpActions;
   lookup: MintLookup;
+  onDone: () => void;
 }) {
   const names = Object.fromEntries(
     run.targets.map((t) => [t.id, positionName(t, lookup)]),
@@ -556,8 +605,9 @@ function RunProgress({
       error={run.error}
       done={run.phase === "done"}
       stopping={run.stopping}
+      autoFocus={actions.focusRun}
       onStop={actions.stop}
-      onDone={actions.dismiss}
+      onDone={onDone}
     />
   );
 }

@@ -21,6 +21,7 @@ import {
 } from "@/tests/fixtures/synthetic-meteora-damm-v2";
 import { CLMM, CPMM, clmmPage, cpmmPage } from "@/tests/fixtures/synthetic-raydium-positions";
 import { refetchTimes } from "./use-lp-actions";
+import { resetLpRunStore } from "./run-store";
 
 // The lazy action chunk (web3.js and the SDKs) is replaced wholesale.
 const build = vi.hoisted(() => ({
@@ -138,6 +139,7 @@ function heldRun() {
 
 beforeEach(() => window.localStorage.clear());
 afterEach(() => {
+  resetLpRunStore();
   cleanup.splice(0).forEach((fn) => fn());
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -514,5 +516,154 @@ describe("after an action", () => {
     expect(times.slice(0, 6)).toEqual([5_000, 15_000, 35_000, 75_000, 135_000, 195_000]);
     expect(times.at(-1)).toBeLessThanOrEqual(600_000);
     expect(times.at(-1)! + 60_000).toBeGreaterThan(600_000);
+  });
+});
+
+describe("one run per page (fix round R-T11c)", () => {
+  const NO_FEES = { fee_a_claimable_atoms: "0", fee_b_claimable_atoms: "0", rewards: [] };
+  const claimAll = (name = "Claim all fees (2)") => fireEvent.click(screen.getByRole("button", { name }));
+
+  it("collapsing and reopening mid-run keeps the panel and Stop, and blocks a second start", async () => {
+    await ownDamm();
+    buildsGroups();
+    const run = heldRun();
+    claimAll();
+    await waitFor(() => expect(build.runAction).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Meteora DAMM v2" }));
+    expect(screen.queryByRole("region", { name: /Claiming fees/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Expand Meteora DAMM v2" }));
+    // Shown while the reopened card is still loading its rows.
+    expect(screen.getByRole("region", { name: "Claiming fees from 2 positions" })).toBeInTheDocument();
+    const claims = await screen.findAllByRole("button", { name: "Claim" });
+    claims.forEach((button) => expect(button).toBeDisabled());
+    expect(screen.getByRole("button", { name: "Claim all fees (2)" })).toBeDisabled();
+    fireEvent.click(claims[0]);
+    claimAll();
+    expect(build.buildClaimGroups).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Stop after this one" }));
+    expect(run.options().shouldStop()).toBe(true);
+  });
+
+  it("a second card cannot start while one runs", async () => {
+    const clmm = clmmPage();
+    clmm.wallet = DAMM.wallet;
+    serve({ "meteora-damm-v2": dammPage(), "raydium-clmm": clmm });
+    connect(DAMM.wallet);
+    render(
+      <Shell enabled>
+        <HeaderWallet viewed={DAMM.wallet} />
+        {(["meteora-damm-v2", "raydium-clmm"] as const).map((resource) => (
+          <ProtocolSection
+            key={resource}
+            address={DAMM.wallet}
+            resource={resource}
+            mode={{ kind: "live" }}
+            labels={{}}
+            defaultOpen
+          />
+        ))}
+      </Shell>,
+    );
+    const other = within(document.getElementById("protocol-raydium-clmm")!);
+    const otherClaimAll = await other.findByRole("button", { name: "Claim all fees (1)" });
+    await screen.findByRole("button", { name: "Claim all fees (2)" });
+    buildsGroups();
+    heldRun();
+    claimAll();
+    await waitFor(() => expect(build.runAction).toHaveBeenCalledTimes(1));
+    expect(otherClaimAll).toBeDisabled();
+    other.getAllByRole("button", { name: "Claim" }).forEach((b) => expect(b).toBeDisabled());
+    fireEvent.click(otherClaimAll);
+    expect(build.buildClaimGroups).toHaveBeenCalledTimes(1);
+    // Each card shows only its own run.
+    expect(other.queryByRole("region", { name: /Claiming fees/ })).toBeNull();
+  });
+
+  it("paging is locked while the card's run goes", async () => {
+    const first = dammPage();
+    first.has_more = true;
+    first.cursor = "c2";
+    serve({ "meteora-damm-v2": first });
+    mount(DAMM.wallet, "meteora-damm-v2");
+    const next = await screen.findByRole("button", { name: "Next positions" });
+    buildsGroups();
+    const run = heldRun();
+    fireEvent.click(screen.getAllByRole("button", { name: "Claim" })[0]);
+    await waitFor(() => expect(build.runAction).toHaveBeenCalledTimes(1));
+    expect(next).toBeDisabled();
+    run.finish([]);
+    await waitFor(() => expect(next).toBeEnabled());
+  });
+
+  it("with more pages, Claim all fees shows even when this page has nothing to claim", async () => {
+    const first = dammPage();
+    first.data = [dammRow(3, NO_FEES)];
+    first.has_more = true;
+    first.cursor = "c2";
+    serve({ "meteora-damm-v2": first });
+    mount(DAMM.wallet, "meteora-damm-v2");
+    expect(await screen.findByRole("button", { name: "Claim all fees" })).toBeEnabled();
+    expect(screen.getByText("3 positions · fees to claim on 0")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Select" })).toBeNull();
+  });
+
+  it("Stop while pages load abandons them and says nothing was claimed", async () => {
+    const first = dammPage();
+    first.has_more = true;
+    first.cursor = "c2";
+    let signal: AbortSignal | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string, init?: RequestInit) => {
+        if (!new URL(input, "http://doxxd.test").searchParams.has("cursor"))
+          return Response.json({ ok: true, data: first });
+        signal = init?.signal ?? undefined;
+        return new Promise<Response>((_, reject) =>
+          signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError"))),
+        );
+      }),
+    );
+    mount(DAMM.wallet, "meteora-damm-v2");
+    fireEvent.click(await screen.findByRole("button", { name: "Claim all fees" }));
+    const panel = within(await screen.findByRole("region", { name: "Claiming fees from all positions" }));
+    expect(panel.getByText("Loading every position…")).toBeInTheDocument();
+    await waitFor(() => expect(signal).toBeDefined());
+    fireEvent.click(panel.getByRole("button", { name: "Stop after this one" }));
+    expect(signal!.aborted).toBe(true);
+    expect(await panel.findByText("Nothing was claimed")).toBeInTheDocument();
+    expect(panel.getByRole("button", { name: "Done" })).toBeInTheDocument();
+    expect(panel.queryByText("Couldn't load every position · try again")).toBeNull();
+    expect(build.buildClaimGroups).not.toHaveBeenCalled();
+  });
+
+  it("when no position on any page has fees, it says nothing was claimed", async () => {
+    const first = dammPage();
+    first.data = [dammRow(3, NO_FEES)];
+    first.has_more = true;
+    first.cursor = "c2";
+    const second = dammV2Page();
+    second.data = [dammRow(4, NO_FEES)];
+    serve({ "meteora-damm-v2": first, "meteora-damm-v2c2": second });
+    mount(DAMM.wallet, "meteora-damm-v2");
+    fireEvent.click(await screen.findByRole("button", { name: "Claim all fees" }));
+    const panel = within(await screen.findByRole("region", { name: /Claiming fees/ }));
+    expect(await panel.findByText("Nothing was claimed")).toBeInTheDocument();
+    expect(panel.getByRole("button", { name: "Done" })).toBeInTheDocument();
+    expect(build.buildClaimGroups).not.toHaveBeenCalled();
+  });
+
+  it("announces the panel and moves focus to it, then back to Claim all", async () => {
+    await ownDamm();
+    const live = document.querySelector("#protocol-meteora-damm-v2 [aria-live='polite']");
+    expect(live).toBeEmptyDOMElement();
+    buildsGroups();
+    const run = heldRun();
+    claimAll();
+    const heading = await screen.findByText("Claiming fees from 2 positions");
+    expect(live).toContainElement(heading);
+    await waitFor(() => expect(heading).toHaveFocus());
+    run.finish([]);
+    fireEvent.click(await screen.findByRole("button", { name: "Done" }));
+    expect(screen.getByRole("button", { name: "Claim all fees (2)" })).toHaveFocus();
   });
 });
