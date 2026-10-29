@@ -78,7 +78,7 @@ const ZERO = new BN(0);
 
 type Account = AccountInfo<Buffer>;
 type Clock = { slot: BN; epoch: number; unixTimestamp: BN };
-type LiveMint = { address: PublicKey; program: PublicKey; mint: Mint };
+export type LiveMint = { address: PublicKey; program: PublicKey; mint: Mint };
 
 /** A pool's live token mints, and the reward slots that cannot pay out now. */
 type PoolTokens = {
@@ -98,13 +98,13 @@ type Live = {
 
 type Loaded = { ok: true; live: Live } | { ok: false; reason: SkipReason };
 
-const GONE: SkipReason = "Position no longer exists";
-const MISMATCH: SkipReason = "Position data doesn't match the pool · skipped";
+export const GONE: SkipReason = "Position no longer exists";
+export const MISMATCH: SkipReason = "Position data doesn't match the pool · skipped";
 
 // --- Reading ---------------------------------------------------------------
 
 /** Reads `keys` with as few getMultipleAccounts calls as the pass-through allows. */
-async function readAccounts(rpc: ActionRpc, keys: string[]): Promise<Map<string, Account | null>> {
+export async function readAccounts(rpc: ActionRpc, keys: string[]): Promise<Map<string, Account | null>> {
   const unique = [...new Set(keys)];
   const out = new Map<string, Account | null>();
   for (let i = 0; i < unique.length; i += MAX_ACCOUNTS_PER_READ) {
@@ -138,12 +138,12 @@ function currentPoint(pool: PoolState, clock: Clock): BN {
 }
 
 /** True for a base58 string that is a 32-byte public key. */
-function isAddress(value: unknown): value is string {
+export function isAddress(value: unknown): value is string {
   return typeof value === "string" && attempt(() => new PublicKey(value)) !== null;
 }
 
 /** `parse()`, or null when the bytes do not decode. */
-function attempt<T>(parse: () => T): T | null {
+export function attempt<T>(parse: () => T): T | null {
   try {
     return parse();
   } catch {
@@ -447,7 +447,7 @@ export async function buildDammV2ClaimGroups(
 
 // --- Withdraw --------------------------------------------------------------
 
-function checkShare(bps: number, slippageBps: number, min: number) {
+export function checkShare(bps: number, slippageBps: number, min: number) {
   if (!Number.isInteger(bps) || bps < min || bps > BPS) throw new RangeError(`bps must be an integer from ${min} to ${BPS}.`);
   if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps > MAX_SLIPPAGE_BPS)
     throw new RangeError(`slippageBps must be an integer from 0 to ${MAX_SLIPPAGE_BPS}.`);
@@ -456,7 +456,7 @@ function checkShare(bps: number, slippageBps: number, min: number) {
 const toBps = (part: BN, total: BN) => (total.isZero() ? 0 : part.muln(BPS).div(total).toNumber());
 
 /** Size of the wallet's ATA for `mint`: the mint's account extensions, plus ImmutableOwner on Token-2022. */
-function ataSize(mint: LiveMint): number {
+export function ataSize(mint: LiveMint): number {
   if (!mint.program.equals(TOKEN_2022_PROGRAM_ID)) return ACCOUNT_SIZE;
   const extensions = getExtensionTypes(mint.mint.tlvData)
     .map(getAccountTypeOfMintType)

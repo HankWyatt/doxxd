@@ -28,7 +28,7 @@ import {
   type SyntheticChain,
 } from "@/tests/fixtures/actions-chain";
 import { MOCK_BLOCKHASH, mockActionRpc } from "@/tests/fixtures/mock-action-rpc";
-import type { ClmmTarget, DammV2Target } from "../types";
+import type { DammV2Target, FungibleTarget } from "../types";
 import {
   AmountTooSmallError,
   buildClaimGroups,
@@ -366,8 +366,8 @@ describe("buildClaimGroups (Meteora DAMM v2)", () => {
 
   it("does not build other protocols yet", async () => {
     const chain = chainFixture();
-    const clmm = { protocol: "raydium-clmm", id: "c" } as ClmmTarget;
-    await expect(buildClaimGroups(mockActionRpc(chain), chain.owner.publicKey.toBase58(), [clmm])).rejects.toThrow(
+    const cpmm = { protocol: "raydium-cpmm", id: "c" } as FungibleTarget;
+    await expect(buildClaimGroups(mockActionRpc(chain), chain.owner.publicKey.toBase58(), [cpmm])).rejects.toThrow(
       "not implemented",
     );
   });

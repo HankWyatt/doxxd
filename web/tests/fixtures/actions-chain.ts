@@ -33,6 +33,7 @@ import {
   getPdaPersonalPositionAddress,
   getPdaPoolAuthority,
   getPdaPoolId,
+  getPdaPoolRewardVaultId,
   getPdaPoolVaultId,
   getPdaTickArrayAddress,
   liquidityStateV4Layout,
@@ -122,6 +123,17 @@ export const SYNTHETIC = {
     sqrtPriceX64: pow2(64), // tick 0
     feesOwedA: new BN(1_000_000),
     feesOwedB: new BN(2_000_000),
+    // A second pool with tick spacing 1, whose position's tick arrays lie
+    // beyond the default bitmap (±60 × 512 ticks), and three reward slots.
+    wide: {
+      tickSpacing: 1,
+      tickLower: -40_000,
+      tickUpper: 40_000,
+      liquidity: new BN("1000000000000"),
+      feesOwedA: new BN(3_000_000),
+      feesOwedB: new BN(4_000_000),
+      rewardsOwed: [new BN(5_000_000), new BN(6_000_000), new BN(7_000_000)],
+    },
   },
   cpmm: {
     lpSupply: new BN("1000000000000"),
@@ -173,6 +185,18 @@ export type SyntheticChain = {
     tickArrays: string[];
     config: string;
     bitmapExtension: string;
+    // SYNA/wSOL, tick spacing 1, rewards in REWARD, SYNR1 (Token) and SYNR2
+    // (Token-2022); a Token position NFT held in the owner's ATA.
+    wide: {
+      pool: string;
+      position: string;
+      positionMint: string;
+      positionNftAccount: string;
+      tickArrays: string[];
+      bitmapExtension: string;
+      rewardMints: string[];
+      rewardVaults: string[];
+    };
   };
   cpmm: { pool: string; lpMint: string; config: string; authority: string };
   ammV4: { pool: string; lpMint: string; market: string; authority: string; marketAuthority: string };
@@ -350,7 +374,9 @@ export function chainFixture(): SyntheticChain {
   const synb = key(12); // Token, 6 decimals
   const synt = key(13); // Token-2022 with a 1% transfer fee, 6 decimals
   const sync = key(14); // Token, 6 decimals (AMM v4 base)
-  const reward = key(15); // Token, 6 decimals (DAMM v2 reward)
+  const reward = key(15); // Token, 6 decimals (DAMM v2 and CLMM reward)
+  const synr1 = key(17); // Token, 6 decimals (CLMM reward)
+  const synr2 = key(18); // Token-2022 without extensions, 6 decimals (CLMM reward)
   const decimals = new Map<string, number>([
     [String(wsol), 9],
     [String(syna), 9],
@@ -358,11 +384,14 @@ export function chainFixture(): SyntheticChain {
     [String(synt), 6],
     [String(sync), 6],
     [String(reward), 6],
+    [String(synr1), 6],
+    [String(synr2), 6],
   ]);
-  const programOf = (mint: PublicKey) => (mint.equals(synt) ? PROGRAM_IDS.token2022 : PROGRAM_IDS.token);
+  const programOf = (mint: PublicKey) =>
+    mint.equals(synt) || mint.equals(synr2) ? PROGRAM_IDS.token2022 : PROGRAM_IDS.token;
   const supply = new BN("1000000000000000000");
   put(wsol, PROGRAM_IDS.token, mintData({ decimals: 9, supply: new BN(0) }));
-  for (const mint of [syna, synb, sync, reward])
+  for (const mint of [syna, synb, sync, reward, synr1])
     put(mint, PROGRAM_IDS.token, mintData({ decimals: decimals.get(String(mint))!, supply, authority: mintAuthority }));
   put(
     synt,
@@ -374,6 +403,7 @@ export function chainFixture(): SyntheticChain {
       extensions: [transferFeeConfig(SYNTHETIC.transferFeeBps, SYNTHETIC.transferFeeMax, key(72))],
     }),
   );
+  put(synr2, PROGRAM_IDS.token2022, mintData({ decimals: 6, supply, authority: mintAuthority }));
   if (accounts.get(String(synt))!.data.length !== getMintLen([ExtensionType.TransferFeeConfig]))
     throw new Error("Token-2022 mint length drifted");
 
@@ -718,6 +748,131 @@ export function chainFixture(): SyntheticChain {
     tokenAccountData({ mint: clmmNftMint, owner: wallet, amount: new BN(1) }),
   );
 
+  // A second CLMM pool: SYNA/wSOL at tick spacing 1, so a position at
+  // ±40,000 has tick arrays outside the default bitmap and its decreases
+  // carry the bitmap extension; three initialized reward slots.
+  const W = C.wide;
+  const wideConfig = key(46);
+  put(
+    wideConfig,
+    PROGRAM_IDS.clmm,
+    encodeLayout(
+      ClmmConfigLayout,
+      {
+        bump: 255,
+        index: 1,
+        owner: key(65),
+        protocolFeeRate: 120_000,
+        tradeFeeRate: 100,
+        tickSpacing: W.tickSpacing,
+        fundFeeRate: 40_000,
+        fundOwner: key(65),
+      },
+      "AmmConfig",
+    ),
+  );
+  const [wideMintA, wideMintB] = ordered(wsol, syna);
+  const widePoolPda = getPdaPoolId(clmmProgram, wideConfig, wideMintA, wideMintB);
+  const widePool = widePoolPda.publicKey;
+  const wideVaultA = getPdaPoolVaultId(clmmProgram, widePool, wideMintA).publicKey;
+  const wideVaultB = getPdaPoolVaultId(clmmProgram, widePool, wideMintB).publicKey;
+  const wideRewardMints = [reward, synr1, synr2];
+  const wideRewardVaults = wideRewardMints.map((mint) => getPdaPoolRewardVaultId(clmmProgram, widePool, mint).publicKey);
+  // Tick arrays hold 60 ticks × spacing; starts round down.
+  const wideStarts = [W.tickLower, W.tickUpper].map((tick) => Math.floor(tick / (60 * W.tickSpacing)) * 60 * W.tickSpacing);
+  put(
+    widePool,
+    PROGRAM_IDS.clmm,
+    encodeLayout(
+      PoolInfoLayout,
+      {
+        bump: widePoolPda.nonce,
+        configId: wideConfig,
+        creator: key(63),
+        mintA: wideMintA,
+        mintB: wideMintB,
+        vaultA: wideVaultA,
+        vaultB: wideVaultB,
+        observationId: getPdaObservationAccount(clmmProgram, widePool).publicKey,
+        mintDecimalsA: decimals.get(String(wideMintA)),
+        mintDecimalsB: decimals.get(String(wideMintB)),
+        tickSpacing: W.tickSpacing,
+        liquidity: W.liquidity,
+        sqrtPriceX64: C.sqrtPriceX64,
+        tickCurrent: 0,
+        rewardInfos: Object.fromEntries(
+          wideRewardMints.map((mint, i) => [
+            i,
+            {
+              state: 2, // opening
+              openTime: new BN(SYNTHETIC.clock.unixTimestamp - 86_400),
+              endTime: new BN(SYNTHETIC.clock.unixTimestamp + 86_400),
+              lastUpdateTime: new BN(SYNTHETIC.clock.unixTimestamp),
+              mint,
+              vault: wideRewardVaults[i],
+              creator: key(62),
+            },
+          ]),
+        ),
+      },
+      "PoolState",
+    ),
+  );
+  putTokenAccount(wideVaultA, wideMintA, widePool, new BN("2000000000000"));
+  putTokenAccount(wideVaultB, wideMintB, widePool, new BN("2000000000000"));
+  wideRewardMints.forEach((mint, i) => putTokenAccount(wideRewardVaults[i], mint, widePool, new BN("1000000000")));
+  const wideBitmapExtension = getPdaExBitmapAccount(clmmProgram, widePool).publicKey;
+  put(
+    wideBitmapExtension,
+    PROGRAM_IDS.clmm,
+    encodeLayout(TickArrayBitmapExtensionLayout, { poolId: widePool }, "TickArrayBitmapExtension"),
+  );
+  const wideTickArrays = wideStarts.map((start, i) => {
+    const address = getPdaTickArrayAddress(clmmProgram, widePool, start).publicKey;
+    const tick = i === 0 ? W.tickLower : W.tickUpper;
+    const net = i === 0 ? W.liquidity : W.liquidity.neg();
+    put(
+      address,
+      PROGRAM_IDS.clmm,
+      encodeLayout(
+        TickArrayLayout,
+        {
+          poolId: widePool,
+          startTickIndex: start,
+          ticks: { [(tick - start) / W.tickSpacing]: { tick, liquidityNet: net, liquidityGross: W.liquidity } },
+          initializedTickCount: 1,
+        },
+        "TickArrayState",
+      ),
+    );
+    return String(address);
+  });
+  // A Token (not Token-2022) position NFT in the owner's ATA.
+  const wideNftMint = key(32);
+  const widePositionPda = getPdaPersonalPositionAddress(clmmProgram, wideNftMint);
+  put(
+    widePositionPda.publicKey,
+    PROGRAM_IDS.clmm,
+    encodeLayout(
+      PersonalPositionLayout,
+      {
+        bump: widePositionPda.nonce,
+        nftMint: wideNftMint,
+        poolId: widePool,
+        tickLower: W.tickLower,
+        tickUpper: W.tickUpper,
+        liquidity: W.liquidity,
+        tokenFeesOwedA: W.feesOwedA,
+        tokenFeesOwedB: W.feesOwedB,
+        rewardInfos: Object.fromEntries(W.rewardsOwed.map((owed, i) => [i, { rewardAmountOwed: owed }])),
+      },
+      "PersonalPositionState",
+    ),
+  );
+  put(wideNftMint, PROGRAM_IDS.token, mintData({ decimals: 0, supply: new BN(1) }));
+  const wideNftAccount = getAssociatedTokenAddressSync(wideNftMint, wallet, false, token);
+  put(wideNftAccount, PROGRAM_IDS.token, tokenAccountData({ mint: wideNftMint, owner: wallet, amount: new BN(1) }));
+
   // --- Raydium CPMM --------------------------------------------------------
   const P = SYNTHETIC.cpmm;
   const cpmmProgram = new PublicKey(PROGRAM_IDS.cpmm);
@@ -906,6 +1061,16 @@ export function chainFixture(): SyntheticChain {
       tickArrays,
       config: String(clmmConfig),
       bitmapExtension: String(bitmapExtension),
+      wide: {
+        pool: String(widePool),
+        position: String(widePositionPda.publicKey),
+        positionMint: String(wideNftMint),
+        positionNftAccount: String(wideNftAccount),
+        tickArrays: wideTickArrays,
+        bitmapExtension: String(wideBitmapExtension),
+        rewardMints: wideRewardMints.map(String),
+        rewardVaults: wideRewardVaults.map(String),
+      },
     },
     cpmm: {
       pool: String(cpmmKeys.poolId),

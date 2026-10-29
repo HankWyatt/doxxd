@@ -1,7 +1,7 @@
 import "./buffer-polyfill";
 import type { InstructionGroup } from "../pack";
 import type { ActionRpc } from "../rpc";
-import type { ActionTarget, DammV2Target } from "../types";
+import type { ActionTarget, ClmmTarget, DammV2Target } from "../types";
 import type { Expectation } from "../verify";
 import {
   buildDammV2ClaimGroups,
@@ -10,6 +10,7 @@ import {
   type ClaimBuild,
 } from "./meteora-damm-v2";
 import type { WithdrawQuote } from "./quote";
+import { buildClmmClaimGroups, buildClmmWithdrawGroups, quoteClmmWithdraw } from "./raydium-clmm";
 
 export { createActionRpc, isRpcBusy, RpcBusyError } from "../rpc";
 export type { ActionRpc, SimulatedAccount } from "../rpc";
@@ -27,6 +28,32 @@ function notImplemented(): never {
 }
 
 const isDammV2 = (t: ActionTarget): t is DammV2Target => t.protocol === "meteora-damm-v2";
+const isClmm = (t: ActionTarget): t is ClmmTarget => t.protocol === "raydium-clmm";
+
+/**
+ * One claim build from per-protocol builds: groups and skips in the order of
+ * `targets`, the expected mints without repeats, every built position.
+ */
+function mergeClaims(owner: string, targets: ActionTarget[], builds: ClaimBuild[]): ClaimBuild {
+  const order = new Map<string, number>();
+  targets.forEach((t, i) => {
+    if (!order.has(t.id)) order.set(t.id, i);
+  });
+  const at = (id: string) => order.get(id) ?? targets.length;
+  const mints = new Map<string, string>();
+  for (const { mint, tokenProgram } of builds.flatMap((b) => b.expectation.mints))
+    if (!mints.has(mint)) mints.set(mint, tokenProgram);
+  return {
+    groups: builds.flatMap((b) => b.groups).sort((a, b) => at(a.positionIds[0]) - at(b.positionIds[0])),
+    skipped: builds.flatMap((b) => b.skipped).sort((a, b) => at(a.positionId) - at(b.positionId)),
+    expectation: {
+      kind: "claim",
+      owner,
+      mints: [...mints].map(([mint, tokenProgram]) => ({ mint, tokenProgram })),
+      positions: builds.flatMap((b) => b.expectation.positions),
+    },
+  };
+}
 
 /**
  * Claim groups for `targets`, built per protocol from live chain state, with
@@ -41,9 +68,14 @@ export async function buildClaimGroups(
   skipped: ClaimBuild["skipped"];
   expectation: Expectation;
 }> {
-  // Raydium (Tasks 9 and 10) is not built yet.
-  if (!targets.every(isDammV2)) notImplemented();
-  return buildDammV2ClaimGroups(rpc, owner, targets);
+  // Raydium CPMM and AMM v4 (Task 10) are not built yet.
+  if (!targets.every((t) => isDammV2(t) || isClmm(t))) notImplemented();
+  const damm = targets.filter(isDammV2);
+  const clmm = targets.filter(isClmm);
+  const builds: ClaimBuild[] = [];
+  if (damm.length) builds.push(await buildDammV2ClaimGroups(rpc, owner, damm));
+  if (clmm.length) builds.push(await buildClmmClaimGroups(rpc, owner, clmm));
+  return mergeClaims(owner, targets, builds);
 }
 
 /** A live quote for withdrawing `bps` of `target`'s withdrawable liquidity. */
@@ -55,6 +87,7 @@ export async function quoteWithdraw(
   slippageBps: number,
 ): Promise<WithdrawQuote> {
   if (isDammV2(target)) return quoteDammV2Withdraw(rpc, owner, target, bps, slippageBps);
+  if (isClmm(target)) return quoteClmmWithdraw(rpc, owner, target, bps, slippageBps);
   return notImplemented();
 }
 
@@ -67,5 +100,6 @@ export async function buildWithdrawGroups(
   slippageBps: number,
 ): Promise<{ groups: InstructionGroup[]; expectation: Expectation }> {
   if (isDammV2(target)) return buildDammV2WithdrawGroups(rpc, owner, target, bps, slippageBps);
+  if (isClmm(target)) return buildClmmWithdrawGroups(rpc, owner, target, bps, slippageBps);
   return notImplemented();
 }
