@@ -82,6 +82,9 @@ const MAX_WATCHED = 16;
 const POLL_INTERVAL_MS = 1_500;
 const POLL_TIMEOUT_MS = 90_000;
 const SEND_RETRY_DELAYS_MS = [500, 1_000, 2_000];
+// A blockhash with this few blocks of validity left is not shown to the
+// wallet: signing alone can take longer.
+const EXPIRY_MARGIN_BLOCKS = 10;
 // SPL Token account layout: amount is a u64 at offset 64 of a 165-byte base.
 const TOKEN_ACCOUNT_SIZE = 165;
 const TOKEN_AMOUNT_OFFSET = 64;
@@ -395,6 +398,59 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
     }
   };
 
+  // Fetches a blockhash and a priority fee for these steps, then packs,
+  // checks and simulates each. Null when the reads fail (the steps are
+  // failed); otherwise the messages ready for the wallet.
+  type Ready = { step: number; message: VersionedMessage; bytes: Uint8Array };
+  const prepareChunk = async (
+    entries: { step: number; part: InstructionGroup[] }[],
+  ): Promise<{ ready: Ready[]; lastValidBlockHeight: number } | null> => {
+    let blockhash: string;
+    let lastValidBlockHeight: number;
+    let cuPrice: number;
+    try {
+      const [latest, fees] = await Promise.all([
+        rpc.latestBlockhash(),
+        rpc.priorityFees(writableAccounts(entries.flatMap(({ part }) => part))),
+      ]);
+      ({ blockhash, lastValidBlockHeight } = latest);
+      cuPrice = computeUnitPrice(fees);
+    } catch (error) {
+      for (const { step } of entries) set(step, { status: "failed", reason: plainReason(error) });
+      return null;
+    }
+    const ready: Ready[] = [];
+    for (const { step, part } of entries) {
+      let packed: ReturnType<typeof packGroups>;
+      try {
+        packed = packGroups(part, new PublicKey(wallet.address), blockhash, cuPrice);
+      } catch {
+        packed = [];
+      }
+      if (packed.length !== 1) {
+        set(step, { status: "failed", reason: REASONS.tooLarge });
+        continue;
+      }
+      const result = await prepare(packed[0].message);
+      if (result.ok) {
+        set(step, { expected: result.expected });
+        ready.push({ step, message: result.message, bytes: result.bytes });
+      } else set(step, { status: result.status, reason: result.reason });
+    }
+    return { ready, lastValidBlockHeight };
+  };
+
+  // True when the blockhash has at most EXPIRY_MARGIN_BLOCKS blocks of
+  // validity left. An unreadable height counts as not expired: the checks
+  // after the prompt and on send still apply.
+  const nearlyExpired = async (lastValidBlockHeight: number): Promise<boolean> => {
+    try {
+      return lastValidBlockHeight - (await rpc.blockHeight()) <= EXPIRY_MARGIN_BLOCKS;
+    } catch {
+      return false;
+    }
+  };
+
   // Ruling R-T7d: each prompt of up to 10 transactions is prepared just
   // before it opens, with its own blockhash and priority fee, so nothing the
   // wallet is shown has waited behind an earlier prompt.
@@ -410,39 +466,8 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
     }
 
     // 1-3. Blockhash and fee for this prompt, then pack, check, simulate.
-    let blockhash: string;
-    let lastValidBlockHeight: number;
-    let cuPrice: number;
-    try {
-      const [latest, fees] = await Promise.all([
-        rpc.latestBlockhash(),
-        rpc.priorityFees(writableAccounts(chunk.flatMap(({ part }) => part))),
-      ]);
-      ({ blockhash, lastValidBlockHeight } = latest);
-      cuPrice = computeUnitPrice(fees);
-    } catch (error) {
-      for (const { step } of chunk) set(step, { status: "failed", reason: plainReason(error) });
-      continue;
-    }
-    const ready: { step: number; message: VersionedMessage; bytes: Uint8Array }[] = [];
-    for (const { step, part } of chunk) {
-      let packed: ReturnType<typeof packGroups>;
-      try {
-        packed = packGroups(part, new PublicKey(wallet.address), blockhash, cuPrice);
-      } catch {
-        packed = [];
-      }
-      if (packed.length !== 1) {
-        set(step, { status: "failed", reason: REASONS.tooLarge });
-        continue;
-      }
-      const prepared = await prepare(packed[0].message);
-      if (prepared.ok) {
-        set(step, { expected: prepared.expected });
-        ready.push({ step, message: prepared.message, bytes: prepared.bytes });
-      } else set(step, { status: prepared.status, reason: prepared.reason });
-    }
-    if (ready.length === 0) continue;
+    let prepared = await prepareChunk(chunk);
+    if (!prepared || prepared.ready.length === 0) continue;
 
     // 4. One wallet prompt for the chunk, checked for a stop right before.
     if (shouldStop()) {
@@ -453,6 +478,27 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
       stopRemaining(REASONS.walletChanged);
       break;
     }
+    // Preparation reads the RPC several times per message. If that outlived
+    // (or nearly outlived) the blockhash, prepare once more with a fresh one;
+    // the wallet is never shown messages that can no longer land.
+    if (await nearlyExpired(prepared.lastValidBlockHeight)) {
+      const stillReady = new Set(prepared.ready.map(({ step }) => step));
+      prepared = await prepareChunk(chunk.filter(({ step }) => stillReady.has(step)));
+      if (!prepared || prepared.ready.length === 0) continue;
+      if (shouldStop()) {
+        stopRemaining();
+        break;
+      }
+      if (walletChanged()) {
+        stopRemaining(REASONS.walletChanged);
+        break;
+      }
+      if (await nearlyExpired(prepared.lastValidBlockHeight)) {
+        for (const { step } of prepared.ready) set(step, { status: "failed", reason: REASONS.expired });
+        continue;
+      }
+    }
+    const { ready, lastValidBlockHeight } = prepared;
     for (const { step } of ready) set(step, { status: "awaiting-approval" });
 
     let signed: Uint8Array[];

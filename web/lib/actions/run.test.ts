@@ -157,6 +157,9 @@ const statuses = (steps: ActionStep[]) => steps.map((s) => s.status);
 const signatureOf = (raw: Uint8Array) => bs58.encode(VersionedTransaction.deserialize(raw).signatures[0]);
 const blockhashOf = (raw: Uint8Array) => VersionedTransaction.deserialize(raw).message.recentBlockhash;
 const { lastValidBlockHeight: LAST_VALID, blockHeight: HEIGHT } = SYNTHETIC.clock;
+// Block-height reads before a chunk's first send: one just before the wallet
+// prompt opens, one after it returns.
+const READS_BEFORE_SEND = 2;
 const expiredRefusal = () =>
   new SendTransactionError({ action: "send", signature: "", transactionMessage: "Transaction simulation failed: Blockhash not found" });
 
@@ -284,7 +287,7 @@ describe("runAction", () => {
         ...claimed(ctx),
         statuses: async (sigs) => sigs.map(() => null),
         // Still valid when the prompt returns; expired while confirming.
-        blockHeight: async () => (heights++ === 0 ? HEIGHT : LAST_VALID + 1),
+        blockHeight: async () => (heights++ < READS_BEFORE_SEND ? HEIGHT : LAST_VALID + 1),
       },
     });
     expect(statuses(steps)).toEqual(["failed", "failed"]);
@@ -573,8 +576,8 @@ describe("runAction", () => {
       groups: groups(ctx, 1),
       rpc: {
         ...claimed(ctx),
-        // Valid when the prompt returns, expired by the time the send is refused.
-        blockHeight: async () => (heights++ === 0 ? HEIGHT : LAST_VALID + 1),
+        // Valid until the prompt returns, expired by the time the send is refused.
+        blockHeight: async () => (heights++ < READS_BEFORE_SEND ? HEIGHT : LAST_VALID + 1),
         send: async () => {
           throw new SendTransactionError({ action: "send", signature: "", transactionMessage: "Transaction simulation failed" });
         },
@@ -636,6 +639,73 @@ describe("runAction", () => {
     expect(statuses(steps.slice(10))).toEqual(["confirmed", "confirmed"]);
   });
 
+  it("re-prepares a prompt whose blockhash died during preparation, never showing the stale messages", async () => {
+    const ctx = setup();
+    let height = HEIGHT;
+    let reads = 0;
+    const hashOf = (n: number) => bs58.encode(new Uint8Array(32).fill(40 + n));
+    const base = mockActionRpc(ctx.chain, claimed(ctx));
+    const { steps, wallet } = await run(ctx, {
+      groups: groups(ctx, 2),
+      rpc: {
+        ...claimed(ctx),
+        blockHeight: async () => height,
+        latestBlockhash: async () => ({ blockhash: hashOf(++reads), lastValidBlockHeight: height + 150 }),
+        // A slow RPC: the first preparation outlives its blockhash.
+        simulate: async (tx, watch) => {
+          if (reads === 1) height += 100;
+          return base.simulate(tx, watch);
+        },
+      },
+    });
+    expect(reads).toBe(2);
+    expect(wallet.calls.map((c) => c.length)).toEqual([2]);
+    expect(wallet.calls[0].map(blockhashOf)).toEqual([hashOf(2), hashOf(2)]);
+    expect(statuses(steps)).toEqual(["confirmed", "confirmed"]);
+  });
+
+  it("does not prompt at all when the blockhash dies during preparation twice", async () => {
+    const ctx = setup();
+    let height = HEIGHT;
+    const base = mockActionRpc(ctx.chain, claimed(ctx));
+    const { steps, wallet, rpc } = await run(ctx, {
+      groups: groups(ctx, 2),
+      rpc: {
+        ...claimed(ctx),
+        blockHeight: async () => height,
+        latestBlockhash: async () => ({ blockhash: bs58.encode(new Uint8Array(32).fill(height % 200)), lastValidBlockHeight: height + 150 }),
+        simulate: async (tx, watch) => {
+          height += 100;
+          return base.simulate(tx, watch);
+        },
+      },
+    });
+    expect(wallet.calls).toHaveLength(0);
+    expect(rpc.sent).toHaveLength(0);
+    expect(steps.map((s) => [s.status, s.reason])).toEqual([
+      ["failed", "Didn't land · nothing changed"],
+      ["failed", "Didn't land · nothing changed"],
+    ]);
+  });
+
+  it("treats a blockhash within 10 blocks of its end as dead before prompting", async () => {
+    const ctx = setup();
+    let reads = 0;
+    const { wallet } = await run(ctx, {
+      groups: groups(ctx, 1),
+      rpc: {
+        ...claimed(ctx),
+        // The first blockhash has 10 blocks left; the second has 150.
+        latestBlockhash: async () => ({
+          blockhash: bs58.encode(new Uint8Array(32).fill(50 + ++reads)),
+          lastValidBlockHeight: HEIGHT + (reads === 1 ? 10 : 150),
+        }),
+      },
+    });
+    expect(reads).toBe(2);
+    expect(wallet.calls[0].map(blockhashOf)).toEqual([bs58.encode(new Uint8Array(32).fill(52))]);
+  });
+
   it("waits one more round after expiry before saying it didn't land (R-T7e)", async () => {
     const ctx = setup();
     let heights = 0;
@@ -644,7 +714,7 @@ describe("runAction", () => {
       groups: groups(ctx, 1),
       rpc: {
         ...claimed(ctx),
-        blockHeight: async () => (heights++ === 0 ? HEIGHT : LAST_VALID + 1),
+        blockHeight: async () => (heights++ < READS_BEFORE_SEND ? HEIGHT : LAST_VALID + 1),
         // A lagging node misses the status once; the next round finds it.
         statuses: async (sigs) =>
           rounds++ === 0 ? sigs.map(() => null) : sigs.map(() => ({ slot: 1_001, confirmationStatus: "confirmed", err: null })),
@@ -661,7 +731,7 @@ describe("runAction", () => {
       groups: groups(ctx, 1),
       rpc: {
         ...claimed(ctx),
-        blockHeight: async () => (heights++ === 0 ? HEIGHT : LAST_VALID + 1),
+        blockHeight: async () => (heights++ < READS_BEFORE_SEND ? HEIGHT : LAST_VALID + 1),
         statuses: async (sigs) => (rounds++, sigs.map(() => null)),
       },
     });
