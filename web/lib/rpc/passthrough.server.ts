@@ -9,7 +9,7 @@
 // the client's id back, put in after the secret scan, so a client cannot
 // probe the scan with ids the upstream echoes.
 import { checkRpcRequest, type JsonRpcRequest } from "./policy";
-import { rateLimitKey, type RateLimiter } from "./rate-limit";
+import { LIMITER_REFUSAL, rateLimitKey, type RateLimiter } from "./rate-limit";
 
 export type RpcEnv = {
   enabled: boolean;
@@ -223,7 +223,7 @@ export async function handleRpc(request: Request, env: RpcEnv): Promise<Response
   const key = rateLimitKey(request.headers.get("cf-connecting-ip"));
   const limit = env.limiter.take(key, checked.method, Date.now());
   if (!limit.ok)
-    return rpcError(429, -32005, "Rate limited", checked.request.id, {
+    return rpcError(429, -32005, LIMITER_REFUSAL, checked.request.id, {
       "retry-after": String(limit.retryAfterSec),
     });
   return forward(checked.request, env);

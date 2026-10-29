@@ -11,7 +11,13 @@
 // - after a busy or failed send only the same signed bytes are re-sent;
 //   nothing is ever rebuilt or re-signed for positions that may have landed;
 // - "Didn't land · nothing changed" is reported only once the blockhash has
-//   expired with no status for the signature;
+//   expired with no status for the signature: on two rounds whose status
+//   answers came from a node at or past the slot where the expired height
+//   was read, and then in a final lookup through the transaction history;
+// - a send that /api/rpc's own limiter refused never left Doxxd: the same
+//   signed bytes go again after its Retry-After (at most 10 s, 3 times);
+// - simulated amounts are gross: the wallet's SOL change has this
+//   transaction's own fee added back;
 // - the run stops before any signing prompt or send when the visitor asks, or
 //   when the wallet's account is no longer the one the run started with.
 //
@@ -28,8 +34,15 @@ import {
 import bs58 from "bs58";
 import { GroupTooLargeError, packGroups, partitionGroups, withComputeUnitLimit, type InstructionGroup } from "./pack";
 import { recordPending } from "./pending";
-import { MAX_COMPUTE_UNIT_LIMIT, WSOL_MINT, type ActionKind } from "./programs";
-import { isRpcBusy, type ActionRpc, type SimulatedAccount } from "./rpc";
+import {
+  COMPUTE_BUDGET_PROGRAM,
+  MAX_COMPUTE_UNIT_LIMIT,
+  SET_COMPUTE_UNIT_LIMIT,
+  SET_COMPUTE_UNIT_PRICE,
+  WSOL_MINT,
+  type ActionKind,
+} from "./programs";
+import { isRpcBusy, notForwardedRetryMs, type ActionRpc, type SimulatedAccount } from "./rpc";
 import { verifyMessage, type Expectation } from "./verify";
 import type { ConnectedWallet } from "./wallet-session";
 
@@ -82,6 +95,11 @@ const MAX_WATCHED = 16;
 const POLL_INTERVAL_MS = 1_500;
 const POLL_TIMEOUT_MS = 90_000;
 const SEND_RETRY_DELAYS_MS = [500, 1_000, 2_000];
+// Re-sends after /api/rpc's own limiter refused a send (nothing forwarded).
+const LIMITER_RETRIES = 3;
+const LIMITER_MAX_WAIT_MS = 10_000;
+// Solana's base fee per signature.
+const LAMPORTS_PER_SIGNATURE = BigInt(5_000);
 // A blockhash with this few blocks of validity left is not shown to the
 // wallet: signing alone can take longer.
 const EXPIRY_MARGIN_BLOCKS = 10;
@@ -182,7 +200,30 @@ function tokenAmount(account: Balance, program: string): bigint {
 }
 const lamportsOf = (account: Balance) => BigInt(account?.lamports ?? 0);
 
-function deltas(watch: Watch, pre: Balance[], post: Balance[]): { mint: string; atoms: string }[] {
+/**
+ * The fee the payer pays for `message`: 5,000 lamports per required
+ * signature, plus compute-unit price × compute-unit limit / 1,000,000,
+ * rounded up (no SetComputeUnitPrice: no priority fee).
+ */
+export function transactionFee(message: VersionedMessage): bigint {
+  const keys = message.staticAccountKeys;
+  let units = BigInt(0);
+  let price = BigInt(0);
+  for (const ix of message.compiledInstructions) {
+    if (keys[ix.programIdIndex]?.toBase58() !== COMPUTE_BUDGET_PROGRAM) continue;
+    const data = Buffer.from(ix.data);
+    if (data[0] === SET_COMPUTE_UNIT_LIMIT && data.length === 5) units = BigInt(data.readUInt32LE(1));
+    if (data[0] === SET_COMPUTE_UNIT_PRICE && data.length === 9) price = data.readBigUInt64LE(1);
+  }
+  const million = BigInt(1_000_000);
+  const priority = (price * units + million - BigInt(1)) / million;
+  return LAMPORTS_PER_SIGNATURE * BigInt(message.header.numRequiredSignatures) + priority;
+}
+
+// Gross deltas: `fee` (what the payer, the owner, pays for this transaction)
+// is added back to the SOL change, so the amounts show what the action pays
+// out, and a small SOL claim is not read as nothing.
+function deltas(watch: Watch, pre: Balance[], post: Balance[], fee: bigint): { mint: string; atoms: string }[] {
   const out: { mint: string; atoms: string }[] = [];
   for (const { mint, program, index } of watch.tokens) {
     const delta = tokenAmount(post[index], program) - tokenAmount(pre[index], program);
@@ -192,7 +233,7 @@ function deltas(watch: Watch, pre: Balance[], post: Balance[]): { mint: string; 
   // closed in the same transaction, it is absent before and after).
   const sol = (balances: Balance[]) =>
     lamportsOf(balances[0]) + (watch.wsolIndex === null ? BigInt(0) : lamportsOf(balances[watch.wsolIndex]));
-  const solDelta = sol(post) - sol(pre);
+  const solDelta = sol(post) - sol(pre) + fee;
   if (solDelta > BigInt(0)) out.push({ mint: WSOL_MINT, atoms: solDelta.toString() });
   return out;
 }
@@ -309,7 +350,7 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
       );
       const second = await rpc.simulate(new VersionedTransaction(final), watch.addresses);
       if (second.err) return fail(REASONS.simulationFailed);
-      const expected = deltas(watch, before.map(preBalance), second.accounts.map(postBalance));
+      const expected = deltas(watch, before.map(preBalance), second.accounts.map(postBalance), transactionFee(final));
       if (expectation.kind === "claim" && expected.length === 0)
         return { ok: false, status: "skipped", reason: REASONS.nothingToClaim };
       return { ok: true, message: final, bytes: new VersionedTransaction(final).serialize(), expected };
@@ -327,16 +368,29 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
   };
 
   // Sends `raw` until the RPC accepts it, re-sending only these bytes after a
-  // busy error. "rejected" and "expired" mean it certainly never left;
-  // "unknown" means it may have reached the network.
-  const send = async (raw: Uint8Array, lastValidBlockHeight: number): Promise<"sent" | "unknown" | "rejected" | "expired"> => {
+  // busy error. "rejected", "expired" and "busy" mean it certainly never
+  // left; "unknown" means it may have reached the network.
+  const send = async (
+    raw: Uint8Array,
+    lastValidBlockHeight: number,
+  ): Promise<"sent" | "unknown" | "rejected" | "expired" | "busy"> => {
     let mayHaveReached = false;
-    for (let attempt = 0; ; attempt++) {
+    let limiterRetries = 0;
+    for (let attempt = 0; ; ) {
       try {
         await rpc.send(raw);
         return "sent";
       } catch (error) {
         if (alreadyProcessed(error)) return "sent";
+        // Refused by /api/rpc's own limiter: nothing was forwarded, so the
+        // same bytes simply go again once it allows.
+        const wait = notForwardedRetryMs(error);
+        if (wait !== null) {
+          if (limiterRetries >= LIMITER_RETRIES) return mayHaveReached ? "unknown" : "busy";
+          limiterRetries++;
+          await sleep(Math.min(wait, LIMITER_MAX_WAIT_MS));
+          continue;
+        }
         if (!isRpcBusy(error)) {
           if (!refused(error) || mayHaveReached) return "unknown";
           // Preflight refuses an expired blockhash; so is any refusal once
@@ -347,6 +401,7 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
         mayHaveReached = true;
         if (attempt >= SEND_RETRY_DELAYS_MS.length) return "unknown";
         await sleep(SEND_RETRY_DELAYS_MS[attempt]);
+        attempt++;
       }
     }
   };
@@ -360,18 +415,55 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
   };
 
   // Polls until each signature is confirmed or failed, the blockhash has
-  // expired without it, or 90 s pass. Expiry needs no status on two rounds
-  // after the height first passes the last valid height, in case one answer
-  // came from a node that lags.
+  // expired without it, or 90 s pass. Expiry (ruling S-R003) needs:
+  // - the block height past the last valid height, read together with its
+  //   slot (getEpochInfo);
+  // - no status on two rounds whose answer came from a node at or past that
+  //   slot (a lagging status node proves nothing);
+  // - then no status in one final lookup through the transaction history.
   const confirm = async (inFlight: Map<string, number>, lastValidBlockHeight: number) => {
     const start = now();
     const missingAfterExpiry = new Set<string>();
+    type Status = Awaited<ReturnType<ActionRpc["statuses"]>>["value"][number];
+    // Applies a status; true when it settled the signature.
+    const settle = (signature: string, status: Status): boolean => {
+      const step = inFlight.get(signature)!;
+      if (status?.err) {
+        set(step, { status: "failed", reason: REASONS.failedOnChain, slot: status.slot });
+      } else if (status && (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized")) {
+        confirmed(step, signature, status.slot);
+      } else return false;
+      inFlight.delete(signature);
+      return true;
+    };
+    // The final history lookup for signatures that look expired: only a
+    // reply from a node at or past `slot` with no status means it can no
+    // longer land.
+    const expireUnlessFound = async (signatures: string[], slot: number) => {
+      let history: Awaited<ReturnType<ActionRpc["statuses"]>> | null = null;
+      try {
+        history = await rpc.statuses(signatures, { searchTransactionHistory: true });
+      } catch {
+        return; // Unknown: keep polling.
+      }
+      if (history.contextSlot < slot) return;
+      signatures.forEach((signature, k) => {
+        const status = history.value[k] ?? null;
+        if (settle(signature, status)) return;
+        if (status) {
+          missingAfterExpiry.delete(signature);
+          return;
+        }
+        set(inFlight.get(signature)!, { status: "failed", reason: REASONS.expired });
+        inFlight.delete(signature);
+      });
+    };
     while (inFlight.size > 0) {
       // Height first: a signature with no status at a height past the
       // blockhash's last valid height can no longer land.
-      let height: number | null = null;
+      let tip: { blockHeight: number; slot: number } | null = null;
       try {
-        height = await rpc.blockHeight();
+        tip = await rpc.chainTip();
       } catch {
         // Unknown this round.
       }
@@ -383,24 +475,19 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
         // Unknown this round.
       }
       if (found) {
+        const expired =
+          tip !== null && tip.blockHeight > lastValidBlockHeight && found.contextSlot >= tip.slot;
+        const lookUp: string[] = [];
         signatures.forEach((signature, k) => {
-          const step = inFlight.get(signature)!;
-          const status = found[k];
-          if (status?.err) {
-            set(step, { status: "failed", reason: REASONS.failedOnChain, slot: status.slot });
-            inFlight.delete(signature);
-          } else if (status && (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized")) {
-            confirmed(step, signature, status.slot);
-            inFlight.delete(signature);
-          } else if (status) {
-            missingAfterExpiry.delete(signature);
-          } else if (height !== null && height > lastValidBlockHeight) {
-            if (missingAfterExpiry.has(signature)) {
-              set(step, { status: "failed", reason: REASONS.expired });
-              inFlight.delete(signature);
-            } else missingAfterExpiry.add(signature);
+          const status = found.value[k] ?? null;
+          if (settle(signature, status)) return;
+          if (status) missingAfterExpiry.delete(signature);
+          else if (expired) {
+            if (missingAfterExpiry.has(signature)) lookUp.push(signature);
+            else missingAfterExpiry.add(signature);
           }
         });
+        if (lookUp.length > 0) await expireUnlessFound(lookUp, tip!.slot);
       }
       if (inFlight.size === 0) break;
       if (now() - start >= POLL_TIMEOUT_MS) {
@@ -555,6 +642,7 @@ export async function runAction(options: RunOptions): Promise<ActionStep[]> {
       const outcome = await send(raw, lastValidBlockHeight);
       if (outcome === "rejected") set(step, { status: "failed", reason: REASONS.rejected });
       else if (outcome === "expired") set(step, { status: "failed", reason: REASONS.expired });
+      else if (outcome === "busy") set(step, { status: "failed", reason: REASONS.busy });
       else inFlight.set(signature, step);
     }
     await confirm(inFlight, lastValidBlockHeight);

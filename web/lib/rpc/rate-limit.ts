@@ -5,6 +5,14 @@ import type { RpcMethod } from "./policy";
 
 export type RateLimitResult = { ok: true } | { ok: false; retryAfterSec: number };
 
+/**
+ * The JSON-RPC error message of /api/rpc's own 429 (this limiter), as
+ * opposed to the upstream's ("Upstream RPC rate limited"). The browser's RPC
+ * client (lib/actions/rpc.ts) reads it: a request refused here was never
+ * forwarded, so a send can safely go again.
+ */
+export const LIMITER_REFUSAL = "Rate limited";
+
 export type RateLimiter = {
   take(key: string, method: RpcMethod, now: number): RateLimitResult;
   /** Number of keys currently tracked. */

@@ -17,12 +17,19 @@ import BN from "bn.js";
 import bs58 from "bs58";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { chainFixture, SYNTHETIC, tokenAccountData, type ChainAccount, type SyntheticChain } from "@/tests/fixtures/actions-chain";
-import { mockActionRpc, postStatesFrom, type MockActionRpcOverrides } from "@/tests/fixtures/mock-action-rpc";
+import {
+  MOCK_PRIORITY_FEES,
+  MOCK_UNITS_CONSUMED,
+  mockActionRpc,
+  mockTransactionFee,
+  postStatesFrom,
+  type MockActionRpcOverrides,
+} from "@/tests/fixtures/mock-action-rpc";
 import type { InstructionGroup } from "./pack";
 import { recordPending } from "./pending";
 import { ALLOWED_INSTRUCTIONS, CLMM_PROGRAM, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, WSOL_MINT } from "./programs";
 import { RpcBusyError } from "./rpc";
-import { runAction, type ActionStep, type RunOptions } from "./run";
+import { computeUnitPrice, runAction, type ActionStep, type RunOptions } from "./run";
 import type { Expectation } from "./verify";
 import type { ConnectedWallet } from "./wallet-session";
 
@@ -150,13 +157,33 @@ function fakeWallet(ctx: Ctx, sign?: (tx: VersionedTransaction) => VersionedTran
   };
 }
 
-// A clock whose sleeps pass instantly and move time forward.
+// A clock whose sleeps pass instantly, move time forward and are recorded.
 function fakeClock() {
   let t = 1_800_000_000_000;
-  return { now: () => t, sleep: async (ms: number) => void (t += ms) };
+  const sleeps: number[] = [];
+  return { now: () => t, sleep: async (ms: number) => void (sleeps.push(ms), (t += ms)), sleeps };
 }
 
-type Run = { steps: ActionStep[]; updates: ActionStep[][]; wallet: FakeWallet; rpc: ReturnType<typeof mockActionRpc> };
+type Status = { slot: number; confirmationStatus: string | null; err: unknown } | null;
+// A statuses() answer from a node at `contextSlot` (default: the synthetic slot).
+const answered =
+  (status: (signature: string) => Status, contextSlot: number = SYNTHETIC.clock.slot) =>
+  async (sigs: string[]) => ({ contextSlot, value: sigs.map(status) });
+const noStatus = answered(() => null);
+
+// The fee of a one-group message as the runner sends it over the double:
+// 1 signature, the limit lowered to the simulated use plus headroom, and the
+// p75 price (checked against a signed message in the R-FW2 test).
+const runnerFee = () =>
+  5_000 + Math.ceil((computeUnitPrice(MOCK_PRIORITY_FEES) * (Math.ceil(MOCK_UNITS_CONSUMED * 1.2) + 10_000)) / 1_000_000);
+
+type Run = {
+  steps: ActionStep[];
+  updates: ActionStep[][];
+  wallet: FakeWallet;
+  rpc: ReturnType<typeof mockActionRpc>;
+  sleeps: number[];
+};
 async function run(
   ctx: Ctx,
   opts: {
@@ -186,7 +213,7 @@ async function run(
     sleep: clock.sleep,
     now: clock.now,
   });
-  return { steps, updates, wallet, rpc };
+  return { steps, updates, wallet, rpc, sleeps: clock.sleeps };
 }
 
 const claimed = (ctx: Ctx, atoms = 1_000_000) => ({ postStates: postStatesFrom(credited(ctx, ctx.chain.mints.syna, atoms)) });
@@ -322,7 +349,7 @@ describe("runAction", () => {
       groups: groups(ctx, 2),
       rpc: {
         ...claimed(ctx),
-        statuses: async (sigs) => sigs.map(() => null),
+        statuses: noStatus,
         // Still valid when the prompt returns; expired while confirming.
         blockHeight: async () => (heights++ < READS_BEFORE_SEND ? HEIGHT : LAST_VALID + 1),
       },
@@ -339,7 +366,7 @@ describe("runAction", () => {
     let height = SYNTHETIC.clock.blockHeight;
     const { steps } = await run(ctx, {
       groups: groups(ctx, 1),
-      rpc: { ...claimed(ctx), statuses: async (sigs) => sigs.map(() => null), blockHeight: async () => (height += 50) },
+      rpc: { ...claimed(ctx), statuses: noStatus, blockHeight: async () => (height += 50) },
     });
     expect(height).toBeGreaterThan(SYNTHETIC.clock.lastValidBlockHeight);
     expect(steps[0]).toMatchObject({ status: "failed", reason: "Didn't land · nothing changed" });
@@ -349,7 +376,7 @@ describe("runAction", () => {
     const ctx = setup();
     const { steps } = await run(ctx, {
       groups: groups(ctx, 1),
-      rpc: { ...claimed(ctx), statuses: async (sigs) => sigs.map(() => null) },
+      rpc: { ...claimed(ctx), statuses: noStatus },
     });
     expect(steps[0].status).toBe("failed");
     expect(steps[0].reason).not.toMatch(/nothing changed/);
@@ -361,7 +388,7 @@ describe("runAction", () => {
       groups: groups(ctx, 1),
       rpc: {
         ...claimed(ctx),
-        statuses: async (sigs) => sigs.map(() => ({ slot: 1_001, confirmationStatus: "confirmed", err: { InstructionError: [2, { Custom: 1 }] } })),
+        statuses: answered(() => ({ slot: 1_001, confirmationStatus: "confirmed", err: { InstructionError: [2, { Custom: 1 }] } })),
       },
     });
     expect(steps[0]).toMatchObject({ status: "failed", reason: "Failed on chain · nothing changed" });
@@ -386,6 +413,50 @@ describe("runAction", () => {
     expect(rpc.sent).toHaveLength(2);
     expect(Buffer.from(rpc.sent[1]).equals(Buffer.from(rpc.sent[0]))).toBe(true);
     expect(steps[0]).toMatchObject({ status: "confirmed", signature: signatureOf(rpc.sent[0]) });
+  });
+
+  it("re-sends the identical bytes after /api/rpc's own limiter refuses, honouring Retry-After capped at 10 s (F-R002)", async () => {
+    const ctx = setup();
+    let attempts = 0;
+    const base = mockActionRpc(ctx.chain);
+    const waits = [4_000, 30_000];
+    const { steps, rpc, wallet, sleeps } = await run(ctx, {
+      groups: groups(ctx, 1),
+      rpc: {
+        ...claimed(ctx),
+        send: async (raw) => {
+          if (attempts < waits.length)
+            throw new RpcBusyError({ cause: new Error("HTTP 429"), notForwarded: true, retryAfterMs: waits[attempts++] });
+          return base.send(raw);
+        },
+      },
+    });
+    expect(wallet.calls).toHaveLength(1);
+    expect(rpc.sent).toHaveLength(3);
+    for (const raw of rpc.sent) expect(Buffer.from(raw).equals(Buffer.from(rpc.sent[0]))).toBe(true);
+    // The two limiter waits come before any polling interval.
+    expect(sleeps.slice(0, 2)).toEqual([4_000, 10_000]);
+    expect(steps[0]).toMatchObject({ status: "confirmed", signature: signatureOf(rpc.sent[0]) });
+  });
+
+  it("fails a send the limiter refuses 4 times as \"Network busy\", certain it never left (F-R002)", async () => {
+    const ctx = setup();
+    let polled = 0;
+    const { steps, rpc, sleeps } = await run(ctx, {
+      groups: groups(ctx, 1),
+      rpc: {
+        ...claimed(ctx),
+        send: async () => {
+          throw new RpcBusyError({ notForwarded: true, retryAfterMs: 2_000 });
+        },
+        statuses: async (sigs) => (polled++, noStatus(sigs)),
+      },
+    });
+    expect(rpc.sent).toHaveLength(4);
+    expect(sleeps).toEqual([2_000, 2_000, 2_000]);
+    expect(steps[0]).toMatchObject({ status: "failed", reason: "Network busy · try again" });
+    expect(polled).toBe(0);
+    expect(recordPending).not.toHaveBeenCalled();
   });
 
   it("fails a send the network rejects outright, without re-sending", async () => {
@@ -554,6 +625,31 @@ describe("runAction", () => {
     expect(wallet.calls.map((c) => c.map((raw) => groupOf(VersionedTransaction.deserialize(raw))))).toEqual([[2]]);
   });
 
+  it("shows a SOL claim smaller than the transaction fee gross, not as \"Nothing to claim\" (R-FW2)", async () => {
+    const ctx = setup();
+    const owner = ctx.owner.toBase58();
+    const account = ctx.chain.accounts.get(owner)!;
+    const fee = runnerFee();
+    const gain = 3_000;
+    expect(gain).toBeLessThan(fee);
+    const { steps, wallet } = await run(ctx, {
+      groups: [group(ctx, 1)],
+      // Net of the fee the wallet loses lamports; gross it gains 3,000.
+      rpc: { postStates: postStatesFrom({ [owner]: { ...account, lamports: account.lamports - fee + gain } }) },
+    });
+    const signed = VersionedTransaction.deserialize(wallet.calls[0][0]).message;
+    expect(mockTransactionFee(signed)).toBe(fee);
+    expect(steps[0]).toMatchObject({ status: "confirmed", expected: [{ mint: WSOL_MINT, atoms: String(gain) }] });
+  });
+
+  it("still skips a claim whose gross deltas are all zero, after the fee (R-FW2)", async () => {
+    const ctx = setup();
+    // The double charges the fee and changes nothing else.
+    const { steps, wallet } = await run(ctx, { groups: [group(ctx, 1)], rpc: {} });
+    expect(steps[0]).toMatchObject({ status: "skipped", reason: "Nothing to claim" });
+    expect(wallet.calls).toHaveLength(0);
+  });
+
   it("does not open the wallet when every claim is empty", async () => {
     const ctx = setup();
     const { steps, wallet } = await run(ctx, { groups: groups(ctx, 2) });
@@ -566,10 +662,11 @@ describe("runAction", () => {
     const owner = ctx.owner.toBase58();
     const now = ctx.chain.accounts.get(owner)!;
     // The wSOL ATA is created and closed in the transaction (absent before
-    // and after); the owner ends up 3,000,000 lamports richer.
+    // and after); the owner ends up 3,000,000 lamports richer before the
+    // fee, which the simulation has already taken (R-FW2).
     const { steps } = await run(ctx, {
       groups: [group(ctx, 1, WSOL_MINT)],
-      rpc: { postStates: postStatesFrom({ [owner]: { ...now, lamports: now.lamports + 3_000_000 } }) },
+      rpc: { postStates: postStatesFrom({ [owner]: { ...now, lamports: now.lamports + 3_000_000 - runnerFee() } }) },
     });
     expect(steps[0]).toMatchObject({ status: "confirmed", expected: [{ mint: WSOL_MINT, atoms: "3000000" }] });
   });
@@ -839,7 +936,7 @@ describe("runAction", () => {
         blockHeight: async () => (heights++ < READS_BEFORE_SEND ? HEIGHT : LAST_VALID + 1),
         // A lagging node misses the status once; the next round finds it.
         statuses: async (sigs) =>
-          rounds++ === 0 ? sigs.map(() => null) : sigs.map(() => ({ slot: 1_001, confirmationStatus: "confirmed", err: null })),
+          (rounds++ === 0 ? noStatus : answered(() => ({ slot: 1_001, confirmationStatus: "confirmed", err: null })))(sigs),
       },
     });
     expect(steps[0]).toMatchObject({ status: "confirmed", slot: 1_001 });
@@ -849,15 +946,103 @@ describe("runAction", () => {
     const ctx = setup();
     let heights = 0;
     let rounds = 0;
+    let history = 0;
     const { steps } = await run(ctx, {
       groups: groups(ctx, 1),
       rpc: {
         ...claimed(ctx),
         blockHeight: async () => (heights++ < READS_BEFORE_SEND ? HEIGHT : LAST_VALID + 1),
-        statuses: async (sigs) => (rounds++, sigs.map(() => null)),
+        statuses: async (sigs, options) => (options?.searchTransactionHistory ? history++ : rounds++, noStatus(sigs)),
       },
     });
-    expect(rounds).toBe(2);
+    // Two polling rounds, then the one history lookup (S-R003).
+    expect([rounds, history]).toEqual([2, 1]);
+    expect(steps[0]).toMatchObject({ status: "failed", reason: "Didn't land · nothing changed" });
+  });
+
+  it("never reports \"Didn't land\" from a status node that lags the expired height's slot (S-R003)", async () => {
+    const ctx = setup();
+    const { slot } = SYNTHETIC.clock;
+    let tips = 0;
+    const { steps } = await run(ctx, {
+      groups: groups(ctx, 1),
+      rpc: {
+        ...claimed(ctx),
+        // Before the send the blockhash is valid; while confirming, the
+        // height has passed it, observed at slot + 100.
+        blockHeight: async () => HEIGHT,
+        chainTip: async () => (tips++ === 0 ? { blockHeight: HEIGHT, slot } : { blockHeight: LAST_VALID + 1, slot: slot + 100 }),
+        // Every status answer comes from a node 1 slot behind that.
+        statuses: answered(() => null, slot + 99),
+      },
+    });
+    expect(steps[0].status).toBe("failed");
+    expect(steps[0].reason).toBe("Not confirmed yet · check your wallet before retrying");
+  });
+
+  it("counts only rounds whose status node has caught up, then looks up the history (S-R003)", async () => {
+    const ctx = setup();
+    const { slot } = SYNTHETIC.clock;
+    const seen: { history: boolean; contextSlot: number }[] = [];
+    let rounds = 0;
+    const { steps } = await run(ctx, {
+      groups: groups(ctx, 1),
+      rpc: {
+        ...claimed(ctx),
+        blockHeight: async () => HEIGHT,
+        chainTip: async () => ({ blockHeight: LAST_VALID + 1, slot: slot + 100 }),
+        // Lagging for two rounds, then caught up.
+        statuses: async (sigs, options) => {
+          const contextSlot = options?.searchTransactionHistory || rounds++ >= 2 ? slot + 100 : slot + 50;
+          seen.push({ history: options?.searchTransactionHistory === true, contextSlot });
+          return answered(() => null, contextSlot)(sigs);
+        },
+      },
+    });
+    expect(seen).toEqual([
+      { history: false, contextSlot: slot + 50 },
+      { history: false, contextSlot: slot + 50 },
+      { history: false, contextSlot: slot + 100 },
+      { history: false, contextSlot: slot + 100 },
+      { history: true, contextSlot: slot + 100 },
+    ]);
+    expect(steps[0]).toMatchObject({ status: "failed", reason: "Didn't land · nothing changed" });
+  });
+
+  it("confirms a transaction that only the history lookup finds (S-R003)", async () => {
+    const ctx = setup();
+    let heights = 0;
+    const { steps } = await run(ctx, {
+      groups: groups(ctx, 1),
+      rpc: {
+        ...claimed(ctx),
+        blockHeight: async () => (heights++ < READS_BEFORE_SEND ? HEIGHT : LAST_VALID + 1),
+        statuses: async (sigs, options) =>
+          (options?.searchTransactionHistory
+            ? answered(() => ({ slot: 1_002, confirmationStatus: "finalized", err: null }))
+            : noStatus)(sigs),
+      },
+    });
+    expect(steps[0]).toMatchObject({ status: "confirmed", slot: 1_002 });
+    expect(recordPending).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps polling when the history lookup itself fails (S-R003)", async () => {
+    const ctx = setup();
+    let heights = 0;
+    let lookups = 0;
+    const { steps } = await run(ctx, {
+      groups: groups(ctx, 1),
+      rpc: {
+        ...claimed(ctx),
+        blockHeight: async () => (heights++ < READS_BEFORE_SEND ? HEIGHT : LAST_VALID + 1),
+        statuses: async (sigs, options) => {
+          if (options?.searchTransactionHistory && lookups++ === 0) throw new RpcBusyError();
+          return noStatus(sigs);
+        },
+      },
+    });
+    expect(lookups).toBe(2);
     expect(steps[0]).toMatchObject({ status: "failed", reason: "Didn't land · nothing changed" });
   });
 

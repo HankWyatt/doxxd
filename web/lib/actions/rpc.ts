@@ -5,6 +5,7 @@
 // Imports web3.js, so it is reached only through the lazy entry
 // lib/actions/build/index.ts (ruling R-P4).
 import { Connection, PublicKey, type VersionedTransaction } from "@solana/web3.js";
+import { LIMITER_REFUSAL } from "@/lib/rpc/rate-limit";
 
 export type ActionRpc = {
   connection: Connection;
@@ -20,11 +21,21 @@ export type ActionRpc = {
     accounts: SimulatedAccount[];
   }>;
   send(raw: Uint8Array): Promise<string>;
+  /**
+   * Signature statuses, with the slot the answering node had reached (the
+   * lowest, when the signatures span several requests).
+   */
   statuses(
     sigs: string[],
-  ): Promise<({ slot: number; confirmationStatus: string | null; err: unknown | null } | null)[]>;
+    options?: { searchTransactionHistory?: boolean },
+  ): Promise<{
+    contextSlot: number;
+    value: ({ slot: number; confirmationStatus: string | null; err: unknown | null } | null)[];
+  }>;
   latestBlockhash(): Promise<{ blockhash: string; lastValidBlockHeight: number }>;
   blockHeight(): Promise<number>;
+  /** Block height and slot read together (getEpochInfo). */
+  chainTip(): Promise<{ blockHeight: number; slot: number }>;
   priorityFees(writable: string[]): Promise<number[]>;
 };
 
@@ -35,12 +46,33 @@ const RPC_BUSY_NAME = "RpcBusyError";
 // isRpcBusy looks for this message (or the name) in what they re-throw.
 const RPC_BUSY_MESSAGE = "Network busy · try again";
 
-/** The RPC stayed rate-limited or unreachable after every retry. */
+/**
+ * The RPC stayed rate-limited or unreachable after every retry.
+ * `notForwarded`: /api/rpc's own limiter refused the request, so it never
+ * left Doxxd (a send can go again after `retryAfterMs`).
+ */
 export class RpcBusyError extends Error {
-  constructor(options?: { cause?: unknown }) {
+  readonly notForwarded: boolean;
+  readonly retryAfterMs: number | null;
+  constructor(options?: { cause?: unknown; notForwarded?: boolean; retryAfterMs?: number }) {
     super(RPC_BUSY_MESSAGE, options);
     this.name = RPC_BUSY_NAME;
+    this.notForwarded = options?.notForwarded ?? false;
+    this.retryAfterMs = options?.retryAfterMs ?? null;
   }
+}
+
+/**
+ * When `error` is, or wraps, a refusal by /api/rpc's own limiter (nothing
+ * was forwarded), the wait it asked for in ms; otherwise null.
+ */
+export function notForwardedRetryMs(error: unknown): number | null {
+  let current = error;
+  for (let depth = 0; current != null && depth < 8; depth++) {
+    if (current instanceof RpcBusyError && current.notForwarded) return current.retryAfterMs ?? DEFAULT_RETRY_AFTER_MS;
+    current = typeof current === "object" ? (current as { cause?: unknown }).cause : undefined;
+  }
+  return null;
 }
 
 /**
@@ -70,6 +102,7 @@ export function isRpcBusy(error: unknown): boolean {
 }
 
 const RETRY_DELAYS_MS = [500, 1_000, 2_000];
+const DEFAULT_RETRY_AFTER_MS = 1_000;
 const REQUEST_TIMEOUT_MS = 20_000;
 // 429 from the pass-through's limiter or the upstream; 502/504 are the
 // pass-through's "upstream unavailable" and "upstream timed out" (network
@@ -90,6 +123,20 @@ function rpcMethod(init?: RequestInit): string | null {
   }
 }
 
+// A 429 from /api/rpc's own limiter (as opposed to the upstream's), and the
+// wait it asks for. Reads the body.
+async function limiterRefusal(response: Response): Promise<{ retryAfterMs: number } | null> {
+  let message: unknown;
+  try {
+    message = ((await response.json()) as { error?: { message?: unknown } }).error?.message;
+  } catch {
+    return null;
+  }
+  if (message !== LIMITER_REFUSAL) return null;
+  const seconds = Number(response.headers.get("retry-after"));
+  return { retryAfterMs: Number.isInteger(seconds) && seconds > 0 ? seconds * 1_000 : DEFAULT_RETRY_AFTER_MS };
+}
+
 async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -103,18 +150,25 @@ async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit) {
 // web3.js's own 429 retry is off (disableRetryOnRateLimit). This one covers
 // every read made through the Connection, including the SDKs' reads, with
 // fixed backoff, and throws RpcBusyError once retries run out. A send is
-// never retried here: it fails fast with RpcBusyError and the runner decides
-// whether to re-send the same signed bytes.
+// never retried here: it fails fast with RpcBusyError (marked notForwarded
+// when /api/rpc's own limiter refused it) and the runner decides whether to
+// re-send the same signed bytes.
 const retryingFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-  const retries = rpcMethod(init) === "sendTransaction" ? 0 : RETRY_DELAYS_MS.length;
+  const isSend = rpcMethod(init) === "sendTransaction";
+  const retries = isSend ? 0 : RETRY_DELAYS_MS.length;
   for (let attempt = 0; ; attempt++) {
     let cause: unknown;
     try {
       const response = await fetchWithTimeout(input, init);
       if (!TRANSIENT_STATUSES.has(response.status)) return response;
+      if (isSend && response.status === 429) {
+        const refusal = await limiterRefusal(response);
+        if (refusal) throw new RpcBusyError({ cause: new Error("HTTP 429"), notForwarded: true, ...refusal });
+      }
       await response.body?.cancel().catch(() => undefined);
       cause = new Error(`HTTP ${response.status}`);
     } catch (error) {
+      if (error instanceof RpcBusyError) throw error;
       cause = error;
     }
     if (attempt >= retries) throw new RpcBusyError({ cause });
@@ -155,12 +209,15 @@ export function actionRpcFor(connection: Connection): ActionRpc {
     async send(raw) {
       return connection.sendRawTransaction(raw, { preflightCommitment: "confirmed" });
     },
-    async statuses(sigs) {
-      const out: Awaited<ReturnType<ActionRpc["statuses"]>> = [];
+    async statuses(sigs, options) {
+      const out: Awaited<ReturnType<ActionRpc["statuses"]>>["value"] = [];
+      let contextSlot = Number.POSITIVE_INFINITY;
       for (let i = 0; i < sigs.length; i += MAX_STATUS_SIGNATURES) {
-        const { value } = await connection.getSignatureStatuses(
+        const { context, value } = await connection.getSignatureStatuses(
           sigs.slice(i, i + MAX_STATUS_SIGNATURES),
+          options?.searchTransactionHistory ? { searchTransactionHistory: true } : undefined,
         );
+        contextSlot = Math.min(contextSlot, context.slot);
         for (const status of value)
           out.push(
             status && {
@@ -170,7 +227,7 @@ export function actionRpcFor(connection: Connection): ActionRpc {
             },
           );
       }
-      return out;
+      return { contextSlot: Number.isFinite(contextSlot) ? contextSlot : 0, value: out };
     },
     async latestBlockhash() {
       // The ...AndContext form, because getLatestBlockhash re-wraps errors
@@ -180,6 +237,11 @@ export function actionRpcFor(connection: Connection): ActionRpc {
     },
     async blockHeight() {
       return connection.getBlockHeight("confirmed");
+    },
+    async chainTip() {
+      const { blockHeight, absoluteSlot } = await connection.getEpochInfo("confirmed");
+      if (blockHeight === undefined) throw new Error("The RPC did not report a block height.");
+      return { blockHeight, slot: absoluteSlot };
     },
     async priorityFees(writable) {
       const fees = await connection.getRecentPrioritizationFees({

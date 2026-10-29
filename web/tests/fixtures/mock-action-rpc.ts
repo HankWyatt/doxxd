@@ -3,7 +3,7 @@
 // Every request first goes through the /api/rpc policy (lib/rpc/policy.ts),
 // so code under test can only use what the real pass-through allows; refused
 // requests get the pass-through's HTTP 400 and JSON-RPC error.
-import { Connection, VersionedTransaction } from "@solana/web3.js";
+import { ComputeBudgetProgram, Connection, VersionedTransaction, type VersionedMessage } from "@solana/web3.js";
 import bs58 from "bs58";
 import { actionRpcFor, type ActionRpc } from "@/lib/actions/rpc";
 import { checkRpcRequest } from "@/lib/rpc/policy";
@@ -46,7 +46,9 @@ function matches(info: ChainAccount, filters: Filter[]): boolean {
  * What simulateTransaction reports for the watched addresses, in order: the
  * state after the transaction (null for an account that does not exist
  * afterwards). The double does not run programs, so by default the accounts
- * come back as they are now, and every balance delta is zero.
+ * come back as they are now, and every balance delta is zero, except that
+ * the fee payer has paid the transaction fee, as a real node reports. A
+ * PostStates that names the fee payer reports it exactly as given.
  */
 export type PostStates = (watch: string[], chain: SyntheticChain) => (ChainAccount | null)[];
 
@@ -59,6 +61,20 @@ export function postStatesFrom(changes: Record<string, ChainAccount | null>): Po
 }
 
 export type AnswerOptions = { postStates?: PostStates };
+
+/** The fee a node charges for `message`: 5,000 per signature plus the priority fee, rounded up. */
+export function mockTransactionFee(message: VersionedMessage): number {
+  const keys = message.staticAccountKeys;
+  let units = 0;
+  let price = 0;
+  for (const ix of message.compiledInstructions) {
+    if (!keys[ix.programIdIndex].equals(ComputeBudgetProgram.programId)) continue;
+    const data = Buffer.from(ix.data);
+    if (data[0] === 2) units = data.readUInt32LE(1);
+    if (data[0] === 3) price = Number(data.readBigUInt64LE(1));
+  }
+  return 5_000 * message.header.numRequiredSignatures + Math.ceil((price * units) / 1_000_000);
+}
 
 /**
  * Answers one JSON-RPC request body from `chain`, with the HTTP status the
@@ -129,10 +145,18 @@ export function answerRpc(
       break;
     case "simulateTransaction": {
       const watched = (params[1] as { accounts?: { addresses: string[] } }).accounts;
+      const message = VersionedTransaction.deserialize(Buffer.from(params[0] as string, "base64")).message;
+      const payer = message.staticAccountKeys[0].toBase58();
       const states = watched
-        ? options.postStates
-          ? options.postStates(watched.addresses, chain)
-          : watched.addresses.map((a) => get(a) ?? null)
+        ? (options.postStates
+            ? options.postStates(watched.addresses, chain)
+            : watched.addresses.map((a) => get(a) ?? null)
+          ).map((state, i) =>
+            // Unchanged by the PostStates: the payer has paid the fee.
+            watched.addresses[i] === payer && state && state === get(payer)
+              ? { ...state, lamports: state.lamports - mockTransactionFee(message) }
+              : state,
+          )
         : null;
       result = ctx({
         err: null,
@@ -184,6 +208,8 @@ export type MockActionRpcOverrides = Partial<Omit<ActionRpc, "connection">> & An
  * The real ActionRpc (lib/actions/rpc.ts) over mockConnection, with any
  * method replaceable. `postStates` sets what simulations report for watched
  * accounts. `sent` records the bytes of every send attempt, overridden or not.
+ * A `blockHeight` override also drives `chainTip` (at the synthetic slot)
+ * unless `chainTip` is overridden too, so one height script covers both.
  */
 export function mockActionRpc(
   chain: SyntheticChain,
@@ -192,8 +218,10 @@ export function mockActionRpc(
   const { postStates, ...methods } = overrides;
   const base = actionRpcFor(mockConnection(chain, { postStates }));
   const sent: Uint8Array[] = [];
+  const blockHeight = overrides.blockHeight;
   return {
     ...base,
+    ...(blockHeight ? { chainTip: async () => ({ blockHeight: await blockHeight(), slot: SYNTHETIC.clock.slot }) } : {}),
     ...methods,
     async send(raw) {
       sent.push(Uint8Array.from(raw));

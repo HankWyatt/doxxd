@@ -1,5 +1,6 @@
 // @vitest-environment node
 import {
+  ComputeBudgetProgram,
   Keypair,
   PublicKey,
   TransactionInstruction,
@@ -16,7 +17,7 @@ vi.mock("@solana/web3.js", () => {
   const browserBuild = "@solana/web3.js/lib/index.browser.esm.js";
   return import(/* @vite-ignore */ browserBuild);
 });
-import { RpcBusyError, cachedReads, createActionRpc, isRpcBusy } from "./rpc";
+import { RpcBusyError, cachedReads, createActionRpc, isRpcBusy, notForwardedRetryMs } from "./rpc";
 
 // Synthetic keys only: fixed seeds of repeated bytes.
 const payer = Keypair.fromSeed(new Uint8Array(32).fill(7));
@@ -29,9 +30,8 @@ function signedTransaction(): VersionedTransaction {
   const message = new TransactionMessage({
     payerKey: payer.publicKey,
     recentBlockhash: blockhash,
-    instructions: [
-      new TransactionInstruction({ programId: MEMO, keys: [], data: Buffer.from("doxxd") }),
-    ],
+    // A top-level program the pass-through allows (not Memo).
+    instructions: [ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 })],
   }).compileToV0Message();
   const transaction = new VersionedTransaction(message);
   transaction.sign([payer]);
@@ -207,10 +207,10 @@ describe("createActionRpc", () => {
       accounts: [{ data, lamports: 1_000, owner: MEMO.toBase58() }, null, null],
     });
     await expect(rpc.send(tx.serialize())).resolves.toBe(signature);
-    await expect(rpc.statuses([signature, signature])).resolves.toEqual([
-      { slot: 1_000, confirmationStatus: "confirmed", err: null },
-      null,
-    ]);
+    await expect(rpc.statuses([signature, signature])).resolves.toEqual({
+      contextSlot: 1_000,
+      value: [{ slot: 1_000, confirmationStatus: "confirmed", err: null }, null],
+    });
     await expect(rpc.latestBlockhash()).resolves.toEqual({
       blockhash,
       lastValidBlockHeight: 1_150,
@@ -233,6 +233,54 @@ describe("createActionRpc", () => {
       commitment: "confirmed",
       accounts: { encoding: "base64", addresses: watched },
     });
+  });
+
+  it("reads the chain tip's height and slot together, and statuses with their context slot (S-R003)", async () => {
+    const signature = bs58.encode(signedTransaction().signatures[0]);
+    const { seen } = upstream(
+      { result: { absoluteSlot: 1_234, blockHeight: 1_100, epoch: 0, slotIndex: 1_234, slotsInEpoch: 432_000 } },
+      { result: { context: { slot: 1_240 }, value: [null] } },
+    );
+    const rpc = createActionRpc(ENDPOINT);
+    await expect(rpc.chainTip()).resolves.toEqual({ blockHeight: 1_100, slot: 1_234 });
+    await expect(rpc.statuses([signature], { searchTransactionHistory: true })).resolves.toEqual({
+      contextSlot: 1_240,
+      value: [null],
+    });
+    expect(seen.map((s) => [s.body.method, s.body.params])).toEqual([
+      ["getEpochInfo", [{ commitment: "confirmed" }]],
+      ["getSignatureStatuses", [[signature], { searchTransactionHistory: true }]],
+    ]);
+    for (const { body } of seen) expect(checkRpcRequest(body)).toMatchObject({ ok: true });
+  });
+
+  it("marks a send that /api/rpc's own limiter refused as not forwarded, with its Retry-After (F-R002)", async () => {
+    const reply = (message: string, retryAfter?: string) =>
+      vi.fn(async (_input: unknown, init?: { body?: unknown }) => {
+        const { id } = JSON.parse(String(init?.body)) as Body;
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32005, message } }), {
+          status: 429,
+          headers: { "content-type": "application/json", ...(retryAfter ? { "retry-after": retryAfter } : {}) },
+        });
+      });
+    const raw = signedTransaction().serialize();
+
+    vi.stubGlobal("fetch", reply("Rate limited", "4"));
+    const ours = await createActionRpc(ENDPOINT).send(raw).catch((e: unknown) => e);
+    expect(ours).toBeInstanceOf(RpcBusyError);
+    expect(notForwardedRetryMs(ours)).toBe(4_000);
+    // Re-wrapped, as web3.js and the SDKs do, it is still found.
+    expect(notForwardedRetryMs(new Error("outer", { cause: ours }))).toBe(4_000);
+
+    vi.stubGlobal("fetch", reply("Rate limited"));
+    expect(notForwardedRetryMs(await createActionRpc(ENDPOINT).send(raw).catch((e: unknown) => e))).toBe(1_000);
+
+    // The upstream's 429 may have been forwarded: not marked.
+    vi.stubGlobal("fetch", reply("Upstream RPC rate limited", "4"));
+    const theirs = await createActionRpc(ENDPOINT).send(raw).catch((e: unknown) => e);
+    expect(theirs).toBeInstanceOf(RpcBusyError);
+    expect(notForwardedRetryMs(theirs)).toBeNull();
+    expect(notForwardedRetryMs(new RpcBusyError())).toBeNull();
   });
 
   it("refuses to watch more than 16 accounts in a simulation", async () => {
