@@ -70,6 +70,7 @@ export function ClaimProgress({
   stopping,
   autoFocus = false,
   nothingLine = "Nothing was claimed",
+  footnote = "If you stop or reject one, nothing is lost: those fees just stay unclaimed.",
   onStop,
   onDone,
 }: {
@@ -90,6 +91,8 @@ export function ClaimProgress({
   autoFocus?: boolean;
   /** The end line when a finished run confirmed nothing. */
   nothingLine?: string;
+  /** What stopping or rejecting means for this kind of run. */
+  footnote?: string;
   onStop(): void;
   onDone(): void;
 }) {
@@ -129,9 +132,7 @@ export function ClaimProgress({
       </ol>
       {error && <p className="progress-error">{error}</p>}
       {nothing && <p>{nothingLine}</p>}
-      <p className="faint small">
-        If you stop or reject one, nothing is lost: those fees just stay unclaimed.
-      </p>
+      <p className="faint small">{footnote}</p>
       <div className="inline">
         {done ? (
           <button type="button" className="action-pill" onClick={onDone}>

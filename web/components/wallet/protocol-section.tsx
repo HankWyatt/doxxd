@@ -132,6 +132,14 @@ export function ProtocolSection({
   // The position whose Withdraw was clicked; the withdraw dialog reads it.
   const [withdrawTarget, setWithdrawTarget] = useState<ActionTarget | null>(null);
   const wallet = useConnectedWallet();
+  // A disconnect or account switch closes the dialog for good: it never
+  // reopens on its own when that wallet comes back.
+  const owner = wallet?.address ?? null;
+  const [withdrawOwner, setWithdrawOwner] = useState(owner);
+  if (withdrawOwner !== owner) {
+    setWithdrawOwner(owner);
+    setWithdrawTarget(null);
+  }
   const definition = resources[resource];
   // DMND reports "0" for sources it has not finished: only a chip or a
   // confirmed-complete source has a total worth showing.
@@ -634,6 +642,11 @@ function RunProgress({
       stopping={run.stopping}
       autoFocus={actions.focusRun}
       nothingLine={run.kind === "withdraw" ? "Nothing was withdrawn" : undefined}
+      footnote={
+        run.kind === "withdraw"
+          ? "If you stop or reject, nothing is lost: your position stays as it is."
+          : undefined
+      }
       onStop={actions.stop}
       onDone={onDone}
     />

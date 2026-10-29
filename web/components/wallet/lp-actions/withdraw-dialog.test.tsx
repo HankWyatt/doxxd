@@ -34,6 +34,8 @@ const OWNER = syntheticAddress("withdraw-dialog/wallet");
 const MINT_A = syntheticAddress("withdraw-dialog/token-a");
 const MINT_B = syntheticAddress("withdraw-dialog/token-b");
 const SIG = "5".repeat(88);
+const OTHER = syntheticAddress("withdraw-dialog/other-wallet");
+type Fake = ReturnType<typeof createFakeWallet>;
 
 function target(over: Partial<DammV2Target> = {}): DammV2Target {
   return {
@@ -204,14 +206,23 @@ describe("withdraw dialog quote", () => {
   it("takes a custom whole percent of the withdrawable part, 1 to 100", async () => {
     open();
     await ready();
-    const input = screen.getByRole("spinbutton", { name: "Percent to withdraw" });
+    const input = screen.getByRole("spinbutton", { name: "or type a percent of the withdrawable part" });
     for (const bad of ["0", "101", "2.5"]) {
       const before = build.quoteWithdraw.mock.calls.length;
       fireEvent.change(input, { target: { value: bad } });
-      expect(await screen.findByText("Enter a whole percent from 1 to 100")).toBeInTheDocument();
+      expect(await screen.findByRole("alert")).toHaveTextContent("Enter a whole percent from 1 to 100");
+      expect(input).toHaveAccessibleDescription("Enter a whole percent from 1 to 100");
+      expect(input).toHaveAttribute("aria-invalid", "true");
       expect(review()).toBeDisabled();
       expect(build.quoteWithdraw.mock.calls.length).toBe(before);
+      // The last quote was for another share: no amounts until a valid one.
+      expect(screen.getByText("You receive (about)").nextElementSibling).toHaveTextContent("—");
+      expect(screen.getByText("Minimum you'll accept").nextElementSibling!.firstChild).toHaveTextContent("—");
     }
+    fireEvent.change(input, { target: { value: "" } });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(review()).toBeDisabled();
+    expect(screen.getByText("You receive (about)").nextElementSibling).toHaveTextContent("—");
     fireEvent.change(input, { target: { value: "40" } });
     await quoted(4_000);
     expect(screen.queryByText("Enter a whole percent from 1 to 100")).toBeNull();
@@ -222,15 +233,21 @@ describe("withdraw dialog quote", () => {
   it("takes a custom price move above 0% and up to 5%", async () => {
     open();
     await ready();
-    const input = screen.getByRole("spinbutton", { name: "Custom price move" });
-    for (const bad of ["0", "5.5", "-1"]) {
+    const input = screen.getByRole("spinbutton", { name: "% price move" });
+    for (const bad of ["0", "5.5", "5.01", "-1", "1.234", "0.001"]) {
+      const before = build.quoteWithdraw.mock.calls.length;
       fireEvent.change(input, { target: { value: bad } });
-      expect(await screen.findByText("Enter a price move above 0% and up to 5%")).toBeInTheDocument();
+      expect(await screen.findByRole("alert")).toHaveTextContent("Enter a price move above 0% and up to 5%");
+      expect(input).toHaveAccessibleDescription("Enter a price move above 0% and up to 5%");
       expect(review()).toBeDisabled();
+      expect(build.quoteWithdraw.mock.calls.length).toBe(before);
+      expect(screen.getByText("You receive (about)").nextElementSibling).toHaveTextContent("—");
     }
-    fireEvent.change(input, { target: { value: "3.5" } });
-    await waitFor(() => expect(lastQuote()[4]).toBe(350));
-    await ready();
+    for (const [good, bps] of [["3.5", 350], ["0.01", 1], ["4.99", 499], ["5", 500]] as const) {
+      fireEvent.change(input, { target: { value: good } });
+      await waitFor(() => expect(lastQuote()[4]).toBe(bps));
+      await ready();
+    }
   });
 
   it("shows the close line only at 100% when the quote closes", async () => {
@@ -258,6 +275,73 @@ describe("withdraw dialog quote", () => {
     expect(
       await screen.findByText("40% is still vesting. You can withdraw up to 60% now; the rest unlocks over time."),
     ).toBeInTheDocument();
+  });
+
+  it("says how much is vesting and how much is locked for good", async () => {
+    build.quoteWithdraw.mockImplementation(async (_r, _o, _t, bps: number) =>
+      quote(bps, { vestingBps: 2_000, withdrawableBps: 5_000 }),
+    );
+    open();
+    expect(
+      await screen.findByText("20% is still vesting and 30% is locked for good. You can withdraw up to 50% now."),
+    ).toBeInTheDocument();
+    await ready();
+  });
+
+  it("says how much is locked for good when nothing is vesting", async () => {
+    build.quoteWithdraw.mockImplementation(async (_r, _o, _t, bps: number) =>
+      quote(bps, { vestingBps: 0, withdrawableBps: 7_000 }),
+    );
+    open();
+    expect(
+      await screen.findByText("30% of this position is locked for good. You can withdraw up to 70% now."),
+    ).toBeInTheDocument();
+    await ready();
+  });
+
+  it("says nothing can be withdrawn yet when the withdrawable part is 0", async () => {
+    build.quoteWithdraw.mockImplementation(async (_r, _o, _t, bps: number) =>
+      quote(bps, { vestingBps: 6_000, withdrawableBps: 0 }),
+    );
+    open();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Nothing to withdraw yet");
+    expect(screen.queryByText(/still vesting|locked for good|up to 0%/)).toBeNull();
+    expect(review()).toBeDisabled();
+  });
+
+  it("says the amount is too small when every minimum is 0", async () => {
+    build.quoteWithdraw.mockImplementation(async (_r, _o, _t, bps: number) => {
+      const q = quote(bps);
+      return bps === 2_500 ? { ...q, minimums: q.minimums.map((m) => ({ ...m, atoms: "0" })) } : q;
+    });
+    open();
+    await ready();
+    fireEvent.click(screen.getByRole("button", { name: "25%" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Amount too small to withdraw");
+    expect(review()).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "50%" }));
+    await ready();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("never lets a stale quote overwrite a newer one", async () => {
+    open();
+    await ready();
+    const held = new Map<number, (q: WithdrawQuote) => void>();
+    build.quoteWithdraw.mockImplementation(
+      (_r, _o, _t, bps: number) => new Promise<WithdrawQuote>((resolve) => held.set(bps, resolve)),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "25%" }));
+    await waitFor(() => expect(held.has(2_500)).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "50%" }));
+    await waitFor(() => expect(held.has(5_000)).toBe(true));
+    await act(async () => held.get(5_000)!(quote(5_000)));
+    await ready();
+    expect(screen.getByText("20 SYNA + 1 SYNB")).toBeInTheDocument();
+    await act(async () => held.get(2_500)!(quote(2_500)));
+    expect(screen.getByText("20 SYNA + 1 SYNB")).toBeInTheDocument();
+    expect(screen.queryByText("10 SYNA + 0.5 SYNB")).toBeNull();
+    expect(review()).toBeEnabled();
   });
 
   it("has no vesting sentence when everything is withdrawable", async () => {
@@ -407,6 +491,20 @@ describe("Review in wallet", () => {
     expect(build.runAction).toHaveBeenCalledTimes(1);
   });
 
+  it("a double click on Review starts one run only", async () => {
+    builds();
+    const run = heldRun();
+    open();
+    await ready();
+    const button = review();
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(build.runAction).toHaveBeenCalled());
+    expect(build.buildWithdrawGroups).toHaveBeenCalledTimes(1);
+    expect(build.runAction).toHaveBeenCalledTimes(1);
+    await run.finish([step({ status: "stopped" })]);
+  });
+
   it("says nothing was withdrawn when no step got a signature", async () => {
     builds();
     const run = heldRun();
@@ -416,6 +514,10 @@ describe("Review in wallet", () => {
     await waitFor(() => expect(build.runAction).toHaveBeenCalled());
     await run.finish([step({ status: "stopped", reason: "You declined in your wallet" })]);
     expect(screen.getByText("Nothing was withdrawn")).toBeInTheDocument();
+    expect(
+      screen.getByText("If you stop or reject, nothing is lost: your position stays as it is."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/those fees just stay unclaimed/)).toBeNull();
   });
 
   it("when the pool changed, shows the new amounts and asks for a second click", async () => {
@@ -470,7 +572,7 @@ describe("on the LP card", () => {
     return p;
   }
 
-  it("Withdraw opens the dialog; closing it mid-run leaves the run on the card", async () => {
+  function mountCard(): Fake {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => Response.json({ ok: true, data: page() })),
@@ -479,8 +581,6 @@ describe("on the LP card", () => {
     fake.add();
     cleanup.push(fake.remove);
     window.localStorage.setItem("doxxd.wallet.v1", JSON.stringify({ name: "Phantom" }));
-    builds(true);
-    const run = heldRun();
     render(
       <Shell>
         <HeaderWallet viewed={DAMM.wallet} />
@@ -493,6 +593,13 @@ describe("on the LP card", () => {
         />
       </Shell>,
     );
+    return fake;
+  }
+
+  it("Withdraw opens the dialog; closing it mid-run leaves the run on the card", async () => {
+    mountCard();
+    builds(true);
+    const run = heldRun();
     await screen.findByText("Your wallet · Phantom");
     fireEvent.click(await screen.findByRole("button", { name: "Withdraw" }));
     const dialog = await screen.findByRole("dialog", { name: "Withdraw from SYNA + SYNB" });
@@ -509,7 +616,56 @@ describe("on the LP card", () => {
     expect(screen.getByRole("button", { name: "Stop after this one" })).toBeInTheDocument();
     // No other action can start meanwhile.
     expect(screen.getByRole("button", { name: /Claim all fees/ })).toBeDisabled();
+    expect(
+      screen.getByText("If you stop or reject, nothing is lost: your position stays as it is."),
+    ).toBeInTheDocument();
     await run.finish([step({ status: "stopped" })]);
     expect(screen.getByText("Nothing was withdrawn")).toBeInTheDocument();
+  });
+
+  it("closing during the rebuild, a changed pool still says so on the card", async () => {
+    mountCard();
+    let resolveBuild!: (built: unknown) => void;
+    build.buildWithdrawGroups.mockImplementation(
+      () => new Promise((resolve) => (resolveBuild = resolve)),
+    );
+    await screen.findByText("Your wallet · Phantom");
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw" }));
+    await screen.findByRole("dialog");
+    await ready();
+    fireEvent.click(review());
+    await waitFor(() => expect(build.buildWithdrawGroups).toHaveBeenCalled());
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByText("Checking live pool data…")).toBeInTheDocument();
+    // The quote closed the position; the fresh build no longer does.
+    await act(async () =>
+      resolveBuild({
+        groups: GROUPS,
+        expectation: { kind: "withdraw", owner: DAMM.wallet, mints: [], positions: [] },
+        closes: false,
+      }),
+    );
+    expect(screen.getByText("The pool changed · review the new amounts")).toBeInTheDocument();
+    expect(build.runAction).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Done" })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["switches account", (fake: Fake) => fake.switchAccount(OTHER)],
+    ["disconnects", (fake: Fake) => fake.switchAccount(null)],
+  ])("closes the dialog for good when the wallet %s", async (_name, change) => {
+    const fake = mountCard();
+    await screen.findByText("Your wallet · Phantom");
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw" }));
+    await screen.findByRole("dialog");
+    await ready();
+    act(() => change(fake));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // Back on the same account, it does not reopen on its own.
+    act(() => fake.switchAccount(DAMM.wallet));
+    await screen.findByText("Your wallet · Phantom");
+    await screen.findByRole("button", { name: "Withdraw" });
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

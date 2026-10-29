@@ -8,7 +8,7 @@
 // (ruling R-P4).
 import { Dialog } from "radix-ui";
 import { X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { ActionRpc } from "@/lib/actions/rpc";
 import type { TokenAmount, WithdrawQuote } from "@/lib/actions/build/quote";
 import { WSOL_MINT } from "@/lib/actions/programs";
@@ -17,7 +17,14 @@ import type { ConnectedWallet } from "@/lib/actions/wallet-session";
 import { useCurrentAddress } from "@/components/wallet-connect/provider";
 import { formatAtoms, mintLookup, positionName, type MintLookup } from "./amounts";
 import { ClaimProgress } from "./claim-progress";
-import { dismissRun, startWithdrawRun, stopRun, useLpRunStore, withdrawErrorText } from "./run-store";
+import {
+  dismissRun,
+  startWithdrawRun,
+  stopRun,
+  useLpRunStore,
+  withdrawErrorText,
+  WITHDRAW_POOL_CHANGED,
+} from "./run-store";
 
 type Actions = typeof import("@/lib/actions/build");
 
@@ -36,6 +43,9 @@ const MICRO = 1_000_000;
 
 const SHARE_ERROR = "Enter a whole percent from 1 to 100";
 const SLIPPAGE_ERROR = "Enter a price move above 0% and up to 5%";
+const NOTHING_YET = "Nothing to withdraw yet";
+const TOO_SMALL = "Amount too small to withdraw";
+const FOOTNOTE = "If you stop or reject, nothing is lost: your position stays as it is.";
 
 type Choice = { preset: number } | { custom: string };
 
@@ -48,16 +58,37 @@ function shareBps(choice: Choice): number | null {
   return percent >= 1 && percent <= 100 ? percent * 100 : null;
 }
 
-/** A custom price move above 0% and up to 5% as bps, or null. */
+/** A custom price move of 0.01–5.00% (at most two decimals) as bps, or null. */
 function slippageBps(choice: Choice): number | null {
   if ("preset" in choice) return choice.preset;
   const text = choice.custom.trim();
-  if (!text) return null;
+  if (!/^(\d+(\.\d{0,2})?|\.\d{1,2})$/.test(text)) return null;
   const bps = Math.round(Number(text) * 100);
-  return Number.isFinite(bps) && bps >= 1 && bps <= MAX_SLIPPAGE_BPS ? bps : null;
+  return bps >= 1 && bps <= MAX_SLIPPAGE_BPS ? bps : null;
 }
 
 const percent = (bps: number) => String(Number((bps / 100).toFixed(2)));
+
+/**
+ * What the live quote says about the part that can't be withdrawn now
+ * (ruling R-T12c): still vesting, locked for good, or both.
+ */
+function lockNote(quote: WithdrawQuote): string | null {
+  const y = percent(quote.withdrawableBps);
+  const lockedBps = Math.max(0, 10_000 - quote.withdrawableBps - quote.vestingBps);
+  const x = percent(quote.vestingBps);
+  const z = percent(lockedBps);
+  if (quote.vestingBps > 0 && lockedBps === 0)
+    return `${x}% is still vesting. You can withdraw up to ${y}% now; the rest unlocks over time.`;
+  if (quote.vestingBps > 0)
+    return `${x}% is still vesting and ${z}% is locked for good. You can withdraw up to ${y}% now.`;
+  if (lockedBps > 0) return `${z}% of this position is locked for good. You can withdraw up to ${y}% now.`;
+  return null;
+}
+
+/** Every minimum is zero: the build would refuse it. */
+const tooSmall = (quote: WithdrawQuote) =>
+  quote.minimums.length > 0 && quote.minimums.every((m) => !/[1-9]/.test(m.atoms));
 
 /** The accounts a withdrawal writes that best predict its priority fee. */
 function feeAccounts(target: ActionTarget): string[] {
@@ -100,6 +131,16 @@ export function WithdrawDialog({
   const [unitPrice, setUnitPrice] = useState<number | null | undefined>(undefined);
   const [changed, setChanged] = useState(false);
   const [runId, setRunId] = useState<number | null>(null);
+  // Whether the dialog is still open when the store reports a pool change.
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const shareId = useId();
+  const slippageId = useId();
 
   const bps = shareBps(share);
   const slip = slippageBps(slippage);
@@ -166,10 +207,15 @@ export function WithdrawDialog({
   const run = store.run !== null && store.run.id === runId ? store.run : null;
   const prompting = run?.steps.some((s) => s.status === "awaiting-approval") ?? false;
   const loading = key !== null && result?.key !== key;
-  const quote = result?.quote ?? null;
-  const error = !loading && result?.key === key ? result.error : null;
+  // No amounts for an invalid or emptied input: the last quote was for another share.
+  const quote = key === null ? null : (result?.quote ?? null);
+  // Refusals the quote implies without throwing (the build would throw).
+  const refusal =
+    quote === null ? null : quote.withdrawableBps <= 0 ? NOTHING_YET : tooSmall(quote) ? TOO_SMALL : null;
+  const error = !loading && result?.key === key ? (result.error ?? refusal) : null;
   const busy = store.run !== null && store.run.phase !== "done";
-  const canReview = key !== null && !loading && quote !== null && !busy && runId === null;
+  const canReview =
+    key !== null && !loading && quote !== null && refusal === null && !busy && runId === null;
 
   const chooseShare = (choice: Choice) => {
     if ("preset" in choice && "preset" in share && share.preset === choice.preset && error) setAttempt((a) => a + 1);
@@ -191,9 +237,11 @@ export function WithdrawDialog({
       closes: quote.closes,
       currentAddress,
       onChanged: () => {
+        if (!mounted.current) return false;
         setRunId(null);
         setChanged(true);
         setEpoch((e) => e + 1);
+        return true;
       },
     });
     if (id === null) return;
@@ -216,7 +264,7 @@ export function WithdrawDialog({
             BigInt(quote.rentLamports),
         )
       : "—";
-  const vesting = quote && (quote.vestingBps > 0 || quote.withdrawableBps < 10_000);
+  const note = quote && quote.withdrawableBps > 0 ? lockNote(quote) : null;
   const wrappedSol = legMints(target).includes(WSOL_MINT);
   // An emptied field waits quietly; anything else out of range says why.
   const shareInvalid = "custom" in share && share.custom.trim() !== "" && bps === null;
@@ -262,6 +310,7 @@ export function WithdrawDialog({
               stopping={run.stopping}
               autoFocus
               nothingLine="Nothing was withdrawn"
+              footnote={FOOTNOTE}
               onStop={stopRun}
               onDone={() => {
                 dismissRun(run.id);
@@ -282,28 +331,28 @@ export function WithdrawDialog({
                   </button>
                 ))}
               </div>
-              <label className="withdraw-custom faint small">
-                or type a percent of the withdrawable part
+              <div className="withdraw-custom faint small">
+                <label htmlFor={shareId}>or type a percent of the withdrawable part</label>
                 <input
+                  id={shareId}
                   type="number"
                   inputMode="numeric"
                   min={1}
                   max={100}
                   step={1}
-                  aria-label="Percent to withdraw"
                   aria-invalid={shareInvalid}
+                  aria-describedby={shareInvalid ? shareId + "-error" : undefined}
                   value={"custom" in share ? share.custom : ""}
                   onChange={(e) => chooseShare({ custom: e.target.value })}
                 />
-                %
-              </label>
-              {shareInvalid && <p className="withdraw-invalid">{SHARE_ERROR}</p>}
-              {vesting && (
-                <p className="withdraw-note">
-                  {percent(quote.vestingBps)}% is still vesting. You can withdraw up to{" "}
-                  {percent(quote.withdrawableBps)}% now; the rest unlocks over time.
+                <span aria-hidden="true">%</span>
+              </div>
+              {shareInvalid && (
+                <p id={shareId + "-error"} className="withdraw-invalid" role="alert">
+                  {SHARE_ERROR}
                 </p>
               )}
+              {note && <p className="withdraw-note">{note}</p>}
               <dl className={"withdraw-rows" + (loading ? " loading" : "")} aria-busy={loading}>
                 <div>
                   <dt>You receive (about)</dt>
@@ -341,20 +390,27 @@ export function WithdrawDialog({
                         </button>
                       ))}
                       <input
+                        id={slippageId}
                         type="number"
                         inputMode="decimal"
                         min={0.01}
                         max={5}
-                        step={0.1}
+                        step={0.01}
                         placeholder="up to 5"
-                        aria-label="Custom price move"
                         aria-invalid={slippageInvalid}
+                        aria-describedby={slippageInvalid ? slippageId + "-error" : undefined}
                         value={"custom" in slippage ? slippage.custom : ""}
                         onChange={(e) => chooseSlippage({ custom: e.target.value })}
                       />
-                      <span className="faint">% price move</span>
+                      <label htmlFor={slippageId} className="faint">
+                        % price move
+                      </label>
                     </span>
-                    {slippageInvalid && <span className="withdraw-invalid">{SLIPPAGE_ERROR}</span>}
+                    {slippageInvalid && (
+                      <span id={slippageId + "-error"} className="withdraw-invalid" role="alert">
+                        {SLIPPAGE_ERROR}
+                      </span>
+                    )}
                   </dd>
                 </div>
                 <div>
@@ -365,7 +421,7 @@ export function WithdrawDialog({
               {wrappedSol && <p className="withdraw-note">Wrapped SOL in your wallet comes back as SOL too.</p>}
               {changed && (
                 <p className="withdraw-note" role="status">
-                  The pool changed · review the new amounts
+                  {WITHDRAW_POOL_CHANGED}
                 </p>
               )}
               {error && (

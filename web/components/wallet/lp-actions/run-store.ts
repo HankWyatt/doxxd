@@ -19,6 +19,8 @@ export const RUN_ERRORS = {
   unexpected: "Something went wrong · check your wallet before retrying",
 } as const;
 
+export const WITHDRAW_POOL_CHANGED = "The pool changed · review the new amounts";
+
 // The builders' typed refusals, shown as they are (lib/actions/build/quote.ts,
 // fungible.ts and the per-protocol builders).
 const WITHDRAW_REFUSALS: readonly string[] = [
@@ -223,9 +225,9 @@ export function startClaimRun({
 /**
  * Withdraws `bps` of `target`'s withdrawable part with the connected wallet:
  * re-reads live state, rebuilds, and runs only when the build still does
- * what the dialog promised (`closes`, and a group to sign). Otherwise the run
- * is dropped before any wallet prompt and `onChanged` is called, so the
- * dialog can show the new amounts. Returns the run's id, or null when another
+ * what the dialog promised (`closes`, and a group to sign). Otherwise nothing
+ * reaches the wallet: `onChanged` lets an open dialog show the new amounts
+ * (the run is dropped), or the run ends saying the pool changed. Returns the run's id, or null when another
  * run is going.
  */
 export function startWithdrawRun({
@@ -248,7 +250,8 @@ export function startWithdrawRun({
   closes: boolean;
   /** The wallet's live account (useCurrentAddress). */
   currentAddress: () => string | null;
-  onChanged: () => void;
+  /** The pool changed: true when the dialog is open to show the new quote. */
+  onChanged: () => boolean;
 }): number | null {
   if (runActive()) return null;
   const id = nextId++;
@@ -290,9 +293,11 @@ export function startWithdrawRun({
         return;
       }
       // Ruling R-T9b: the pool changed since the quote. Nothing was signed.
+      // An open dialog shows the new amounts; otherwise the card says so.
       if (built.groups.length === 0 || built.closes !== closes) {
-        if (state.run?.id === id) set({ ...state, run: null });
-        onChanged();
+        if (onChanged()) {
+          if (state.run?.id === id) set({ ...state, run: null });
+        } else patch(id, { phase: "done", error: WITHDRAW_POOL_CHANGED });
         return;
       }
       patch(id, { phase: "running" });
