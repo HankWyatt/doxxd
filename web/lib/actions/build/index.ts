@@ -7,6 +7,10 @@ export { createActionRpc, isRpcBusy, RpcBusyError } from "../rpc";
 export type { ActionRpc, SimulatedAccount } from "../rpc";
 export { verifyMessage } from "../verify";
 export type { Expectation, VerifyResult } from "../verify";
+export { GroupTooLargeError, packGroups } from "../pack";
+export type { InstructionGroup, PackedMessage } from "../pack";
+export { runAction } from "../run";
+export type { ActionStep, RunOptions, StepStatus } from "../run";
 
 // Placeholder until the builders land. Using each SDK keeps it in this chunk
 // so the build proves the chunk and Worker-stub behavior. Replaced in Task 8.

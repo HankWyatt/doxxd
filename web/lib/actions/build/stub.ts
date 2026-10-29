@@ -10,3 +10,6 @@ export const createActionRpc = browserOnly;
 export const RpcBusyError = browserOnly;
 export const isRpcBusy = browserOnly;
 export const verifyMessage = browserOnly;
+export const packGroups = browserOnly;
+export const GroupTooLargeError = browserOnly;
+export const runAction = browserOnly;
