@@ -162,6 +162,71 @@ describe("quoteWithdraw / buildWithdrawGroups (Raydium AMM v4)", () => {
     expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
   });
 
+  it("withdraws from a pool without an OpenBook market with the 11-account form, which passes the pre-sign check", async () => {
+    const chain = chainFixture();
+    const owner = chain.owner.publicKey.toBase58();
+    const rpc = mockActionRpc(chain);
+    const f = chain.ammV4.marketless;
+    const M = A.marketless;
+    const t = { ...target(chain), id: "amm-v4-marketless", pool: f.pool, lpMint: f.lpMint, lpAccount: f.lpAccount };
+    const amm = liquidityStateV4Layout.decode(chain.accounts.get(f.pool)!.data);
+    expect(amm.marketProgramId.equals(PublicKey.default)).toBe(true);
+    expect(chain.accounts.has(f.marketSeed)).toBe(false);
+    const lp = M.ownerLp.muln(7_500).divn(10_000);
+    const base = M.reserveSyna.mul(lp).div(M.lpSupply);
+    const quote_ = M.reserveWsol.mul(lp).div(M.lpSupply);
+
+    const quote = await quoteWithdraw(rpc, owner, t, 7_500, 100);
+    expect(quote.minimums.map((m) => [m.mint, m.atoms])).toEqual([
+      [chain.mints.syna, slip(base, 100).toString()],
+      [chain.mints.wsol, slip(quote_, 100).toString()],
+    ]);
+    // SYNA's ATA exists and wSOL's is closed again.
+    expect(quote.rentLamports).toBe("0");
+
+    const { groups, expectation } = await buildWithdrawGroups(rpc, owner, t, 7_500, 100);
+    const ixs = groups[0].instructions;
+    expect(ixs.map((ix) => (isWithdraw(ix) ? "withdraw" : isUnwrap(ix) ? "unwrap" : ix.programId.toBase58()))).toEqual(
+      [ATA_PROGRAM, "withdraw", "unwrap"],
+    );
+    const withdraw = ixs[1];
+    expect(withdraw.data).toHaveLength(25);
+    expect([u64(withdraw.data, 1), u64(withdraw.data, 9), u64(withdraw.data, 17)].map(String)).toEqual([
+      lp.toString(),
+      ...quote.minimums.map((m) => m.atoms),
+    ]);
+    // raydium-amm processor.rs:1561-1590: token program, amm, authority,
+    // target orders, LP mint, coin vault, pc vault, user LP, user coin, user
+    // pc, owner.
+    expect(keysOf(withdraw)).toEqual([
+      PROGRAM_IDS.token,
+      f.pool,
+      f.authority,
+      amm.targetOrders.toBase58(),
+      f.lpMint,
+      amm.baseVault.toBase58(),
+      amm.quoteVault.toBase58(),
+      f.lpAccount,
+      ownerAta(chain, chain.mints.syna),
+      ownerAta(chain, chain.mints.wsol),
+      owner,
+    ]);
+    expect(withdraw.keys.map((k) => [k.isSigner, k.isWritable])).toEqual([
+      [false, false],
+      [false, true],
+      [false, false],
+      [false, true],
+      [false, true],
+      [false, true],
+      [false, true],
+      [false, true],
+      [false, true],
+      [false, true],
+      [true, false],
+    ]);
+    expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
+  });
+
   it("unwraps the wSOL leg after the withdraw, to the wallet", async () => {
     const chain = chainFixture();
     const owner = chain.owner.publicKey.toBase58();

@@ -201,12 +201,21 @@ function checkCloseAccount(ctx: Context, program: string, accounts: string[], da
   if (authority !== ctx.owner) reject("CloseAccount authority is not the connected wallet");
 }
 
-function findSpec(program: string, data: Uint8Array): InstructionSpec {
+// An instruction with several allowed account forms (AMM v4 withdraw: 22 or
+// 11 accounts) has one spec per form, all with the same discriminator; the
+// account count picks the form, and any other count is refused.
+function findSpec(program: string, data: Uint8Array, accountCount: number): InstructionSpec {
   const specs = ALLOWED_INSTRUCTIONS[program];
-  const spec = specs.find(
+  const forms = specs.filter(
     (s) => data.length >= s.discriminator.length && s.discriminator.every((b, i) => data[i] === b),
   );
-  if (spec) return spec;
+  if (forms.length === 1) return forms[0];
+  if (forms.length > 1) {
+    const spec = forms.find((s) => s.accounts === accountCount);
+    if (spec) return spec;
+    const counts = forms.map((s) => s.accounts).sort((a, b) => a - b).join(" or ");
+    reject(`${forms[0].protocol} ${forms[0].name} has ${accountCount} accounts; expected ${counts}`);
+  }
   const id = program === AMM_V4_PROGRAM ? String(data[0] ?? "(empty)") : hex(data.subarray(0, 8)) || "(empty)";
   reject(`${specs[0].protocol} instruction ${id} is not allowed`);
 }
@@ -218,7 +227,7 @@ function checkProtocol(
   accounts: string[],
   data: Uint8Array,
 ): void {
-  const spec = findSpec(program, data);
+  const spec = findSpec(program, data, accounts.length);
   const label = `${spec.protocol} ${spec.name}`;
   if (data.length !== spec.args.length)
     reject(`${label} has ${data.length} data bytes; expected ${spec.args.length}`);

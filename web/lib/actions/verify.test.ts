@@ -332,6 +332,17 @@ function ammV4Withdraw(ctx: Ctx, opts: Mins & { lp?: BN } = {}) {
   });
 }
 
+/**
+ * The OpenBook-free 11-account AMM v4 withdraw: the 22-account form without
+ * open orders, the padding, the market accounts and the order book, in the
+ * order raydium-amm's process_withdraw reads them (processor.rs:1561-1590).
+ */
+function ammV4Withdraw11(ctx: Ctx, opts: Mins & { lp?: BN } = {}) {
+  const full = ammV4Withdraw(ctx, opts);
+  const keys = [0, 1, 2, 4, 5, 6, 7, 15, 16, 17, 18].map((i) => full.keys[i]);
+  return new TransactionInstruction({ programId: full.programId, keys, data: full.data });
+}
+
 const spec = (program: string, name: string) => {
   const found = ALLOWED_INSTRUCTIONS[program].find((s) => s.name === name);
   if (!found) throw new Error(`no spec ${name}`);
@@ -371,7 +382,11 @@ describe("ALLOWED_INSTRUCTIONS", () => {
         expect(Buffer.from(s.discriminator)).toEqual(
           createHash("sha256").update(`global:${s.name}`).digest().subarray(0, 8),
         );
-    expect(ALLOWED_INSTRUCTIONS[PROGRAM_IDS.ammV4].map((s) => [...s.discriminator])).toEqual([[4]]);
+    // AMM v4 withdraw, in its 22- and 11-account forms.
+    expect(ALLOWED_INSTRUCTIONS[PROGRAM_IDS.ammV4].map((s) => [s.name, [...s.discriminator], s.accounts])).toEqual([
+      ["withdraw", [4], 22],
+      ["withdraw", [4], 11],
+    ]);
   });
 
   it("places the Raydium roles where the SDK builders put those accounts", () => {
@@ -419,6 +434,16 @@ describe("ALLOWED_INSTRUCTIONS", () => {
       ctx.ata(ctx.chain.mints.wsol).toBase58(),
       ctx.owner.toBase58(),
     ]);
+
+    const amm11 = ammV4Withdraw11(ctx);
+    const v4short = ALLOWED_INSTRUCTIONS[PROGRAM_IDS.ammV4].find((s) => s.accounts === 11)!;
+    expect(amm11.keys).toHaveLength(v4short.accounts);
+    expect(Object.keys(v4short.roles).map((i) => at(amm11, Number(i)))).toEqual([
+      ctx.ata(ctx.chain.mints.sync).toBase58(),
+      ctx.ata(ctx.chain.mints.wsol).toBase58(),
+      ctx.owner.toBase58(),
+    ]);
+    expect(at(amm11, 7)).toBe(at(amm, 15)); // the user's LP account
   });
 });
 
@@ -541,6 +566,11 @@ describe("verifyMessage accepts", () => {
       createCloseAccountInstruction(ctx.ata(wsol), ctx.owner, ctx.owner),
     ];
     expect(verifyMessage(compile(ctx, ixs), withdrawing(ctx))).toEqual(OK);
+  });
+
+  it("a Raydium AMM v4 withdraw in the OpenBook-free 11-account form", () => {
+    const ctx = setup();
+    expect(verifyMessage(compile(ctx, [...budget(), ammV4Withdraw11(ctx)]), withdrawing(ctx))).toEqual(OK);
   });
 
   it("a Raydium AMM v4 withdraw, a plain ATA create and a Token-2022 close", () => {
@@ -972,12 +1002,55 @@ describe("verifyMessage also rejects", () => {
     const amm = ammV4Withdraw(ctx);
     const short = new TransactionInstruction({ programId: amm.programId, keys: amm.keys.slice(0, 21), data: amm.data });
     expect(verifyMessage(compile(ctx, [short]), withdrawing(ctx))).toEqual(
-      rejected("raydium-amm-v4 withdraw has 21 accounts; expected 22"),
+      rejected("raydium-amm-v4 withdraw has 21 accounts; expected 11 or 22"),
+    );
+    const amm11 = ammV4Withdraw11(ctx);
+    const twelve = new TransactionInstruction({ programId: amm11.programId, keys: [...amm11.keys, extra], data: amm11.data });
+    expect(verifyMessage(compile(ctx, [twelve]), withdrawing(ctx))).toEqual(
+      rejected("raydium-amm-v4 withdraw has 12 accounts; expected 11 or 22"),
     );
     const close = clmmClose(ctx);
     const long = new TransactionInstruction({ programId: close.programId, keys: [...close.keys, extra], data: close.data });
     expect(verifyMessage(compile(ctx, [long]), withdrawing(ctx))).toEqual(
       rejected("raydium-clmm close_position has 8 accounts; expected 6 or 7"),
+    );
+  });
+
+  it("an 11-account AMM v4 withdraw paying a stranger, signed for by a stranger or with no minimums", () => {
+    const ctx = setup();
+    const amm = ammV4Withdraw11(ctx);
+    const reason = (i: number, name: string) =>
+      rejected(`raydium-amm-v4 withdraw account ${i} (${name}) is not the connected wallet's own token account`);
+    expect(verifyMessage(compile(ctx, [withKey(amm, 8, STRANGER)]), withdrawing(ctx))).toEqual(
+      reason(8, "user_base_token_account"),
+    );
+    const strangerWsol = ctx.ata(ctx.chain.mints.wsol, STRANGER);
+    expect(verifyMessage(compile(ctx, [withKey(amm, 9, strangerWsol)]), withdrawing(ctx))).toEqual(
+      reason(9, "user_quote_token_account"),
+    );
+    expect(verifyMessage(compile(ctx, [withKey(amm, 10, STRANGER)]), withdrawing(ctx))).toEqual(
+      rejected("raydium-amm-v4 withdraw account 10 (owner) is not the connected wallet"),
+    );
+    // The wallet in the owner slot always signs the message (it is the fee
+    // payer), whatever the instruction's own meta says.
+    const unsigned = new TransactionInstruction({
+      programId: amm.programId,
+      keys: amm.keys.map((k, i) => (i === 10 ? { ...k, isSigner: false } : k)),
+      data: amm.data,
+    });
+    expect(verifyMessage(compile(ctx, [unsigned]), withdrawing(ctx))).toEqual(OK);
+    expect(
+      verifyMessage(compile(ctx, [ammV4Withdraw11(ctx, { a: new BN(0), b: new BN(0) })]), withdrawing(ctx)),
+    ).toEqual(rejected("raydium-amm-v4 withdraw has no minimum amounts"));
+    expect(verifyMessage(compile(ctx, [ammV4Withdraw11(ctx, { lp: new BN(0) })]), withdrawing(ctx))).toEqual(
+      rejected("raydium-amm-v4 withdraw removes nothing"),
+    );
+    expect(verifyMessage(compile(ctx, [amm]), ctx.expectation)).toEqual(
+      rejected("raydium-amm-v4 withdraw is not allowed in a claim"),
+    );
+    const noMinimums = new TransactionInstruction({ programId: amm.programId, keys: amm.keys, data: amm.data.subarray(0, 9) });
+    expect(verifyMessage(compile(ctx, [noMinimums]), withdrawing(ctx))).toEqual(
+      rejected("raydium-amm-v4 withdraw has 9 data bytes; expected 25"),
     );
   });
 

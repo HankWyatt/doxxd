@@ -284,8 +284,8 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       // 12 marketBaseVault, 13 marketQuoteVault, 14 marketAuthority,
       // 15 user lpTokenAccount, 16 user baseTokenAccount,
       // 17 user quoteTokenAccount, 18 owner, 19 eventQueue, 20 bids, 21 asks.
-      // The program also accepts shorter lists with shifted user accounts;
-      // only this one is allowed.
+      // The program also accepts 20, 21 and 23 accounts with shifted user
+      // accounts; only this form and the 11-account form below are allowed.
       discriminator: [4],
       kinds: ["withdraw"],
       // removeLiquidityLayout (src/raydium/liquidity/layout.ts:142): tag u8,
@@ -298,6 +298,28 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
         16: { role: "ownedTokenAccount", name: "user_base_token_account" },
         17: { role: "ownedTokenAccount", name: "user_quote_token_account" },
         18: { role: "owner", name: "owner" },
+      },
+    },
+    {
+      protocol: "raydium-amm-v4",
+      name: "withdraw",
+      // The OpenBook-free form, "Recommended use due to openbook has not
+      // supported" (raydium-amm program/src/processor.rs:1561-1590, master
+      // 91739d8; added by "Remove openbook dependency (#69)", 27f461d, after
+      // which pools are created without a market): 0 token program, 1 amm,
+      // 2 authority, 3 targetOrders, 4 lpMint, 5 coin (base) vault, 6 pc
+      // (quote) vault, 7 user lpTokenAccount, 8 user coin (base) account,
+      // 9 user pc (quote) account, 10 owner. Same data as the 22-account form.
+      // The pre-sign check picks between the two by account count.
+      discriminator: [4],
+      kinds: ["withdraw"],
+      args: { length: 25, amount: { offset: 1, bytes: 8 }, minimums: [9, 17] },
+      accounts: 11,
+      remaining: "none",
+      roles: {
+        8: { role: "ownedTokenAccount", name: "user_base_token_account" },
+        9: { role: "ownedTokenAccount", name: "user_quote_token_account" },
+        10: { role: "owner", name: "owner" },
       },
     },
   ],

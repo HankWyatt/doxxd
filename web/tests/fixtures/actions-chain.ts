@@ -156,6 +156,15 @@ export const SYNTHETIC = {
     ownerLp: new BN("100000000"),
     reserveSync: new BN("5000000000"),
     reserveWsol: new BN("100000000000"),
+    // A pool created without an OpenBook market (raydium-amm after "Remove
+    // openbook dependency"): SYNA / wSOL, with open orders and the market
+    // program set to the default key and no market account.
+    marketless: {
+      lpSupply: new BN("2000000000"),
+      ownerLp: new BN("500000000"),
+      reserveSyna: new BN("4000000000000"),
+      reserveWsol: new BN("20000000000"),
+    },
   },
 };
 
@@ -224,6 +233,9 @@ export type SyntheticChain = {
     market: string;
     authority: string;
     marketAuthority: string;
+    // SYNA/wSOL without a market; `marketSeed` is the account stored as its
+    // market, which does not exist on chain.
+    marketless: { pool: string; lpMint: string; lpAccount: string; authority: string; marketSeed: string };
   };
 };
 
@@ -1088,6 +1100,63 @@ export function chainFixture(): SyntheticChain {
   const ammLpAccount = getAssociatedTokenAddressSync(ammKeys.lpMint, wallet, false, token);
   putTokenAccount(ammLpAccount, ammKeys.lpMint, wallet, A.ownerLp);
 
+  // The market-less pool. process_initialize2 stores the seed account it was
+  // given as `market` and the default key as open orders and market program.
+  const M = A.marketless;
+  const marketSeed = key(47);
+  const freeKeys = getAssociatedPoolKeys({
+    version: 4,
+    marketVersion: 3,
+    marketId: marketSeed,
+    baseMint: syna,
+    quoteMint: wsol,
+    baseDecimals: 9,
+    quoteDecimals: 9,
+    programId: new PublicKey(PROGRAM_IDS.ammV4),
+    marketProgramId: openBook,
+  });
+  put(
+    freeKeys.id,
+    PROGRAM_IDS.ammV4,
+    encodeLayout(liquidityStateV4Layout, {
+      status: new BN(6),
+      nonce: new BN(freeKeys.nonce),
+      maxOrder: new BN(7),
+      depth: new BN(3),
+      baseDecimal: new BN(9),
+      quoteDecimal: new BN(9),
+      state: new BN(1),
+      minSize: new BN(1_000_000),
+      volMaxCutRatio: new BN(500),
+      amountWaveRatio: new BN(5_000_000),
+      minPriceMultiplier: new BN(1),
+      maxPriceMultiplier: new BN(1_000_000_000),
+      systemDecimalValue: new BN(1_000_000_000),
+      tradeFeeNumerator: new BN(25),
+      tradeFeeDenominator: new BN(10_000),
+      pnlNumerator: new BN(12),
+      pnlDenominator: new BN(100),
+      swapFeeNumerator: new BN(25),
+      swapFeeDenominator: new BN(10_000),
+      baseVault: freeKeys.baseVault,
+      quoteVault: freeKeys.quoteVault,
+      baseMint: syna,
+      quoteMint: wsol,
+      lpMint: freeKeys.lpMint,
+      openOrders: DEFAULT_KEY,
+      marketId: marketSeed,
+      marketProgramId: DEFAULT_KEY,
+      targetOrders: freeKeys.targetOrders,
+      owner: key(64),
+      lpReserve: M.lpSupply,
+    }),
+  );
+  putTokenAccount(freeKeys.baseVault, syna, freeKeys.authority, M.reserveSyna);
+  putTokenAccount(freeKeys.quoteVault, wsol, freeKeys.authority, M.reserveWsol);
+  put(freeKeys.lpMint, PROGRAM_IDS.token, mintData({ decimals: 9, supply: M.lpSupply, authority: freeKeys.authority }));
+  const freeLpAccount = getAssociatedTokenAddressSync(freeKeys.lpMint, wallet, false, token);
+  putTokenAccount(freeLpAccount, freeKeys.lpMint, wallet, M.ownerLp);
+
   const marketSigner = Market.getAssociatedAuthority({ programId: openBook, marketId: market });
   const marketBaseVault = key(66);
   const marketQuoteVault = key(67);
@@ -1165,6 +1234,13 @@ export function chainFixture(): SyntheticChain {
       market: String(market),
       authority: String(ammKeys.authority),
       marketAuthority: String(marketSigner.publicKey),
+      marketless: {
+        pool: String(freeKeys.id),
+        lpMint: String(freeKeys.lpMint),
+        lpAccount: String(freeLpAccount),
+        authority: String(freeKeys.authority),
+        marketSeed: String(marketSeed),
+      },
     },
   };
 }
