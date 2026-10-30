@@ -42,7 +42,7 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 1000 }, { name: 
     await expect(holdings.getByLabel("Trading data coverage")).toContainText("1 of 1 tokens loaded");
     const row = jupButton.locator("xpath=ancestor::tr");
     await expect(row.locator(".holdings-value")).toHaveText("$500.00");
-    await expect(row.locator(".holdings-value")).toHaveCSS("color", "rgb(117, 239, 181)");
+    await expect(row.locator(".holdings-value")).toHaveCSS("color", "rgb(20, 241, 149)");
     if (viewport.name === "desktop") {
       await expect(row.getByText("1.25M", { exact: true })).toBeVisible();
       await expect(row.getByText("+$250.00", { exact: true })).toBeVisible();

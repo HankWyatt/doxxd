@@ -27,7 +27,7 @@ export function SelectionBar({
         <button type="button" className="action-pill" onClick={onClear}>
           Clear
         </button>
-        <button type="button" className="action-pill primary" disabled={busy} onClick={onClaim}>
+        <button type="button" className="action-pill claim" disabled={busy} onClick={onClaim}>
           Claim fees ({selected.length})
         </button>
       </span>

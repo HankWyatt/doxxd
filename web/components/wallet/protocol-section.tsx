@@ -460,7 +460,7 @@ function ProtocolBody({
               <button
                 ref={claimAllButton}
                 type="button"
-                className="action-pill primary"
+                className="action-pill claim"
                 disabled={actions.busy}
                 onClick={claimAll}
               >

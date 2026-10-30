@@ -1,19 +1,32 @@
 @import "tailwindcss";
 :root {
   color-scheme: dark;
-  --bg: #0c1111;
-  --panel: #101a18;
-  --raised: #15211e;
-  --line: #ffffff13;
-  --text: #f0f3ed;
-  --muted: #9bb2a7;
-  --faint: #718b7c;
-  --accent: #adf5d4;
-  --violet: #b0a0ef;
-  --glow: #4a776433;
-  --positive: #8cdbb2;
-  --negative: #f295a3;
-  --warning: #e6c88a;
+  /* Palette A, "Solana night": near-black with a violet cast, Solana green
+     for primary actions and brand, Solana purple for wallet actions. */
+  --bg: #0b0a12;
+  --panel: #14121f;
+  --raised: #1c1a2b;
+  --line: #ffffff14;
+  /* UI borders that must read as a control edge (3:1 against --bg/--panel). */
+  --control-line: #6b658f;
+  --text: #f4f2ff;
+  --muted: #a6a0c0;
+  --body: #b9b4d4;
+  --faint: #8d87ab;
+  --accent: #14f195;
+  /* Text and icons drawn on --accent or --violet-fill. */
+  --on-accent: #0b0a12;
+  --on-violet: #ffffff;
+  /* Purple text, icons and borders on the dark surfaces. */
+  --violet: #b98bff;
+  /* Purple fills (white text on top). */
+  --violet-fill: #9945ff;
+  --violet-fill-hover: #8a3cf0;
+  --glow: #9945ff26;
+  --positive: #14f195;
+  --negative: #ff8597;
+  --warning: #ffc861;
+  --solana-gradient: linear-gradient(90deg, #9945ff, #14f195);
 }
 .label-mono {
   font: 9px ui-monospace, SFMono-Regular, monospace;
@@ -27,6 +40,13 @@
 html {
   background: var(--bg);
   scroll-behavior: smooth;
+}
+/* The thin Solana stripe across the very top of every page. */
+body::before {
+  content: "";
+  display: block;
+  height: 3px;
+  background: var(--solana-gradient);
 }
 body {
   margin: 0;
@@ -72,7 +92,7 @@ a svg {
   vertical-align: middle;
 }
 ::selection {
-  background: #28685b;
+  background: #9945ff66;
 }
 .muted {
   color: var(--muted);
@@ -145,9 +165,10 @@ a svg {
   padding: 16px 40px;
 }
 .brand {
+  --brand-gap: 9px;
   display: inline-flex;
   align-items: center;
-  gap: 9px;
+  gap: var(--brand-gap);
   font-size: 25px;
   font-weight: 800;
   letter-spacing: -1.3px;
@@ -158,7 +179,7 @@ a svg {
   display: inline-grid;
   place-items: center;
   background: var(--accent);
-  color: #0b211b;
+  color: var(--on-accent);
   transform: skew(-8deg);
   border-radius: 7px;
   font-size: 24px;
@@ -167,6 +188,8 @@ a svg {
 }
 .brand-dot {
   color: var(--accent);
+  /* Sit right after "doxxd", not a flex gap away. */
+  margin-left: calc(-1 * var(--brand-gap));
 }
 .header-search {
   max-width: 470px;
@@ -221,7 +244,7 @@ a svg {
   display: flex;
   align-items: center;
   gap: 12px;
-  border: 1px solid #33413e;
+  border: 1px solid var(--control-line);
   border-radius: 10px;
   background: var(--panel);
   padding: 8px 8px 8px 17px;
@@ -249,7 +272,7 @@ a svg {
   border: 0;
   background: var(--accent);
   border-radius: 6px;
-  color: #112c24;
+  color: var(--on-accent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -375,7 +398,7 @@ a svg {
   border-radius: 18px;
   background:
     radial-gradient(90% 160% at 0% 0%, var(--glow), transparent 55%),
-    radial-gradient(70% 140% at 100% 0%, #b0a0ef1f, transparent 60%),
+    radial-gradient(70% 140% at 100% 0%, #14f1950f, transparent 60%),
     var(--panel);
 }
 .wallet-total {
@@ -509,13 +532,13 @@ a svg {
   white-space: nowrap;
 }
 .badge.ready {
-  background: #163329;
+  background: color-mix(in srgb, var(--positive) 12%, var(--panel));
   color: var(--positive);
 }
 .badge.partial,
 .badge.pending,
 .badge.stale {
-  background: #332c1d;
+  background: color-mix(in srgb, var(--warning) 12%, var(--panel));
   color: var(--warning);
 }
 .tabs {
@@ -1174,7 +1197,7 @@ tbody tr.data-row:hover {
   min-width: 110px;
 }
 .holdings-value {
-  color: #75efb5;
+  color: var(--positive);
   font-size: 13px;
   font-weight: 650;
 }
@@ -1195,7 +1218,7 @@ tbody tr.data-row:hover {
   align-items: flex-start;
 }
 .holding-trade-buy {
-  color: #75dfae;
+  color: var(--positive);
 }
 .holding-trade-sell {
   color: var(--negative);
@@ -1587,11 +1610,11 @@ tbody tr.data-row:hover {
   .save-wallet-control, .save-wallet-feedback { max-width: 180px; }
 }
 
-.watchlist-add > .button { background: var(--accent); border-color: var(--accent); color: #0b211b; }
+.watchlist-add > .button { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 
 /* Wallet connection: the site header control and the wallet page's tag */
-.button.primary { background: var(--accent); border-color: var(--accent); color: #0b211b; font-weight: 700; }
-.button.primary:hover:not(:disabled) { color: #0b211b; border-color: var(--accent); filter: brightness(1.06); }
+.button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 700; }
+.button.primary:hover:not(:disabled) { color: var(--on-accent); border-color: var(--accent); filter: brightness(1.06); }
 .pill {
   display: inline-flex;
   align-items: center;
@@ -1776,18 +1799,21 @@ tbody tr.data-row:hover {
 }
 .action-pill:disabled { opacity: 0.45; cursor: default; }
 .action-pill[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+/* Every Claim button: Solana purple fill, white text. */
 .action-pill.claim {
-  color: var(--violet);
-  border-color: color-mix(in srgb, var(--violet) 60%, transparent);
+  background: var(--violet-fill);
+  border-color: var(--violet-fill);
+  color: var(--on-violet);
+  font-weight: 700;
 }
-.action-pill.claim:hover:not(:disabled) { color: var(--violet); border-color: var(--violet); }
+.action-pill.claim:hover:not(:disabled) { color: var(--on-violet); background: var(--violet-fill-hover); border-color: var(--violet-fill-hover); }
 .action-pill.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #0b211b;
+  color: var(--on-accent);
   font-weight: 700;
 }
-.action-pill.primary:hover:not(:disabled) { color: #0b211b; border-color: var(--accent); filter: brightness(1.06); }
+.action-pill.primary:hover:not(:disabled) { color: var(--on-accent); border-color: var(--accent); filter: brightness(1.06); }
 /* Under the balance at every width, so the row never outgrows a phone. */
 .row-actions {
   display: flex;
