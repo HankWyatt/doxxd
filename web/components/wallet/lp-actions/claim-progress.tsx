@@ -155,10 +155,12 @@ export function ClaimProgress({
           </button>
         ) : (
           <button type="button" className="action-pill" disabled={stopping} onClick={onStop}>
-            Stop after this one
+            Stop
           </button>
         )}
       </div>
+      {/* Stop halts before the next prompt or send; nothing sent is ever recalled. */}
+      {!done && <p className="faint small">Transactions you haven&apos;t approved won&apos;t be sent.</p>}
     </section>
   );
 }

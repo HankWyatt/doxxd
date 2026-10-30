@@ -885,7 +885,7 @@ describe("runAction", () => {
       rpc: {
         ...claimed(ctx),
         blockHeight: async () => {
-          stop = true; // "Stop after this one" while the read is in flight
+          stop = true; // "Stop" while the read is in flight
           return HEIGHT;
         },
       },

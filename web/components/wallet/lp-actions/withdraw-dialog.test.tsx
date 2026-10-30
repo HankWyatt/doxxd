@@ -679,7 +679,7 @@ describe("on the LP card", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     // The card's own panel carries on with the same run.
     expect(screen.getByText("Withdraw from SYNA + SYNB")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Stop after this one" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
     // No other action can start meanwhile.
     expect(screen.getByRole("button", { name: /Claim all fees/ })).toBeDisabled();
     expect(

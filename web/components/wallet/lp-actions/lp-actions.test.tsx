@@ -430,7 +430,8 @@ describe("claiming", () => {
       p.getByText("If you stop or reject one, nothing is lost: those fees just stay unclaimed."),
     ).toBeInTheDocument();
 
-    fireEvent.click(p.getByRole("button", { name: "Stop after this one" }));
+    expect(p.getByText("Transactions you haven't approved won't be sent.")).toBeInTheDocument();
+    fireEvent.click(p.getByRole("button", { name: "Stop" }));
     expect(run.options().shouldStop()).toBe(true);
     expect(p.queryByRole("button", { name: "Done" })).toBeNull();
 
@@ -563,7 +564,7 @@ describe("one run per page (fix round R-T11c)", () => {
     fireEvent.click(claims[0]);
     claimAll();
     expect(build.buildClaimGroups).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Stop after this one" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     expect(run.options().shouldStop()).toBe(true);
   });
 
@@ -652,7 +653,7 @@ describe("one run per page (fix round R-T11c)", () => {
     const panel = within(await screen.findByRole("region", { name: "Claiming fees from all positions" }));
     expect(panel.getByText("Loading every position…")).toBeInTheDocument();
     await waitFor(() => expect(signal).toBeDefined());
-    fireEvent.click(panel.getByRole("button", { name: "Stop after this one" }));
+    fireEvent.click(panel.getByRole("button", { name: "Stop" }));
     expect(signal!.aborted).toBe(true);
     expect(await panel.findByText("Nothing was claimed")).toBeInTheDocument();
     expect(panel.getByRole("button", { name: "Done" })).toBeInTheDocument();
