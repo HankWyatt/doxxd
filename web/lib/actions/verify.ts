@@ -18,6 +18,7 @@
 //   exact amount (or all, for remove_all_liquidity) and the exact minimums,
 //   at most once per position; a position is closed only when the
 //   withdrawal closes it;
+// - a reward claim never skips (forfeits) the reward;
 // - a close acts only on listed DAMM v2 and CLMM positions: it may collect
 //   (as a claim does), refresh vesting and close each listed position once,
 //   and never removes liquidity;
@@ -280,6 +281,8 @@ function checkProtocol(
   if (data.length !== spec.args.length)
     reject(`${label} has ${data.length} data bytes; expected ${spec.args.length}`);
   if (!spec.kinds.includes(ctx.kind)) reject(`${label} is not allowed in a ${ctx.kind}`);
+  for (const flag of spec.args.zeroFlags ?? [])
+    if (data[flag.offset] !== 0) reject(`${label} ${flag.name} must be 0 (${flag.why})`);
   checkArgs(ctx.kind, spec, label, data);
 
   const n = accounts.length;

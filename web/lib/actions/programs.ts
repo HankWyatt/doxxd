@@ -95,12 +95,14 @@ export type ActionKind = "claim" | "withdraw" | "close";
  * An instruction's data, decoded with an exact length:
  * - `length`: the whole data length, discriminator included;
  * - `amount`: the liquidity or LP amount removed, little-endian at `offset`;
- * - `minimums`: offsets of the u64 little-endian minimum outputs.
+ * - `minimums`: offsets of the u64 little-endian minimum outputs;
+ * - `zeroFlags`: single-byte flags that must be 0, by offset and name.
  */
 export type InstructionArgs = {
   length: number;
   amount?: { offset: number; bytes: 8 | 16 };
   minimums: readonly number[];
+  zeroFlags?: readonly { offset: number; name: string; why: string }[];
 };
 
 export type InstructionSpec = {
@@ -173,8 +175,14 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       name: "claim_reward", // dist/index.js:367
       discriminator: [149, 95, 181, 242, 94, 90, 158, 162],
       kinds: ["claim", "withdraw", "close"],
-      // reward_index: u8, skip_reward: u8 (dist/index.js:427-438).
-      args: { length: 10, minimums: [] },
+      // reward_index: u8, skip_reward: u8 (dist/index.js:427-438). A
+      // non-zero skip_reward clears the pending reward without paying it
+      // (damm-v2 ix_claim_reward.rs), so it must be 0.
+      args: {
+        length: 10,
+        minimums: [],
+        zeroFlags: [{ offset: 9, name: "skip_reward", why: "a skipped reward is never paid out" }],
+      },
       // 0 pool_authority, 1 pool, 2 position, 3 reward_vault, 4 reward_mint,
       // 5 user_token_account, 6 position_nft_account, 7 signer,
       // 8 token_program, 9 event_authority, 10 program.

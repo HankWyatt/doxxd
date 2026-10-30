@@ -1738,3 +1738,33 @@ describe("verifyMessage for a close", () => {
     );
   });
 });
+
+describe("verifyMessage and claim_reward's skip_reward flag (R-001)", () => {
+  // skip_reward = 1 clears the pending reward without paying it out.
+  async function skipping(ctx: Ctx, flag: number) {
+    const ixs = await dammClaimReward(ctx);
+    return ixs.map((ix) => {
+      if (ix.programId.toBase58() !== PROGRAM_IDS.cpAmm) return ix;
+      const data = Buffer.from(ix.data);
+      data[9] = flag;
+      return new TransactionInstruction({ programId: ix.programId, keys: ix.keys, data });
+    });
+  }
+
+  it("rejects a reward claim that skips the reward, in a claim, a withdraw and a close", async () => {
+    const ctx = setup();
+    for (const flag of [1, 255])
+      for (const kind of ["claim", "withdraw", "close"] as const)
+        expect(verifyMessage(compile(ctx, await skipping(ctx, flag)), { ...ctx.expectation, kind }), `${kind} ${flag}`).toEqual(
+          rejected("meteora-damm-v2 claim_reward skip_reward must be 0 (a skipped reward is never paid out)"),
+        );
+  });
+
+  it("still accepts the builders' claim_reward (skip_reward 0) in every kind", async () => {
+    const ctx = setup();
+    const ixs = await dammClaimReward(ctx);
+    expect(only(ixs, PROGRAM_IDS.cpAmm)[0].data[9]).toBe(0);
+    for (const kind of ["claim", "withdraw", "close"] as const)
+      expect(verifyMessage(compile(ctx, ixs), { ...ctx.expectation, kind }), kind).toEqual(OK);
+  });
+});
