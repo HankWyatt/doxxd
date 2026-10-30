@@ -29,7 +29,8 @@ export function mintLookup(targets: readonly ActionTarget[], labels: Record<stri
 export function formatAtoms(mint: string, atoms: string, lookup: MintLookup): string {
   const { decimals, name } = lookup(mint);
   const ui = decimals === null ? null : atomsToUi(atoms, decimals);
-  return ui === null ? `${atoms} raw atoms ${name}` : `${formatAmount(ui)} ${name}`;
+  const text = ui === null ? null : formatAmount(ui);
+  return text === null ? `${atoms} raw atoms ${name}` : `${text} ${name}`;
 }
 
 /** "1.5 SYNA + 0.002 SOL" */
