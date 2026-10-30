@@ -103,38 +103,6 @@ it("refuses an oversized successful payload without reading it as a wallet resul
     ).read(wallet, "summary"),
   ).toEqual({ ok: false, kind: "refused" });
 });
-it("enforces an optional wallet allowlist and a shared request budget before upstream reads", async () => {
-  const network = vi.fn(async () => reply(summary));
-  const client = createDmndClient(
-    { ...env, DMND_ALLOWED_WALLETS: wallet, DMND_REQUEST_BUDGET: "1" },
-    network,
-  );
-  expect(
-    await client.read("J3jHGNUJMKHZnC8iTnnMGx5Vii5fjXBuh5Rc6K6feZ38", "summary"),
-  ).toEqual({ ok: false, kind: "not_enabled", scope: "wallet" });
-  expect(await client.read(wallet, "summary")).toEqual({
-    ok: true,
-    data: summary,
-  });
-  expect(await client.read(wallet, "overview")).toEqual({
-    ok: false,
-    kind: "refused",
-  });
-  expect(network).toHaveBeenCalledTimes(1);
-});
-it.each(["0", "35", "1.5", "NaN"])(
-  "rejects an invalid bounded request budget %s",
-  async (budget) => {
-    const network = vi.fn();
-    expect(
-      await createDmndClient(
-        { ...env, DMND_REQUEST_BUDGET: budget },
-        network,
-      ).read(wallet, "summary"),
-    ).toEqual({ ok: false, kind: "configuration" });
-    expect(network).not.toHaveBeenCalled();
-  },
-);
 it("turns an expired upstream cursor into recoverable invalid input", async () => {
   expect(
     await createDmndClient(env, async () =>

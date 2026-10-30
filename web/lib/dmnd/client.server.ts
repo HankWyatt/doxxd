@@ -13,8 +13,6 @@ export type DmndEnv = {
   DMND_API_BASE_URL?: string;
   DMND_API_KEY?: string;
   DMND_ENABLED_PROTOCOLS?: string;
-  DMND_ALLOWED_WALLETS?: string;
-  DMND_REQUEST_BUDGET?: string;
 };
 function apiBase(value: string): URL | null {
   try {
@@ -135,7 +133,6 @@ export function createDmndClient(
   fetchImpl: typeof fetch = fetch,
 ) {
   const pending = new Map<string, Promise<ResourceResult<unknown>>>();
-  let upstreamReads = 0;
   async function read<K extends ResourceName>(
     wallet: string,
     resource: K,
@@ -148,25 +145,6 @@ export function createDmndClient(
       if (value !== undefined) params.set(key, String(value));
     const validQuery = parseResourceQuery(resource, params);
     if (validQuery === null) return { ok: false, kind: "invalid_input" };
-    const allowed = env.DMND_ALLOWED_WALLETS?.split(",").map((value) =>
-      value.trim(),
-    );
-    if (allowed?.some((value) => normalizeAddress(value) !== value))
-      return { ok: false, kind: "configuration" };
-    if (allowed && !allowed.includes(wallet))
-      return { ok: false, kind: "not_enabled", scope: "wallet" };
-    const budget =
-      env.DMND_REQUEST_BUDGET === undefined
-        ? undefined
-        : Number(env.DMND_REQUEST_BUDGET);
-    if (
-      budget !== undefined &&
-      (!/^\d+$/.test(env.DMND_REQUEST_BUDGET!) ||
-        !Number.isInteger(budget) ||
-        budget < 1 ||
-        budget > 34)
-    )
-      return { ok: false, kind: "configuration" };
     const base = apiBase(
       env.DMND_API_BASE_URL ?? "https://api.dmnd.dev/api/v1",
     );
@@ -182,9 +160,6 @@ export function createDmndClient(
     const existing = pending.get(identity);
     if (existing) return existing as Promise<ResourceResult<ResourceData[K]>>;
     const request = (async (): Promise<ResourceResult<ResourceData[K]>> => {
-      if (budget !== undefined && upstreamReads >= budget)
-        return { ok: false, kind: "refused" };
-      upstreamReads++;
       const definition = resources[resource];
       const url = new URL(base.href);
       url.pathname =
@@ -277,8 +252,6 @@ export function serverClient() {
     DMND_API_BASE_URL: process.env.DMND_API_BASE_URL,
     DMND_API_KEY: process.env.DMND_API_KEY,
     DMND_ENABLED_PROTOCOLS: process.env.DMND_ENABLED_PROTOCOLS,
-    DMND_ALLOWED_WALLETS: process.env.DMND_ALLOWED_WALLETS,
-    DMND_REQUEST_BUDGET: process.env.DMND_REQUEST_BUDGET,
   };
   const signature = JSON.stringify(env);
   if (!cached || cached.signature !== signature)

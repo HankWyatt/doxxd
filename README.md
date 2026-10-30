@@ -40,8 +40,6 @@ Live data comes from the [DMND API](https://docs.dmnd.dev) through a server-side
 | `DMND_API_BASE_URL` | DMND API root; default `https://api.dmnd.dev/api/v1`. HTTPS is required except for loopback in development. |
 | `DMND_API_KEY` | Server-only credential. Missing or invalid configuration displays a connection state. |
 | `DMND_ENABLED_PROTOCOLS` | Comma-separated **resource IDs** qualified by DMND for serving. Default empty. |
-| `DMND_ALLOWED_WALLETS` | Optional server allowlist of wallet addresses; omit for public arbitrary-wallet use. |
-| `DMND_REQUEST_BUDGET` | Optional per-runtime upstream request cap, integer 1-34. Omit for normal public operation. |
 | `DOXXD_ACTIONS_ENABLED` | Server-only switch for [on-site actions](#on-site-actions). Off unless exactly `1` and `SOLANA_RPC_URL` is set. |
 | `SOLANA_RPC_URL` | Server-only secret, required for on-site actions: your Solana RPC provider's mainnet URL behind `/api/rpc`. There is no default, because the public `api.mainnet-beta.solana.com` refuses requests from Cloudflare Workers. It usually carries a key and never reaches the browser. |
 
@@ -90,8 +88,6 @@ Run these from `web/`.
 | `npm run lint` | ESLint; it currently reports existing issues and is not part of CI |
 
 After `npm run build`, `DOXXD_E2E_BUILT=1 npm run test:e2e` runs the browser tests against the compiled Worker instead of the development server. The browser tests serve the app on port 4318 and a synthetic Solana RPC helper for the wallet-action flows on port 4319.
-
-`web/scripts/` also holds staged live-verification tooling (`acceptance:dmnd`, `start:dmnd`, `verify:dmnd-runtime`). It is maintainer tooling and is not needed to run, build or contribute to the application.
 
 ## Project layout
 

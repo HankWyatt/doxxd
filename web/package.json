@@ -25,10 +25,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test --workers=1",
-    "contracts:generate": "openapi-typescript contracts/dmnd.openapi.yaml -o lib/dmnd/generated.ts && node scripts/generate-dmnd-validation.mjs",
-    "acceptance:dmnd": "node scripts/dmnd-acceptance.mjs",
-    "start:dmnd": "node scripts/run-dmnd.mjs",
-    "verify:dmnd-runtime": "node scripts/verify-dmnd-runtime.mjs"
+    "contracts:generate": "openapi-typescript contracts/dmnd.openapi.yaml -o lib/dmnd/generated.ts && node scripts/generate-dmnd-validation.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
