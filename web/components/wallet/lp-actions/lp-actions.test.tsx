@@ -856,3 +856,44 @@ describe("wrapped SOL on claims", () => {
       expect(build.unwrapsWrappedSol).toHaveBeenCalledWith(build.runAction.mock.calls[0][0].groups);
     });
 });
+
+describe("a run for another account", () => {
+  it("the connected account's cards say a claim is still running for the other one, with Stop it", async () => {
+    serve({ "meteora-damm-v2": dammPage() });
+    const fake = connect(DAMM.wallet);
+    render(
+      <Shell enabled>
+        <HeaderWallet viewed={DAMM.wallet} />
+        {[DAMM.wallet, OTHER].map((address) => (
+          <ProtocolSection
+            key={address}
+            address={address}
+            resource="meteora-damm-v2"
+            mode={{ kind: "live" }}
+            labels={{}}
+            defaultOpen
+          />
+        ))}
+      </Shell>,
+    );
+    await screen.findByText("Your wallet · Phantom");
+    await screen.findAllByRole("button", { name: "Claim" });
+    buildsGroups();
+    const run = heldRun();
+    fireEvent.click(screen.getAllByRole("button", { name: "Claim" })[0]);
+    await waitFor(() => expect(build.runAction).toHaveBeenCalledTimes(1));
+    const notice = `A claim is still running for ${short(DAMM.wallet)}.`;
+    expect(screen.queryByText(notice)).toBeNull();
+
+    act(() => fake!.switchAccount(OTHER));
+    const shown = await screen.findByText(notice);
+    // Shown once, on the connected account's card; the run's own card no longer offers actions.
+    expect(screen.getAllByText(notice)).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Claim" })).toBeNull();
+    fireEvent.click(within(shown.closest("[role=status]") as HTMLElement).getByRole("button", { name: "Stop it" }));
+    expect(run.options().shouldStop()).toBe(true);
+
+    run.finish([]);
+    await waitFor(() => expect(screen.queryByText(notice)).toBeNull());
+  });
+});

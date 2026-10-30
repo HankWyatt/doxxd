@@ -365,6 +365,7 @@ function ProtocolBody({
   const live =
     actions.active || actions.run ? (
       <div className="lp-live" aria-live="polite">
+        {actions.foreignRun && <ForeignRunNotice run={actions.foreignRun} onStop={actions.stop} />}
         {actions.run && (
           <RunProgress
             // A new run remounts the panel, so it takes focus again.
@@ -661,6 +662,26 @@ function ProtocolBody({
         </div>
       )}
     </>
+  );
+}
+
+const RUN_NOUN: Record<LpRun["kind"], string> = {
+  claim: "A claim",
+  withdraw: "A withdrawal",
+  close: "Closing a position",
+};
+
+/** The page's run belongs to another account than the connected one: say so, and offer to stop it. */
+function ForeignRunNotice({ run, onStop }: { run: LpRun; onStop: () => void }) {
+  return (
+    <div className="lp-foreign-run small" role="status">
+      <span>
+        {RUN_NOUN[run.kind]} is still running for {short(run.wallet)}.
+      </span>{" "}
+      <button type="button" className="action-pill" disabled={run.stopping} onClick={onStop}>
+        Stop it
+      </button>
+    </div>
   );
 }
 

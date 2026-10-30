@@ -78,6 +78,11 @@ export type LpActions = {
   focusRun: boolean;
   /** A run is going on any card; no other may start. */
   busy: boolean;
+  /**
+   * A run still going for another account than the connected one (the wallet
+   * switched accounts mid-run), shown on this account's cards; null otherwise.
+   */
+  foreignRun: LpRun | null;
   start(kind: "claim", targets: ActionTarget[] | ((signal: AbortSignal) => Promise<ActionTarget[]>)): void;
   stop(): void;
   dismiss(): void;
@@ -172,6 +177,7 @@ export function useLpActions(
   const store = useLpRunStore();
   const run = store.run && store.run.wallet === address && store.run.resource === resource ? store.run : null;
   const busy = store.run !== null && store.run.phase !== "done";
+  const foreignRun = busy && active && store.run!.wallet !== wallet!.address ? store.run : null;
   const [startedHere, setStartedHere] = useState<number | null>(null);
 
   // Backoff refetch: positions still pending among the loaded rows. Until the
@@ -240,6 +246,7 @@ export function useLpActions(
     run,
     focusRun: run !== null && run.id === startedHere,
     busy,
+    foreignRun,
     start,
     stop: stopRun,
     dismiss: () => {
