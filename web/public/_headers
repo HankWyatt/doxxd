@@ -1,5 +1,6 @@
 # Security headers for static assets, which Workers assets serve without
-# running the Worker. Must match securityHeaders({ https: true }) in
+# running the Worker. Applied in production and by `wrangler dev` on the built
+# output, not by `npm run dev`. Must match securityHeaders({ https: true }) in
 # lib/security-headers.ts (lib/security-headers.test.ts checks it).
 /*
   X-Content-Type-Options: nosniff
@@ -7,4 +8,4 @@
   X-Frame-Options: DENY
   Permissions-Policy: camera=(), microphone=(), geolocation=()
   Content-Security-Policy: frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'
-  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  Strict-Transport-Security: max-age=31536000

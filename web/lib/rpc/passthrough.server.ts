@@ -79,8 +79,10 @@ async function readCappedText(
 
 // Substrings of the upstream URL that would identify or unlock it: the URL
 // itself, its host, credentials, the query string and its values, and long
-// path segments (some providers put the key in the path). Query parameter
-// names are not secret: a name like `token` also appears in ordinary replies.
+// path segments (some providers put the key in the path). Named query
+// parameters' names are not secret: a name like `token` also appears in
+// ordinary replies. A bare name with no value can be the key itself. Each part
+// is also matched in its JSON-escaped form, as it appears in the reply.
 function secretParts(upstream: string): string[] {
   const parts = [upstream];
   try {
@@ -89,14 +91,19 @@ function secretParts(upstream: string): string[] {
     for (const credential of [url.username, url.password])
       if (credential.length >= MIN_SECRET_LENGTH) parts.push(credential);
     if (url.search.length > 1) parts.push(url.search.slice(1));
-    for (const value of url.searchParams.values())
-      if (value.length >= MIN_SECRET_LENGTH) parts.push(value, encodeURIComponent(value));
+    for (const [name, value] of url.searchParams) {
+      const secret = value === "" ? name : value;
+      if (secret.length >= MIN_SECRET_LENGTH) parts.push(secret, encodeURIComponent(secret));
+    }
     for (const segment of url.pathname.split("/"))
       if (segment.length >= 8) parts.push(segment);
   } catch {
     // An unparseable upstream fails at fetch; the raw string is still covered.
   }
-  return parts;
+  return parts.flatMap((part) => {
+    const escaped = JSON.stringify(part).slice(1, -1);
+    return escaped === part ? [part] : [part, escaped];
+  });
 }
 
 function retryAfter(value: string | null): string {

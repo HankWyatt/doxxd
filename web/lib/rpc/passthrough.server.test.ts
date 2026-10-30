@@ -233,6 +233,38 @@ describe("handleRpc", () => {
     }
   });
 
+  it("scans a bare query parameter name, which can be the key itself (#12)", async () => {
+    const url = "https://rpc.example.test/?SYNTHETICBAREKEY9&cluster=mainnet";
+    const { env } = setup(
+      async (_input, init) => answer(init, { result: { logs: ["Program log: SYNTHETICBAREKEY9"] } }),
+      true,
+      url,
+    );
+    const response = await handleRpc(post(slotRequest), env);
+    expect(response.status).toBe(502);
+    expect(await response.text()).not.toContain("SYNTHETICBAREKEY9");
+    // A named parameter's name is still not a secret.
+    const named = setup(
+      async (_input, init) => answer(init, { result: { logs: ["Program log: cluster"] } }),
+      true,
+      url,
+    );
+    expect((await handleRpc(post(slotRequest), named.env)).status).toBe(200);
+  });
+
+  it("scans the JSON-escaped form of a secret with quotes or backslashes (#12)", async () => {
+    // The key is SYN"TH\ETIC: re-serialised, it reads SYN\"TH\\ETIC.
+    const url = "https://rpc.example.test/?api-key=SYN%22TH%5CETIC";
+    const { env } = setup(
+      async (_input, init) => answer(init, { result: { logs: ['Program log: SYN"TH\\ETIC'] } }),
+      true,
+      url,
+    );
+    const response = await handleRpc(post(slotRequest), env);
+    expect(response.status).toBe(502);
+    expect(await response.text()).not.toContain("ETIC");
+  });
+
   it("scans the re-serialised reply, so a \\u-escaped secret cannot slip through (#12)", async () => {
     const escape = (text: string) =>
       [...text].map((c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`).join("");

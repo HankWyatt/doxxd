@@ -12,7 +12,7 @@ const EXPECTED = {
   "Content-Security-Policy": "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'",
 };
 
-const HSTS = "max-age=31536000; includeSubDomains";
+const HSTS = "max-age=31536000";
 
 function expectSecured(response: Response) {
   for (const [name, value] of Object.entries(EXPECTED)) expect(response.headers.get(name)).toBe(value);
@@ -24,10 +24,10 @@ describe("securityHeaders", () => {
     expect(securityHeaders()["Content-Security-Policy"]).not.toContain("script-src");
   });
 
-  it("adds HSTS, without preload, only for HTTPS", () => {
+  it("adds HSTS, without includeSubDomains or preload, only for HTTPS", () => {
     expect(securityHeaders({ https: true })).toEqual({ ...EXPECTED, "Strict-Transport-Security": HSTS });
     expect(securityHeaders({ https: false })).toEqual(EXPECTED);
-    expect(securityHeaders({ https: true })["Strict-Transport-Security"]).not.toContain("preload");
+    expect(securityHeaders({ https: true })["Strict-Transport-Security"]).toBe("max-age=31536000");
   });
 });
 
@@ -167,6 +167,21 @@ describe("withSecurityHeaders", () => {
       expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
       const text = await response.text();
       expect(text).toBe("Internal Server Error");
+    }
+  });
+
+  it("logs a crash's error name and path only: no message, stack or query", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const fetch = withSecurityHeaders((): Response => {
+        throw new TypeError("boom https://rpc.provider.test/?api-key=SECRET");
+      });
+      await fetch(new Request("https://doxxd.test/wallet/x?cursor=SECRET"));
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(log).toHaveBeenCalledWith("worker error", { name: "TypeError", path: "/wallet/x" });
+      expect(JSON.stringify(log.mock.calls)).not.toContain("SECRET");
+    } finally {
+      log.mockRestore();
     }
   });
 
