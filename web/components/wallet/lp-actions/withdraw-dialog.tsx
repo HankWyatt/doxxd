@@ -26,6 +26,7 @@ import {
   withdrawErrorText,
   WITHDRAW_FOOTNOTE,
   WITHDRAW_POOL_CHANGED,
+  WRAPPED_SOL_NOTE,
 } from "./run-store";
 
 type Actions = typeof import("@/lib/actions/build");
@@ -327,6 +328,7 @@ export function WithdrawDialog({
               stopping={run.stopping}
               autoFocus
               nothingLine="Nothing was withdrawn"
+              note={run.wrappedSol ? WRAPPED_SOL_NOTE : null}
               footnote={WITHDRAW_FOOTNOTE}
               onStop={stopRun}
               onDone={() => {
@@ -435,7 +437,7 @@ export function WithdrawDialog({
                   <dd className="numeric">{orUnknown(networkFee, "Fee estimate unavailable")}</dd>
                 </div>
               </dl>
-              {wrappedSol && <p className="withdraw-note">Wrapped SOL in your wallet comes back as SOL too.</p>}
+              {wrappedSol && <p className="withdraw-note">{WRAPPED_SOL_NOTE}</p>}
               {changed && (
                 <p className="withdraw-note" role="status">
                   {WITHDRAW_POOL_CHANGED}

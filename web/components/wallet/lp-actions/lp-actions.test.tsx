@@ -838,3 +838,20 @@ describe("closing empty positions", () => {
     expect(closeButtons()).toHaveLength(0);
   });
 });
+
+describe("wrapped SOL on claims", () => {
+  for (const unwraps of [true, false])
+    it(`${unwraps ? "says" : "does not say"} wrapped SOL comes back as SOL when the claim ${unwraps ? "unwraps" : "doesn't unwrap"} it`, async () => {
+      await ownDamm();
+      buildsGroups();
+      build.unwrapsWrappedSol.mockImplementation(() => unwraps);
+      heldRun();
+      fireEvent.click(screen.getAllByRole("button", { name: "Claim" })[0]);
+      await waitFor(() => expect(build.runAction).toHaveBeenCalledTimes(1));
+      const panel = within(screen.getByRole("region", { name: "Claiming fees from 1 position" }));
+      const note = panel.queryByText("Wrapped SOL in your wallet comes back as SOL too.");
+      if (unwraps) expect(note).toBeInTheDocument();
+      else expect(note).toBeNull();
+      expect(build.unwrapsWrappedSol).toHaveBeenCalledWith(build.runAction.mock.calls[0][0].groups);
+    });
+});

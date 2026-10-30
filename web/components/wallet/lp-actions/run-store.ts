@@ -20,6 +20,8 @@ export const RUN_ERRORS = {
 } as const;
 
 export const WITHDRAW_POOL_CHANGED = "The pool changed · review the new amounts";
+/** Shown when a transaction unwraps wSOL: it closes the wallet's wSOL account, whatever it held. */
+export const WRAPPED_SOL_NOTE = "Wrapped SOL in your wallet comes back as SOL too.";
 /** The progress panel's footnote for a withdraw run. */
 export const WITHDRAW_FOOTNOTE = "If you stop or reject, nothing is lost: your position stays as it is.";
 
@@ -68,6 +70,8 @@ export type LpRun = {
   error: string | null;
   stopping: boolean;
   walletName: string;
+  /** A built transaction unwraps wSOL (see WRAPPED_SOL_NOTE). */
+  wrappedSol: boolean;
 };
 
 /** A backoff re-read after an action, per wallet and resource. */
@@ -170,6 +174,7 @@ export function startClaimRun({
       error: null,
       stopping: false,
       walletName: wallet.walletName,
+      wrappedSol: false,
     },
   });
   const stopping = () => state.run?.id !== id || state.run.stopping;
@@ -208,7 +213,7 @@ export function startClaimRun({
         patch(id, { phase: "done", error: RUN_ERRORS.build });
         return;
       }
-      patch(id, { skipped: built.skipped, phase: "running" });
+      patch(id, { skipped: built.skipped, phase: "running", wrappedSol: actions.unwrapsWrappedSol(built.groups) });
       const steps = await actions.runAction({
         groups: built.groups,
         expectation: built.expectation,
@@ -278,6 +283,7 @@ export function startWithdrawRun({
       error: null,
       stopping: false,
       walletName: wallet.walletName,
+      wrappedSol: false,
     },
   });
   const stopping = () => state.run?.id !== id || state.run.stopping;
@@ -308,7 +314,7 @@ export function startWithdrawRun({
         } else patch(id, { phase: "done", error: WITHDRAW_POOL_CHANGED });
         return;
       }
-      patch(id, { phase: "running" });
+      patch(id, { phase: "running", wrappedSol: actions.unwrapsWrappedSol(built.groups) });
       const steps = await actions.runAction({
         groups: built.groups,
         expectation: built.expectation,
@@ -366,6 +372,7 @@ export function startCloseRun({
       error: null,
       stopping: false,
       walletName: wallet.walletName,
+      wrappedSol: false,
     },
   });
   const stopping = () => state.run?.id !== id || state.run.stopping;
@@ -388,7 +395,7 @@ export function startCloseRun({
         patch(id, { phase: "done" });
         return;
       }
-      patch(id, { phase: "running" });
+      patch(id, { phase: "running", wrappedSol: actions.unwrapsWrappedSol(built.groups) });
       const steps = await actions.runAction({
         groups: built.groups,
         expectation: built.expectation,

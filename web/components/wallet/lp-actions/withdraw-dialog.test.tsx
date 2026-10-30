@@ -26,6 +26,7 @@ const build = vi.hoisted(() => ({
   computeUnitPrice: vi.fn(),
   isRpcBusy: vi.fn(),
   buildClaimGroups: vi.fn(),
+  unwrapsWrappedSol: vi.fn(() => false),
 }));
 vi.mock("@/lib/actions/build", () => build);
 

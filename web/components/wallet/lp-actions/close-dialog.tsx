@@ -15,7 +15,15 @@ import type { ConnectedWallet } from "@/lib/actions/wallet-session";
 import { useCurrentAddress } from "@/components/wallet-connect/provider";
 import { formatAtoms, mintLookup, positionName, type MintLookup } from "./amounts";
 import { ClaimProgress } from "./claim-progress";
-import { dismissRun, startCloseRun, stopRun, useLpRunStore, withdrawErrorText, WITHDRAW_FOOTNOTE } from "./run-store";
+import {
+  dismissRun,
+  startCloseRun,
+  stopRun,
+  useLpRunStore,
+  withdrawErrorText,
+  WITHDRAW_FOOTNOTE,
+  WRAPPED_SOL_NOTE,
+} from "./run-store";
 
 type Actions = typeof import("@/lib/actions/build");
 
@@ -116,6 +124,7 @@ export function CloseDialog({
               stopping={run.stopping}
               autoFocus
               nothingLine="Nothing was closed"
+              note={run.wrappedSol ? WRAPPED_SOL_NOTE : null}
               footnote={WITHDRAW_FOOTNOTE}
               onStop={stopRun}
               onDone={() => {

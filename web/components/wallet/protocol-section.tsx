@@ -44,7 +44,7 @@ import { mintLookup, positionName, type MintLookup } from "./lp-actions/amounts"
 import { ClaimProgress } from "./lp-actions/claim-progress";
 import { RowActions, RowFees } from "./lp-actions/row-actions";
 import { ClaimableTotal, Estimate, FeeUsd } from "./claim-value";
-import { WITHDRAW_FOOTNOTE } from "./lp-actions/run-store";
+import { WITHDRAW_FOOTNOTE, WRAPPED_SOL_NOTE } from "./lp-actions/run-store";
 import { SelectionBar } from "./lp-actions/selection-bar";
 import {
   isActionResource,
@@ -708,6 +708,7 @@ function RunProgress({
       nothingLine={
         run.kind === "withdraw" ? "Nothing was withdrawn" : run.kind === "close" ? "Nothing was closed" : undefined
       }
+      note={run.wrappedSol ? WRAPPED_SOL_NOTE : null}
       footnote={run.kind === "claim" ? undefined : WITHDRAW_FOOTNOTE}
       onStop={actions.stop}
       onDone={onDone}

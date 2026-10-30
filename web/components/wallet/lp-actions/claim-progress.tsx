@@ -77,6 +77,7 @@ export function ClaimProgress({
   stopping,
   autoFocus = false,
   nothingLine = "Nothing was claimed",
+  note = null,
   footnote = "If you stop or reject one, nothing is lost: those fees just stay unclaimed.",
   onStop,
   onDone,
@@ -98,6 +99,8 @@ export function ClaimProgress({
   autoFocus?: boolean;
   /** The end line when a finished run confirmed nothing. */
   nothingLine?: string;
+  /** A line about what the run does besides its steps (wrapped SOL). */
+  note?: string | null;
   /** What stopping or rejecting means for this kind of run. */
   footnote?: string;
   onStop(): void;
@@ -143,6 +146,7 @@ export function ClaimProgress({
         </p>
       )}
       {nothing && <p>{nothingLine}</p>}
+      {note && <p className="small">{note}</p>}
       <p className="faint small">{footnote}</p>
       <div className="inline">
         {done ? (
