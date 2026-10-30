@@ -1,47 +1,66 @@
-import { Activity, ArrowDownLeft, ArrowUpRight, Layers3, Wallet } from "lucide-react";
+/**
+ * The homepage hero: one orchestrated moment, looping every 9 s. A shortened
+ * address types into the bar, then the portfolio resolves below it (CSS only,
+ * see `.pf-*` in app/home.css; static under prefers-reduced-motion).
+ *
+ * Every figure here is synthetic and the address is not a real wallet, so the
+ * card never implies anyone's holdings.
+ */
+const SPLIT = [
+  { label: "Wallet", value: "$1.25M", share: 44 },
+  { label: "Kamino lending", value: "$625K", share: 22 },
+  { label: "Staked SOL", value: "$455K", share: 16 },
+  { label: "Raydium pools", value: "$312K", share: 11 },
+  { label: "Meteora pools", value: "$199K", share: 7 },
+];
 
-function SolanaMark() {
-  return <span className="solana-glyph" aria-hidden="true"><i /><i /><i /></span>;
-}
+export const PREVIEW_ADDRESS = "7xKX…9fQa";
 
 export function PortfolioPreview() {
   return (
-    <div className="portfolio-scene" role="img" aria-label="Public wallet explorer illustration: one Solana address brings holdings, protocol positions, and activity into view.">
-      <div aria-hidden="true">
-        <div className="scene-orbit orbit-one" /><div className="scene-orbit orbit-two" />
-        <div className="scene-cross cross-one">+</div><div className="scene-cross cross-two">+</div>
-        <div className="scene-token token-sol"><SolanaMark /></div>
-        <div className="scene-token token-usdc">$</div>
-        <div className="scene-token token-jito">J</div>
-        <div className="preview-window">
-          <div className="preview-chrome">
-            <div className="window-dots"><i /><i /><i /></div>
-            <span>doxxd<span className="preview-url"> / wallet</span></span>
-            <span className="preview-network"><i /> SOLANA</span>
+    <div
+      className="pf"
+      role="img"
+      aria-label="Example portfolio with made-up numbers: a wallet address resolves into its net worth, holdings split and recent moves."
+    >
+      <div className="pf-bar" aria-hidden="true">
+        <span>doxxd.io/wallet/</span>
+        <span className="pf-addr">{PREVIEW_ADDRESS}</span>
+        <span className="pf-example">Example</span>
+      </div>
+      <div className="pf-body" aria-hidden="true">
+        <div className="pf-worth">
+          <div>
+            <div className="pf-label">Net worth</div>
+            <div className="pf-value">$2,841,390</div>
           </div>
-          <div className="preview-body">
-            <div className="preview-wallet">
-              <span className="preview-avatar"><Wallet size={19} strokeWidth={1.5} /></span>
-              <div><strong>An address. A clearer picture.</strong><span>PUBLIC WALLET EXPLORER</span></div>
-              <span className="preview-access">READ ONLY</span>
-            </div>
-            <div className="preview-focus">
-              <div><p>Your wallet. Any wallet.</p><strong>One address.<br /><span>Every angle.</span></strong></div>
-              <div className="preview-ring"><div><SolanaMark /></div><span className="ring-orbit-dot" /></div>
-            </div>
-            <div className="preview-tabs"><span>Portfolio <i /></span><span>Activity</span></div>
-            <div className="preview-scope"><span className="scope-symbol"><Wallet size={17} /></span><div><strong>Wallet holdings</strong><span>Tokens, balances, and available values</span></div><ArrowUpRight size={13} /></div>
-            <div className="preview-scope"><span className="scope-symbol violet"><Layers3 size={17} /></span><div><strong>Protocol positions</strong><span>Staking, lending, and liquidity</span></div><ArrowUpRight size={13} /></div>
-            <div className="preview-scope"><span className="scope-symbol peach"><Activity size={17} /></span><div><strong>On-chain activity</strong><span>Transfers, trades, and what changed</span></div><ArrowUpRight size={13} /></div>
+          <div className="pf-who">
+            412 tokens
+            <br />9 protocols
           </div>
         </div>
-        <div className="scene-activity">
-          <span className="activity-indicator"><ArrowDownLeft size={17} /></span>
-          <div><strong>A closer look at every move.</strong><span>Transfers, trades, and what changed.</span></div>
-          <span className="activity-trail">↗</span>
+        <div className="pf-split">
+          {SPLIT.map((part, i) => (
+            <span key={part.label} className={`swatch-${i + 1}`} style={{ flex: part.share }} />
+          ))}
         </div>
-        <p className="scene-caption"><span /> PUBLIC ADDRESSES · ONE CLEARER VIEW</p>
-        <span className="scene-coordinate">SOL / 001</span>
+        <div className="pf-legend">
+          {SPLIT.map((part, i) => (
+            <div key={part.label}>
+              <i className={`swatch-${i + 1}`} />
+              {part.label}
+              <b>{part.value}</b>
+            </div>
+          ))}
+        </div>
+        <div className="pf-moves">
+          <span>
+            <b>Bought</b> 18,400 JUP · 2h ago
+          </span>
+          <span>
+            <b>Added</b> liquidity to SOL–USDC · 5h ago
+          </span>
+        </div>
       </div>
     </div>
   );
