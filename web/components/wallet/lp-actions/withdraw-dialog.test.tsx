@@ -235,7 +235,7 @@ describe("withdraw dialog quote", () => {
     open();
     await ready();
     const input = screen.getByRole("spinbutton", { name: "% price move" });
-    for (const bad of ["0", "5.5", "5.01", "-1", "1.234", "0.001"]) {
+    for (const bad of ["0", "5.5", "5.01", "-1", "1.234", "0.001", "5e-3", "1e1"]) {
       const before = build.quoteWithdraw.mock.calls.length;
       fireEvent.change(input, { target: { value: bad } });
       expect(await screen.findByRole("alert")).toHaveTextContent("Enter a price move above 0% and up to 5%");
@@ -244,7 +244,16 @@ describe("withdraw dialog quote", () => {
       expect(build.quoteWithdraw.mock.calls.length).toBe(before);
       expect(screen.getByText("You receive (about)").nextElementSibling).toHaveTextContent("Unknown");
     }
-    for (const [good, bps] of [["3.5", 350], ["0.01", 1], ["4.99", 499], ["5", 500]] as const) {
+    for (const [good, bps] of [
+      ["3.5", 350],
+      ["0.01", 1],
+      ["4.99", 499],
+      ["5", 500],
+      ["5e-1", 50],
+      ["1E0", 100],
+      ["2.50", 250],
+      [".25", 25],
+    ] as const) {
       fireEvent.change(input, { target: { value: good } });
       await waitFor(() => expect(lastQuote()[4]).toBe(bps));
       await ready();
@@ -320,6 +329,18 @@ describe("withdraw dialog quote", () => {
     open();
     expect(await screen.findByRole("alert")).toHaveTextContent("Nothing to withdraw yet");
     expect(screen.queryByText(/still vesting|locked for good|up to 0%/)).toBeNull();
+    expect(review()).toBeDisabled();
+  });
+
+  it("says less than 0.01% can be withdrawn when the withdrawable part floors to 0 but is not empty", async () => {
+    build.quoteWithdraw.mockImplementation(async (_r, _o, _t, bps: number) =>
+      quote(bps, { lockedBps: 9_999, withdrawableBps: 0, dust: true }),
+    );
+    open();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Less than 0.01% of this position can be withdrawn right now.",
+    );
+    expect(screen.queryByText("Nothing to withdraw yet")).toBeNull();
     expect(review()).toBeDisabled();
   });
 

@@ -856,3 +856,18 @@ describe("unwrapsWrappedSol", () => {
     expect(unwrapsWrappedSol([])).toBe(false);
   });
 });
+
+describe("quoteWithdraw (Meteora DAMM v2): dust", () => {
+  it("flags withdrawable liquidity that floors to 0 bps", async () => {
+    const chain = chainFixture();
+    patchCpAmm(chain, chain.dammV2.variants.locked.position, "Position", (s) => {
+      s.unlocked_liquidity = new BN(1);
+    });
+    const owner = chain.owner.publicKey.toBase58();
+    const quote = await quoteWithdraw(mockActionRpc(chain), owner, target(chain, "locked"), 10_000, 100);
+    expect(quote.withdrawableBps).toBe(0);
+    expect(quote.dust).toBe(true);
+    const normal = await quoteWithdraw(mockActionRpc(chainFixture()), owner, target(chain, "locked"), 10_000, 100);
+    expect(normal.dust).toBe(false);
+  });
+});

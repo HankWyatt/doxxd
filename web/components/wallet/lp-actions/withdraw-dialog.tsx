@@ -46,6 +46,7 @@ const MICRO = 1_000_000;
 const SHARE_ERROR = "Enter a whole percent from 1 to 100";
 const SLIPPAGE_ERROR = "Enter a price move above 0% and up to 5%";
 const NOTHING_YET = "Nothing to withdraw yet";
+const DUST = "Less than 0.01% of this position can be withdrawn right now.";
 const TOO_SMALL = "Amount too small to withdraw";
 
 type Choice = { preset: number } | { custom: string };
@@ -59,12 +60,18 @@ function shareBps(choice: Choice): number | null {
   return percent >= 1 && percent <= 100 ? percent * 100 : null;
 }
 
-/** A custom price move of 0.01–5.00% (at most two decimals) as bps, or null. */
+/**
+ * A custom price move of 0.01–5.00% (at most two decimals once normalised,
+ * so "5e-1" is 0.5%) as bps, or null.
+ */
 function slippageBps(choice: Choice): number | null {
   if ("preset" in choice) return choice.preset;
   const text = choice.custom.trim();
-  if (!/^(\d+(\.\d{0,2})?|\.\d{1,2})$/.test(text)) return null;
-  const bps = Math.round(Number(text) * 100);
+  // Plain decimal numbers, with an optional exponent; no hex, signs or words.
+  if (!/^(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(text)) return null;
+  const value = Number(text) * 100;
+  const bps = Math.round(value);
+  if (!Number.isFinite(value) || Math.abs(value - bps) > 1e-9) return null;
   return bps >= 1 && bps <= MAX_SLIPPAGE_BPS ? bps : null;
 }
 
@@ -213,7 +220,15 @@ export function WithdrawDialog({
   const quote = key === null ? null : (result?.quote ?? null);
   // Refusals the quote implies without throwing (the build would throw).
   const refusal =
-    quote === null ? null : quote.withdrawableBps <= 0 ? NOTHING_YET : tooSmall(quote) ? TOO_SMALL : null;
+    quote === null
+      ? null
+      : quote.withdrawableBps <= 0
+        ? quote.dust
+          ? DUST
+          : NOTHING_YET
+        : tooSmall(quote)
+          ? TOO_SMALL
+          : null;
   const error = !loading && result?.key === key ? (result.error ?? refusal) : null;
   const busy = store.run !== null && store.run.phase !== "done";
   const canReview =

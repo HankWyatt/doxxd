@@ -16,7 +16,8 @@ export type TokenAmount = { mint: string; symbol: string | null; decimals: numbe
  * - `withdrawableBps` / `vestingBps` / `lockedBps`: live shares of the
  *   position's total liquidity that can be withdrawn now / are still vesting /
  *   are permanently locked, each floored on its own (so they need not sum to
- *   10,000); `lockedBps` is 0 exactly when nothing is permanently locked.
+ *   10,000); `lockedBps` is 0 exactly when nothing is permanently locked;
+ * - `dust`: withdrawable liquidity above 0 that floors to 0 bps.
  */
 export type WithdrawQuote = {
   receive: TokenAmount[];
@@ -28,6 +29,11 @@ export type WithdrawQuote = {
   withdrawableBps: number;
   vestingBps: number;
   lockedBps: number;
+  /**
+   * Some liquidity can be withdrawn now, but less than 0.01% of the
+   * position, so `withdrawableBps` floors to 0. Absent where it can't happen.
+   */
+  dust?: boolean;
 };
 
 /** Why a position gets no claim transaction. */
