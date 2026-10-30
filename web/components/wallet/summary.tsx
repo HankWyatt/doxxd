@@ -1,4 +1,5 @@
 "use client";
+import { orUnknown } from "@/components/unknown-value";
 import { useState, type ReactNode } from "react";
 import { Info } from "lucide-react";
 import type { ResourceData, ResourceResult } from "@/lib/dmnd/contracts";
@@ -44,7 +45,7 @@ export function WalletSummary({
     return hero(
       <div>
         <div className="label-mono">Known value</div>
-        <div className="summary-value numeric">{formatHeadline(null)}</div>
+        <div className="summary-value numeric">{orUnknown(formatHeadline(null))}</div>
         <div className="status-line" data-tone="partial">
           {VALUE_UNAVAILABLE}
         </div>
@@ -71,7 +72,7 @@ export function WalletSummary({
             </button>
           </div>
           <div className="summary-value numeric">
-            {formatHeadline(view.valueUsd)}
+            {orUnknown(formatHeadline(view.valueUsd))}
           </div>
           <div className="status-line" data-tone={status.tone}>
             {status.text}

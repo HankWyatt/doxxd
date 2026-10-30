@@ -114,7 +114,7 @@ test("on a 390px screen the pill is an icon and the account card spans the width
 
   await button.click();
   const card = page.getByRole("dialog", { name: "Wallet account" });
-  await expect(card.getByText("—")).toBeVisible();
+  await expect(card.getByText("Unknown")).toBeVisible();
   const box = await card.boundingBox();
   expect(box!.x).toBeGreaterThanOrEqual(15);
   expect(box!.x + box!.width).toBeLessThanOrEqual(375);

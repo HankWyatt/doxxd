@@ -113,7 +113,7 @@ The application uses React, TypeScript and the Sites Vinext runtime.
 
 ## Data principles
 
-The headline uses DMND's authoritative known net value. Doxxd does not sum protocol pages or calculate financial positions. Unknown values remain unknown; missing data does not establish an empty wallet. Receipt references are labeled as overlapping holdings. LP position NFTs in holdings are labeled as position receipts that overlap protocol positions; they are never priced or valued, and their creator-supplied token metadata is not a verification signal. Source clocks, coverage, debt, raw rewards and page-scoped subtotals retain their upstream meaning.
+The headline uses DMND's authoritative known net value. Doxxd does not sum protocol pages or calculate financial positions. Unknown values remain unknown and are left blank (screen readers hear "Unknown", and a hover title says why when known), never shown as $0; missing data does not establish an empty wallet. Receipt references are labeled as overlapping holdings. LP position NFTs in holdings are labeled as position receipts that overlap protocol positions; they are never priced or valued, and their creator-supplied token metadata is not a verification signal. Source clocks, coverage, debt, raw rewards and page-scoped subtotals retain their upstream meaning.
 
 Expanded Marginfi details preserve raw shares, bank amounts, underlying quantities and independent price/bank/position clocks. Expanded spot/perp details preserve raw scaled balances and exact source base/quote amounts. A scaled balance is not a token quantity; base/quote amounts are not USD, equity or profit. Saved protocol snapshots retain their incomplete coverage and disabled-scan reason even when a price observation is newer.
 

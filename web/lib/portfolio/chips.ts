@@ -20,7 +20,7 @@ const UNAVAILABLE = /disabled|unavailable|not_requested|missing/;
 
 /** 1 positive, -1 negative, 0 zero, unknown or unparseable. */
 const sign = (value: string | null | undefined): -1 | 0 | 1 =>
-  value == null || formatUsd(value) === "—"
+  value == null || formatUsd(value) === null
     ? 0
     : (-compareDecimalDesc(value, "0") as -1 | 0 | 1);
 

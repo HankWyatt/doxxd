@@ -1,4 +1,5 @@
 "use client";
+import { orUnknown } from "@/components/unknown-value";
 import type { Schemas } from "@/lib/dmnd/contracts";
 import { formatAmount, atomsToUi } from "@/lib/decimal";
 import { short, mintName } from "@/lib/portfolio/adapters/shared";
@@ -21,7 +22,7 @@ export function ChangeAmount({
   return (
     <span className={negative ? "negative" : "positive"}>
       {!negative && amount !== "0" ? "+" : ""}
-      {formatAmount(amount)}{" "}
+      {orUnknown(formatAmount(amount))}{" "}
       <span className="muted">
         {label}
         {row.ui_amount == null ? " raw atoms" : ""}
@@ -111,10 +112,13 @@ export function TransactionDetail({
         <h4>Network fee / outcome</h4>
         <p>
           {row.fee
-            ? formatAmount(atomsToUi(row.fee.lamports, 9), 9) +
-              " SOL · " +
-              (row.fee.succeeded ? "Succeeded" : "Failed")
-            : "Unknown — fee evidence was not supplied for this wallet."}
+            ? (
+                <>
+                  {orUnknown(formatAmount(atomsToUi(row.fee.lamports, 9), 9))}
+                  {" SOL · " + (row.fee.succeeded ? "Succeeded" : "Failed")}
+                </>
+              )
+            : "Unknown. Fee evidence was not supplied for this wallet."}
         </p>
       </div>
       <div>
@@ -133,11 +137,11 @@ export function TransactionDetail({
               row.observed_trades.map((trade, i) => (
                 <p key={i}>
                   {trade.exchange.replaceAll("_", " ")} · {trade.side}{" "}
-                  {formatAmount(trade.amount_tokens)}{" "}
+                  {orUnknown(formatAmount(trade.amount_tokens))}{" "}
                   {labels[trade.mint] ?? mintName(trade.mint)}
                   <br />
                   <span className="muted">
-                    Quote: {formatAmount(trade.quote_amount)}{" "}
+                    Quote: {orUnknown(formatAmount(trade.quote_amount))}{" "}
                     {labels[trade.quote_mint] ?? mintName(trade.quote_mint)}
                   </span>
                 </p>
@@ -161,10 +165,13 @@ export function TransactionDetail({
               row.observed_transfers.map((transfer, i) => (
                 <p key={i}>
                   {transfer.direction} ·{" "}
-                  {transfer.kind === "native_sol"
-                    ? formatAmount(atomsToUi(transfer.amount_atoms, 9), 9) +
-                      " SOL"
-                    : formatAmount(transfer.amount_atoms) + " raw atoms"}
+                  {transfer.kind === "native_sol" ? (
+                    <>
+                      {orUnknown(formatAmount(atomsToUi(transfer.amount_atoms, 9), 9))} SOL
+                    </>
+                  ) : (
+                    <>{orUnknown(formatAmount(transfer.amount_atoms))} raw atoms</>
+                  )}
                   <br />
                   {transfer.mint && (
                     <>

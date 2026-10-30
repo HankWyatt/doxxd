@@ -1,4 +1,5 @@
 "use client";
+import { orUnknown } from "@/components/unknown-value";
 import { useRef, useState } from "react";
 import { ChevronDown, Info, Layers3 } from "lucide-react";
 import type { ProtocolResource, Schemas } from "@/lib/dmnd/contracts";
@@ -135,7 +136,7 @@ function TradeTotal({
   return (
     <span className="holding-trade-total">
       <span className={total.usd == null ? "muted" : "holding-trade-" + side}>
-        {formatUsd(total.usd)}
+        {orUnknown(formatUsd(total.usd))}
       </span>
       <small>{total.count.toLocaleString()} {total.count === 1 ? "trade" : "trades"}</small>
     </span>
@@ -326,7 +327,7 @@ function HoldingsTable({
           <span className="protocol-icon" aria-hidden="true">W</span>
           <h2>Wallet</h2>
           <span className="holdings-total numeric">
-            {formatUsd(overview.known_value_usd)}{" "}
+            {orUnknown(formatUsd(overview.known_value_usd))}{" "}
             <span className="faint">known</span>
           </span>
           {rows.length > 0 && (
@@ -481,7 +482,7 @@ function HoldingsTable({
                     <Layers3 size={13} aria-hidden="true" />
                     <span>
                       <strong>{plural(line.count, "LP position NFT")}</strong>
-                      {" — "}
+                      {": "}
                       {line.resource && showProtocol ? (
                         <>
                           shown in{" "}
@@ -585,30 +586,30 @@ function HoldingRow({
               <strong>{row.symbol}</strong>
               <small>{row.name}</small>
               <span className="holding-balance-mobile numeric" title={fullBalance}>
-                Balance {formatCompactAmount(row.amount)}
+                Balance {orUnknown(formatCompactAmount(row.amount))}
               </span>
             </span>
             <ChevronDown size={12} className="expand-icon" />
           </button>
         </td>
         <td className="right hide-mobile numeric muted">
-          {formatPrice(row.price)}
+          {orUnknown(formatPrice(row.price))}
         </td>
         <td className="right hide-mobile numeric">
-          <span title={fullBalance}>{formatCompactAmount(row.amount)}</span>
+          <span title={fullBalance}>{orUnknown(formatCompactAmount(row.amount))}</span>
         </td>
         <td className="right hide-mobile numeric" title={pnl?.unavailableReason ?? (!position ? unavailable : undefined)}>
-          <span className={pnlTone(pnl?.total)}>{formatSignedUsd(pnl?.total)}</span>
+          <span className={pnlTone(pnl?.total)}>{orUnknown(formatSignedUsd(pnl?.total))}</span>
         </td>
         <td className="right numeric">
           {row.value == null && row.estimate != null ? (
             <span className="muted">
-              {formatUsd(row.estimate)}{" "}
+              {orUnknown(formatUsd(row.estimate))}{" "}
               <span className="badge">estimate</span>
             </span>
           ) : (
             <span className={row.value == null ? "muted" : "holdings-value"}>
-              {formatUsd(row.value)}
+              {orUnknown(formatUsd(row.value))}
             </span>
           )}
         </td>
@@ -645,7 +646,7 @@ function HoldingRow({
               </div>
               <div>
                 <dt>Price</dt>
-                <dd>{formatPrice(row.price)}</dd>
+                <dd>{orUnknown(formatPrice(row.price))}</dd>
               </div>
               <div>
                 <dt>Balance observation slot</dt>
@@ -675,23 +676,23 @@ function HoldingRow({
                 <>
                   <div>
                     <dt>Indexed total P&amp;L estimate</dt>
-                    <dd className={pnlTone(pnl?.total)}>{formatSignedUsd(pnl?.total)}</dd>
+                    <dd className={pnlTone(pnl?.total)}>{orUnknown(formatSignedUsd(pnl?.total))}</dd>
                   </div>
                   <div>
                     <dt>Indexed realized P&amp;L estimate</dt>
-                    <dd className={pnlTone(pnl?.realized)}>{formatSignedUsd(pnl?.realized)}</dd>
+                    <dd className={pnlTone(pnl?.realized)}>{orUnknown(formatSignedUsd(pnl?.realized))}</dd>
                   </div>
                   <div>
                     <dt>Indexed unrealized P&amp;L estimate</dt>
-                    <dd className={pnlTone(pnl?.unrealized)}>{formatSignedUsd(pnl?.unrealized)}</dd>
+                    <dd className={pnlTone(pnl?.unrealized)}>{orUnknown(formatSignedUsd(pnl?.unrealized))}</dd>
                   </div>
                   <div>
                     <dt>Average indexed buy price</dt>
-                    <dd>{formatPrice(position.avg_buy_price_usd)}</dd>
+                    <dd>{orUnknown(formatPrice(position.avg_buy_price_usd))}</dd>
                   </div>
                   <div>
                     <dt>Average indexed sell price</dt>
-                    <dd>{formatPrice(position.avg_sell_price_usd)}</dd>
+                    <dd>{orUnknown(formatPrice(position.avg_sell_price_usd))}</dd>
                   </div>
                   <div>
                     <dt>Recorded buys</dt>

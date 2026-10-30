@@ -73,7 +73,7 @@ it("preserves exact native source facts from the scrubbed fixture while keeping 
   expect(container.querySelector(".tx-detail")).toHaveTextContent("2026-06-23T11:41:50.000Z");
   expect(screen.getByText(data.data[0].signature, { exact: true })).toBeVisible();
   expect(screen.getByText("Partial history")).toBeVisible();
-  expect(screen.getByText(/Unknown — fee evidence was not supplied/)).toBeVisible();
+  expect(screen.getByText(/Unknown\. Fee evidence was not supplied/)).toBeVisible();
   expect(screen.queryByText("Observed transfers")).not.toBeInTheDocument();
   expect(screen.queryByText("No indexed activity is available yet")).not.toBeInTheDocument();
   expect(container.querySelector(".tx-detail")).not.toHaveTextContent("WSOL");

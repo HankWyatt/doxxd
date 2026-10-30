@@ -18,17 +18,17 @@ function grouped(value: string): string {
     (fraction ? "." + fraction : "")
   );
 }
-export function formatUsd(value: string | null | undefined): string {
+export function formatUsd(value: string | null | undefined): string | null {
   const n = read(value);
-  if (!n) return "—";
+  if (!n) return null;
   const sign = n.isNegative() && !n.isZero() ? "-" : "";
   if (!n.isZero() && n.abs().lessThan("0.01")) return sign + "<$0.01";
   return sign + "$" + grouped(n.abs().toFixed(2));
 }
 /** Token unit prices retain five significant digits below one cent. */
-export function formatPrice(value: string | null | undefined): string {
+export function formatPrice(value: string | null | undefined): string | null {
   const n = read(value);
-  if (!n) return "—";
+  if (!n) return null;
   if (n.isZero() || n.abs().greaterThanOrEqualTo("0.01"))
     return formatUsd(value);
   const rounded = n.abs().toSignificantDigits(5).toFixed();
@@ -37,9 +37,9 @@ export function formatPrice(value: string | null | undefined): string {
 export function formatAmount(
   value: string | null | undefined,
   maxFractionDigits = 6,
-): string {
+): string | null {
   const n = read(value);
-  if (!n) return "—";
+  if (!n) return null;
   const digits = Math.min(20, Math.max(0, maxFractionDigits));
   const sign = n.isNegative() && !n.isZero() ? "-" : "";
   if (!n.isZero() && n.abs().lessThan(new D(10).pow(-digits)))
@@ -53,9 +53,9 @@ export function formatAmount(
 /** Compact token quantities only; full amounts remain available in the details. */
 export function formatCompactAmount(
   value: string | null | undefined,
-): string {
+): string | null {
   const n = read(value);
-  if (!n) return "—";
+  if (!n) return null;
   if (n.abs().lessThan("1000")) return formatAmount(value);
   // Retain every accepted input digit while scaling, including values beyond
   // the precision needed for on-chain balances or JavaScript's safe integers.

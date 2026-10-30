@@ -178,7 +178,7 @@ describe("HeaderAccount", () => {
       release({ ok: false, kind: "unavailable" });
     });
     const card = screen.getByRole("dialog", { name: "Wallet account" });
-    expect(await within(card).findByText("—")).toBeInTheDocument();
+    expect(await within(card).findByText("Unknown")).toBeInTheDocument();
     expect(within(card).queryByText("$0.00")).toBeNull();
   });
 

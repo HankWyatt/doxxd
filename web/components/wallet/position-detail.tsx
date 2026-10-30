@@ -1,4 +1,5 @@
 "use client";
+import { UnknownValue, orUnknown } from "@/components/unknown-value";
 import type { PositionView, AmountView } from "@/lib/portfolio/model";
 import { formatAmount, formatUsd } from "@/lib/decimal";
 import { LegIcon, legName } from "./token-meta";
@@ -11,12 +12,12 @@ export function Amounts({
   labels?: Record<string, string>;
   showSources?: boolean;
 }) {
-  if (!values.length) return <span className="faint">—</span>;
+  if (!values.length) return <UnknownValue />;
   return (
     <div className="stack">
       {values.map((a, i) => (
         <div key={i}>
-          <span className="numeric">{formatAmount(a.amount)}</span>{" "}
+          <span className="numeric">{orUnknown(formatAmount(a.amount))}</span>{" "}
           <LegIcon leg={a} name={legName(a, labels)} />
           <span className="muted" title={a.mint}>
             {legName(a, labels)}
@@ -73,7 +74,7 @@ export function PositionDetail({
         ))}
       </dl>
       <p className="small faint" style={{ marginBottom: 0 }}>
-        Position value: {formatUsd(position.valueUsd)}. Unavailable quantities
+        Position value: {orUnknown(formatUsd(position.valueUsd))}. Unavailable quantities
         and valuations remain unknown.
       </p>
     </>

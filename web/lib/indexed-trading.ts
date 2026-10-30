@@ -31,8 +31,9 @@ export function pnlTone(value: string | null | undefined): "positive" | "negativ
   return !number || number.isZero() ? "" : number.isNegative() ? "negative" : "positive";
 }
 
-export function formatSignedUsd(value: string | null | undefined): string {
-  return (pnlTone(value) === "positive" ? "+" : "") + formatUsd(value);
+export function formatSignedUsd(value: string | null | undefined): string | null {
+  const text = formatUsd(value);
+  return text === null ? null : (pnlTone(value) === "positive" ? "+" : "") + text;
 }
 
 /**

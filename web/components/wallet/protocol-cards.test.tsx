@@ -116,7 +116,7 @@ it("lp table columns and manage link", async () => {
   expect(within(locked).getByText("1,234.5")).toBeVisible();
   expect(within(locked).getByText("1.5")).toBeVisible();
   expect(within(locked).getByText("0.25")).toBeVisible();
-  expect(locked.lastElementChild).toHaveTextContent("—");
+  expect(locked.lastElementChild).toHaveTextContent("Unknown");
   const link = within(locked).getByRole("link", { name: /Manage on Meteora/ });
   expect(link).toHaveAttribute(
     "href",
@@ -258,7 +258,7 @@ it("failed card shows retry not zero", async () => {
   expect(await screen.findByText("Couldn’t load this section")).toBeVisible();
   expect(screen.getByRole("button", { name: "Retry section" })).toBeVisible();
   const value = container.querySelector(".protocol-value")!;
-  expect(value).toHaveTextContent("—");
+  expect(value).toHaveTextContent("Unknown");
   expect(value).not.toHaveTextContent("$");
   expect(onStatus).toHaveBeenLastCalledWith("orca", expect.any(Function));
 });
@@ -284,11 +284,11 @@ it("an incomplete, unchecked card shows an unknown total, never $0.00", () => {
   };
   const { container } = card("kamino", { component: unchecked, defaultOpen: false });
   const value = container.querySelector(".protocol-value")!;
-  expect(value).toHaveTextContent("—");
+  expect(value).toHaveTextContent("Unknown");
   expect(value).not.toHaveTextContent("$");
 });
 
-it("a chip card with unpriced positions and a zero net shows —, like its chip", () => {
+it("a chip card with unpriced positions and a zero net shows Unknown, like its chip", () => {
   serve("kamino", fixture("kamino"));
   const unpriced: Schemas["WalletPortfolioComponent"] = {
     ...component("kamino_lend", "0"),
@@ -297,7 +297,7 @@ it("a chip card with unpriced positions and a zero net shows —, like its chip"
   };
   const { container } = card("kamino", { component: unpriced, defaultOpen: false });
   const value = container.querySelector(".protocol-value")!;
-  expect(value).toHaveTextContent("—");
+  expect(value).toHaveTextContent("Unknown");
   expect(value).not.toHaveTextContent("$");
 });
 
@@ -343,7 +343,7 @@ it("claimable fees column shows only DMND claimable fees, never rewards", async 
   const table = await screen.findByRole("table");
   const row = table.querySelector<HTMLElement>("tbody tr.data-row")!;
   // Orca has reward counters and raw fee counters only: no claimable fee amount.
-  expect(row.children[2]).toHaveTextContent(/^—$/);
+  expect(row.children[2]).toHaveTextContent(/^Unknown$/);
   expect(within(row).queryByText(/raw atoms/)).toBeNull();
   unmount();
   serve("meteora-damm-v2", dammV2Page());
@@ -385,7 +385,7 @@ it.each(["upstream", "timeout", "rate_limited", "unavailable"] as const)(
       onStatus,
     });
     await waitFor(() => expect(container.querySelector(".empty-state")).not.toBeNull());
-    expect(container.querySelector(".protocol-value")).toHaveTextContent(/^—$/);
+    expect(container.querySelector(".protocol-value")).toHaveTextContent(/^Unknown$/);
     expect(onStatus).toHaveBeenLastCalledWith("orca", expect.any(Function));
     expect(screen.queryByText("Not available yet")).toBeNull();
     expect(screen.getByRole("button", { name: /Retry/ })).toBeInTheDocument();
@@ -413,10 +413,10 @@ it("an expired cursor is not a card failure and keeps the summary total", async 
   expect(onStatus.mock.calls.some(([, retry]) => retry !== null)).toBe(false);
 });
 
-it("a lending position with no row value shows — in its group row", async () => {
+it("a lending position with no row value shows Unknown in its group row", async () => {
   serve("kamino", fixture("kamino"));
   const { container } = card("kamino");
   await screen.findByRole("table");
   const group = container.querySelector<HTMLElement>("tr.group-row")!;
-  expect(group.lastElementChild).toHaveTextContent(/^—$/);
+  expect(group.lastElementChild).toHaveTextContent(/^Unknown$/);
 });

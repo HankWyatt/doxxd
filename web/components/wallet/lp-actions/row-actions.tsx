@@ -2,6 +2,7 @@
 import type { ReactNode } from "react";
 import { claimableLabel } from "@/lib/actions/capabilities";
 import type { ActionTarget } from "@/lib/actions/types";
+import { UnknownValue } from "@/components/unknown-value";
 import { formatAtoms, type MintLookup } from "./amounts";
 import type { RowActionState } from "./use-lp-actions";
 
@@ -65,7 +66,7 @@ export function RowActions({
 
 /**
  * The claimable-fees cell for a row with on-site actions. Values are DMND's;
- * a pending row shows "—", and exact fees keep the card's usual cell
+ * a pending row shows an unknown marker, and exact fees keep the card's usual cell
  * (`children`).
  */
 export function RowFees({
@@ -78,7 +79,7 @@ export function RowFees({
   children: ReactNode;
 }) {
   const { target } = state;
-  if (state.pending) return <span className="faint">—</span>;
+  if (state.pending) return <UnknownValue reason="Still loading" />;
   const label = claimableLabel(target);
   if (label === "included") return <span className="faint">Included in your LP tokens</span>;
   if (label === "lower-bound" && target.protocol === "raydium-clmm") {
@@ -87,7 +88,7 @@ export function RowFees({
       { mint: target.tokenA.mint, atoms: target.feeOwedAAtoms },
       { mint: target.tokenB.mint, atoms: target.feeOwedBAtoms },
     ].filter((fee) => /^\d+$/.test(fee.atoms) && /[1-9]/.test(fee.atoms));
-    if (!owed.length) return <span className="faint">—</span>;
+    if (!owed.length) return <UnknownValue reason="No claimable fees recorded" />;
     return (
       <div className="stack">
         {owed.map((fee) => (

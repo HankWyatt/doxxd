@@ -64,7 +64,7 @@ it.each(records)("shows the $phase supported Drift scope without inventing zero 
     expect(screen.getByText("Source slot: 403321218.")).toBeVisible();
     expect(screen.getByText(/Scope: drift user accounts authorized by wallet/)).toBeVisible();
   }
-  expect(container.querySelector(".protocol-value")).toHaveTextContent("—");
+  expect(container.querySelector(".protocol-value")).toHaveTextContent("Unknown");
   expect(screen.queryByText(/This page:/)).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Next positions" })).not.toBeInTheDocument();
   expect(request).toHaveBeenCalledTimes(1);

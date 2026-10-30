@@ -32,7 +32,7 @@ test("pending, stale, unpriced, and protocol failure preserve honest values", as
     .filter({
       has: page.getByRole("button", { name: "Inspect UNPRICED holding" }),
     });
-  await expect(unpriced).toContainText("—");
+  await expect(unpriced).toContainText("Unknown");
   await expect(unpriced).toContainText("500");
   fixtureApi.setScenario("protocol-error");
   await page.goto(`/wallet/${DEMO_ADDRESS}`);
@@ -44,7 +44,7 @@ test("pending, stale, unpriced, and protocol failure preserve honest values", as
     page.locator("#protocol-orca").getByText("Couldn’t load this section"),
   ).toBeVisible();
   // The failed card never shows a total, and the page offers one retry.
-  await expect(page.locator("#protocol-orca .protocol-value")).toHaveText("—");
+  await expect(page.locator("#protocol-orca .protocol-value")).toHaveText("Unknown");
   await expect(
     page.getByText("1 protocol couldn’t load · retry", { exact: true }),
   ).toBeVisible();

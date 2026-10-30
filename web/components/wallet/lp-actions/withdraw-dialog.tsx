@@ -15,6 +15,7 @@ import { WSOL_MINT } from "@/lib/actions/programs";
 import type { ActionTarget } from "@/lib/actions/types";
 import type { ConnectedWallet } from "@/lib/actions/wallet-session";
 import { useCurrentAddress } from "@/components/wallet-connect/provider";
+import { UnknownValue, orUnknown } from "@/components/unknown-value";
 import { formatAtoms, mintLookup, positionName, type MintLookup } from "./amounts";
 import { ClaimProgress } from "./claim-progress";
 import {
@@ -264,7 +265,7 @@ export function WithdrawDialog({
             BigInt(Math.ceil((unitPrice * ESTIMATED_UNITS) / MICRO)) +
             BigInt(quote.rentLamports),
         )
-      : "—";
+      : null;
   const note = quote && quote.withdrawableBps > 0 ? lockNote(quote) : null;
   const wrappedSol = legMints(target).includes(WSOL_MINT);
   // An emptied field waits quietly; anything else out of range says why.
@@ -357,12 +358,12 @@ export function WithdrawDialog({
               <dl className={"withdraw-rows" + (loading ? " loading" : "")} aria-busy={loading}>
                 <div>
                   <dt>You receive (about)</dt>
-                  <dd className="numeric">{quote ? show(quote.receive) : "—"}</dd>
+                  <dd className="numeric">{quote ? show(quote.receive) : <UnknownValue reason="No quote yet" />}</dd>
                 </div>
                 <div>
                   <dt>Includes fees</dt>
                   <dd className="numeric">
-                    {!quote ? "—" : quote.fees.length ? show(quote.fees) : "Included in your LP tokens"}
+                    {!quote ? <UnknownValue reason="No quote yet" /> : quote.fees.length ? show(quote.fees) : "Included in your LP tokens"}
                   </dd>
                 </div>
                 {quote?.closes && (
@@ -371,14 +372,14 @@ export function WithdrawDialog({
                     <dd className="numeric">
                       {quote.depositRefundLamports && /^\d+$/.test(quote.depositRefundLamports)
                         ? "+" + sol(BigInt(quote.depositRefundLamports))
-                        : "—"}
+                        : <UnknownValue reason="Refund unavailable" />}
                     </dd>
                   </div>
                 )}
                 <div>
                   <dt>Minimum you&apos;ll accept</dt>
                   <dd className="numeric">
-                    {quote ? show(quote.minimums) : "—"}
+                    {quote ? show(quote.minimums) : <UnknownValue reason="No quote yet" />}
                     <span className="withdraw-chips" role="group" aria-label="Price move limit">
                       {SLIPPAGE_PRESETS.map((preset) => (
                         <button
@@ -416,7 +417,7 @@ export function WithdrawDialog({
                 </div>
                 <div>
                   <dt>Network fee</dt>
-                  <dd className="numeric">{networkFee}</dd>
+                  <dd className="numeric">{orUnknown(networkFee, "Fee estimate unavailable")}</dd>
                 </div>
               </dl>
               {wrappedSol && <p className="withdraw-note">Wrapped SOL in your wallet comes back as SOL too.</p>}

@@ -11,7 +11,7 @@ it("shows meaningful sub-cent token prices without rounding them to zero", () =>
   expect(formatPrice("0.000000000003123456")).toBe("$0.0000000000031235");
   expect(formatPrice("0.4")).toBe("$0.40");
   expect(formatPrice("150")).toBe("$150.00");
-  expect(formatPrice(null)).toBe("—");
+  expect(formatPrice(null)).toBeNull();
 });
 it.each([
   ["9007199254740993.12", "$9,007,199,254,740,993.12"],
@@ -19,9 +19,9 @@ it.each([
   ["0.001", "<$0.01"],
   ["-0.001", "-<$0.01"],
   ["0", "$0.00"],
-  [null, "—"],
-  ["NaN", "—"],
-  ["Infinity", "—"],
+  [null, null],
+  ["NaN", null],
+  ["Infinity", null],
 ])("formats exact dollars %s", (v, want) => expect(formatUsd(v)).toBe(want));
 it("sorts large exact values and places unknowns last", () => {
   const values = [null, "9007199254740992.01", "9007199254740992.02", "-2"];
@@ -50,7 +50,7 @@ it.each([
 });
 it("retains accepted significant digits beyond the ordinary decimal context", () => {
   const wholeBillions = "1234567890".repeat(15);
-  expect(formatCompactAmount(wholeBillions + "125000000").replaceAll(",", ""))
+  expect(formatCompactAmount(wholeBillions + "125000000")?.replaceAll(",", ""))
     .toBe(wholeBillions + ".13B");
 });
 it.each([
@@ -68,5 +68,5 @@ it.each(["0", "-0", "47.183920517", "999.999999", "0.000000001", "-0.000000001"]
 );
 it.each([null, undefined, "", " ", "NaN", "Infinity", "not a quantity", "1".repeat(513)])(
   "keeps unavailable compact quantities unknown %s",
-  (value) => expect(formatCompactAmount(value)).toBe("—"),
+  (value) => expect(formatCompactAmount(value)).toBeNull(),
 );

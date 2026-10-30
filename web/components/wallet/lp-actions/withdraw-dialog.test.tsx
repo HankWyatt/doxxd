@@ -217,13 +217,13 @@ describe("withdraw dialog quote", () => {
       expect(review()).toBeDisabled();
       expect(build.quoteWithdraw.mock.calls.length).toBe(before);
       // The last quote was for another share: no amounts until a valid one.
-      expect(screen.getByText("You receive (about)").nextElementSibling).toHaveTextContent("—");
-      expect(screen.getByText("Minimum you'll accept").nextElementSibling!.firstChild).toHaveTextContent("—");
+      expect(screen.getByText("You receive (about)").nextElementSibling).toHaveTextContent("Unknown");
+      expect(screen.getByText("Minimum you'll accept").nextElementSibling!.firstChild).toHaveTextContent("Unknown");
     }
     fireEvent.change(input, { target: { value: "" } });
     expect(screen.queryByRole("alert")).toBeNull();
     expect(review()).toBeDisabled();
-    expect(screen.getByText("You receive (about)").nextElementSibling).toHaveTextContent("—");
+    expect(screen.getByText("You receive (about)").nextElementSibling).toHaveTextContent("Unknown");
     fireEvent.change(input, { target: { value: "40" } });
     await quoted(4_000);
     expect(screen.queryByText("Enter a whole percent from 1 to 100")).toBeNull();
@@ -242,7 +242,7 @@ describe("withdraw dialog quote", () => {
       expect(input).toHaveAccessibleDescription("Enter a price move above 0% and up to 5%");
       expect(review()).toBeDisabled();
       expect(build.quoteWithdraw.mock.calls.length).toBe(before);
-      expect(screen.getByText("You receive (about)").nextElementSibling).toHaveTextContent("—");
+      expect(screen.getByText("You receive (about)").nextElementSibling).toHaveTextContent("Unknown");
     }
     for (const [good, bps] of [["3.5", 350], ["0.01", 1], ["4.99", 499], ["5", 500]] as const) {
       fireEvent.change(input, { target: { value: good } });
@@ -389,7 +389,7 @@ describe("withdraw dialog quote", () => {
     expect(await screen.findByText("~0.002009 SOL")).toBeInTheDocument();
   });
 
-  it("shows — for the network fee when the priority fees can't be read", async () => {
+  it("shows an unknown marker for the network fee when the priority fees can't be read", async () => {
     build.createActionRpc.mockImplementation(() => ({
       ...UNCACHED,
       priorityFees: vi.fn(async () => {
@@ -399,7 +399,7 @@ describe("withdraw dialog quote", () => {
     open();
     await ready();
     const fee = screen.getByText("Network fee").parentElement!;
-    expect(within(fee).getByText("—")).toBeInTheDocument();
+    expect(within(fee).getByText("Unknown")).toBeInTheDocument();
   });
 });
 

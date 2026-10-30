@@ -106,7 +106,7 @@ test("withdraw 50% from the unlocked DAMM v2 position", async ({ page }) => {
   await expect(dialog.getByRole("heading", { name: "Withdraw from SYNA + SOL" })).toBeVisible();
   await dialog.getByRole("button", { name: "50%" }).first().click();
   const receive = dialog.locator("dt", { hasText: "You receive (about)" }).locator("+ dd");
-  await expect(receive).not.toHaveText("—");
+  await expect(receive).not.toHaveText("Unknown");
   await expect(receive).toContainText("SYNA");
   await dialog.getByRole("button", { name: "Review in wallet" }).click();
   await expect(dialog.getByText("Confirmed")).toBeVisible({ timeout: 15_000 });

@@ -19,6 +19,7 @@ import {
 } from "@/lib/actions/account";
 import type { ConnectedWallet } from "@/lib/actions/wallet-session";
 import { walletHref } from "@/lib/address";
+import { orUnknown } from "@/components/unknown-value";
 import { formatHeadline, headlineLabel } from "@/lib/portfolio/headline";
 import { toSummary } from "@/lib/portfolio/model";
 import { useWalletResource } from "@/lib/use-wallet-resource";
@@ -93,7 +94,7 @@ function AccountCard({
               />
             ) : (
               <span className="account-worth-value numeric">
-                {hidden ? "••••" : formatHeadline(view?.valueUsd ?? null)}
+                {hidden ? "••••" : orUnknown(formatHeadline(view?.valueUsd ?? null))}
               </span>
             )}
             <button

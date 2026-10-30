@@ -1,4 +1,5 @@
 "use client";
+import { orUnknown } from "@/components/unknown-value";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { Layers3 } from "lucide-react";
 import { useWalletResource } from "@/lib/use-wallet-resource";
@@ -202,7 +203,7 @@ function PortfolioContent({
               </span>
               <span>
                 <span className="small">{chip.label}</span>
-                <strong className="numeric">{formatUsd(chip.valueUsd)}</strong>
+                <strong className="numeric">{orUnknown(formatUsd(chip.valueUsd))}</strong>
               </span>
             </a>
           ))}
@@ -270,7 +271,7 @@ function PortfolioContent({
           </div>
           {summaryFailed && (
             <p className="small faint protocol-unsummarised">
-              Portfolio summary unavailable — open a protocol to check it.
+              Portfolio summary unavailable. Open a protocol to check it.
             </p>
           )}
           {/* One keyed list, so a card keeps its state when it changes group. */}

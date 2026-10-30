@@ -459,7 +459,7 @@ describe("after an action", () => {
     expect(await screen.findByText("Just claimed · updating")).toBeInTheDocument();
     const row = rowOf("Just claimed · updating");
     expect(within(row).queryByText(/1\.5/)).toBeNull();
-    expect(within(row).getAllByText("—").length).toBeGreaterThan(0);
+    expect(within(row).getAllByText("Unknown").length).toBeGreaterThan(0);
     expect(within(row).queryByRole("button", { name: "Claim" })).toBeNull();
     expect(screen.getByText("3 positions · fees to claim on 1")).toBeInTheDocument();
   });

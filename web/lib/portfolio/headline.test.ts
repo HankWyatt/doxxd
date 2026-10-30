@@ -36,7 +36,7 @@ it("known value when partial or stale", () => {
 it("null value is never zero", () => {
   const data = raw();
   data.known_component_net_value_usd = null;
-  expect(formatHeadline(null)).toBe("—");
+  expect(formatHeadline(null)).toBeNull();
   expect(formatHeadline("0")).toBe("$0.00");
   expect(statusLine(view(data), NOW)).toEqual({ tone: "partial", text: "Value unavailable" });
 });

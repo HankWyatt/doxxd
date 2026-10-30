@@ -111,7 +111,7 @@ it("keeps an unknown pending headline unknown", () => {
   data.components[0].coverage_status = "snapshot_queued";
   show(data);
   expect(screen.getByText("1 source still updating")).toBeVisible();
-  expect(screen.getByText("—")).toBeVisible();
+  expect(screen.getByText("Unknown")).toBeVisible();
   expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
 });
 
@@ -205,7 +205,7 @@ it("keeps an excluded terminal wallet's null value unknown", () => {
     coverage_status: "native_balance_stale_or_unavailable",
   });
   show(data);
-  expect(screen.getByText("—")).toBeVisible();
+  expect(screen.getByText("Unknown")).toBeVisible();
   expect(screen.getByText("Value unavailable")).toBeVisible();
   expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
   expect(screen.queryByText(SUBTOTAL)).not.toBeInTheDocument();
@@ -252,7 +252,7 @@ it("renders an unavailable value as a dash with its reason, never zero", () => {
       actions={<div data-testid="actions" />}
     />,
   );
-  expect(screen.getByText("—")).toBeVisible();
+  expect(screen.getByText("Unknown")).toBeVisible();
   expect(screen.getByText("Value unavailable")).toBeVisible();
   expect(screen.getByText("Wallet data is unavailable")).toBeVisible();
   expect(screen.queryByText("$0.00")).not.toBeInTheDocument();

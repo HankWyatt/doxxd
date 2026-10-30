@@ -1,4 +1,5 @@
 "use client";
+import { UnknownValue, orUnknown } from "@/components/unknown-value";
 import {
   Fragment,
   lazy,
@@ -205,7 +206,11 @@ export function ProtocolSection({
         )}
         <span className="protocol-value">
           {/* A failed load, or a source not yet checked, never shows a total. */}
-          {failed || !totalKnown || !component ? "—" : formatUsd(chipValue(component))}
+          {failed || !totalKnown || !component ? (
+            <UnknownValue reason="Value unavailable" />
+          ) : (
+            orUnknown(formatUsd(chipValue(component)), "Value unavailable")
+          )}
         </span>
         {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
       </button>
@@ -553,7 +558,7 @@ function ProtocolBody({
           </span>
           {view.pageValueUsd !== null && (
             <span className="numeric">
-              This page: {formatUsd(view.pageValueUsd)}
+              This page: {orUnknown(formatUsd(view.pageValueUsd))}
             </span>
           )}
         </summary>
@@ -711,18 +716,18 @@ function Claimable({
   values: AmountView[];
   labels: Record<string, string>;
 }) {
-  if (!values.length) return <span className="faint">—</span>;
+  if (!values.length) return <UnknownValue />;
   return (
     <div className="stack">
       {values.map((a, i) => (
         <div key={i}>
-          <span className="numeric">{formatAmount(a.amount)}</span>{" "}
+          <span className="numeric">{orUnknown(formatAmount(a.amount))}</span>{" "}
           <LegIcon leg={a} name={legName(a, labels)} />
           <span className="muted" title={a.mint}>
             {legName(a, labels)}
           </span>
           {a.valueUsd != null && (
-            <span className="faint"> ({formatUsd(a.valueUsd)})</span>
+            <span className="faint"> ({orUnknown(formatUsd(a.valueUsd))})</span>
           )}
           {a.qualifier?.startsWith("raw atoms") && (
             <span className="faint small"> · raw atoms</span>
@@ -836,7 +841,7 @@ function LiquidityTable({
                 </td>
                 <td className="hide-mobile">
                   {/* Fees only: rewards and raw counters stay under details. */}
-                  {/* Action wording on your own wallet; "—" wherever a row is pending. */}
+                  {/* Action wording on your own wallet; an unknown marker wherever a row is pending. */}
                   {state && lookup && (actions?.active || state.pending) ? (
                     <RowFees state={state} lookup={lookup}>
                       <Claimable values={row.fees ?? []} labels={labels} />
@@ -845,7 +850,7 @@ function LiquidityTable({
                     <Claimable values={row.fees ?? []} labels={labels} />
                   )}
                 </td>
-                <td className="right numeric">{formatUsd(row.valueUsd)}</td>
+                <td className="right numeric">{orUnknown(formatUsd(row.valueUsd))}</td>
               </tr>
               {expanded === row.id && (
                 <DetailRow row={row} labels={labels} span={selecting ? 5 : 4} />
@@ -895,7 +900,7 @@ function PositionTable({
               <td>
                 <Amounts values={row.assets} labels={labels} />
               </td>
-              <td className="right numeric">{formatUsd(row.valueUsd)}</td>
+              <td className="right numeric">{orUnknown(formatUsd(row.valueUsd))}</td>
             </tr>
             {expanded === row.id && <DetailRow row={row} labels={labels} span={3} />}
           </Fragment>
@@ -936,7 +941,7 @@ function LegTable({
                 <DetailsToggle row={row} expanded={expanded} toggle={toggle} />
               </span>
             </td>
-            <td className="right numeric">{formatUsd(row.valueUsd)}</td>
+            <td className="right numeric">{orUnknown(formatUsd(row.valueUsd))}</td>
           </tr>
           {expanded === row.id && <DetailRow row={row} labels={labels} span={3} />}
           {[row.assets, row.debts].map((legs, i) =>
@@ -958,8 +963,8 @@ function LegTable({
                         <span className="faint small"> · {leg.qualifier}</span>
                       )}
                     </td>
-                    <td className="numeric">{formatAmount(leg.amount)}</td>
-                    <td className="right numeric">{formatUsd(leg.valueUsd)}</td>
+                    <td className="numeric">{orUnknown(formatAmount(leg.amount))}</td>
+                    <td className="right numeric">{orUnknown(formatUsd(leg.valueUsd))}</td>
                   </tr>
                 ))}
               </Fragment>

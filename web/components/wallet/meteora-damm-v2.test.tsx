@@ -65,7 +65,7 @@ it("loads lazily and shows a complete position with expandable detail", async ()
   expect(screen.getByText("Permanently locked liquidity")).toBeVisible();
   expect(screen.getByText(DAMM.pool)).toBeVisible();
   expect(screen.getAllByText(/claimable fee/).length).toBe(2);
-  expect(screen.getByText(/Position value: —/)).toBeVisible();
+  expect(screen.getByText(/Position value:/)).toHaveTextContent(/^Position value: Unknown\. Unavailable quantities/);
   expect(fetch).toHaveBeenCalledTimes(1);
 });
 
@@ -143,7 +143,7 @@ it("labels an LP position NFT as an unvalued receipt overlapping the protocol se
   );
   expect(screen.queryByRole("button", { name: "Inspect Meteora DAMM v2 position holding" })).toBeNull();
   expect(screen.getByText(/1 LP position NFT/).closest("p")).toHaveTextContent(
-    "1 LP position NFT — shown in Meteora DAMM v2 below",
+    "1 LP position NFT: shown in Meteora DAMM v2 below",
   );
   revealReceipts();
   const button = screen.getByRole("button", {
@@ -153,7 +153,7 @@ it("labels an LP position NFT as an unvalued receipt overlapping the protocol se
   expect(within(row).queryByText("Unknown token")).toBeNull();
   expect(within(row).getByText("LP position receipt")).toBeVisible();
   expect(within(row).queryByText(/\$999/)).toBeNull();
-  expect(within(row).getAllByText("—")).toHaveLength(3);
+  expect(within(row).getAllByText("Unknown")).toHaveLength(3);
   fireEvent.click(button);
   const detail = row.nextElementSibling as HTMLElement;
   expect(within(detail).getByText(DAMM.position)).toBeVisible();
@@ -214,7 +214,7 @@ it("never joins indexed trading results to an LP receipt's NFT mint", () => {
   });
   const row = button.closest("tr")!;
   const cells = within(row).getAllByRole("cell");
-  for (const index of [1, 3, 4]) expect(cells[index]).toHaveTextContent("—");
+  for (const index of [1, 3, 4]) expect(cells[index]).toHaveTextContent("Unknown");
   expect(within(row).queryByText("+$75.00")).toBeNull();
   expect(within(row).queryByText(/trades?$/)).toBeNull();
   fireEvent.click(button);

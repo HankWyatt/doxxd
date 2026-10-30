@@ -19,7 +19,7 @@ it("formats signed source values without converting to binary floating point", (
   expect(formatSignedUsd("9007199254740993.25")).toBe("+$9,007,199,254,740,993.25");
   expect(formatSignedUsd("-4.75")).toBe("-$4.75");
   expect(formatSignedUsd("0")).toBe("$0.00");
-  expect(formatSignedUsd(null)).toBe("—");
+  expect(formatSignedUsd(null)).toBeNull();
   expect(pnlTone("-0")).toBe("");
   expect(pnlTone("invalid")).toBe("");
 });

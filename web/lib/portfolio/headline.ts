@@ -34,8 +34,8 @@ export function headlineLabel(summary: SummaryView): "Net worth" | "Known value"
   return summary.complete && !stale ? "Net worth" : "Known value";
 }
 
-export function formatHeadline(valueUsd: string | null): string {
-  return valueUsd === null ? "—" : formatUsd(valueUsd);
+export function formatHeadline(valueUsd: string | null): string | null {
+  return valueUsd === null ? null : formatUsd(valueUsd);
 }
 
 /**

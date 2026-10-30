@@ -327,7 +327,7 @@ it("failed card shows retry not zero", async () => {
     return section;
   };
   expect(await within(await waitFor(orca)).findByText("Couldn’t load this section")).toBeVisible();
-  expect(orca().querySelector(".protocol-value")).toHaveTextContent("—");
+  expect(orca().querySelector(".protocol-value")).toHaveTextContent("Unknown");
   expect(within(orca()).queryByText("$0.00")).toBeNull();
   const note = screen.getByText(/couldn’t load ·/);
   expect(note).toHaveTextContent("1 protocol couldn’t load · retry");
@@ -347,7 +347,7 @@ it("renders every protocol card collapsed and lazy when the summary is unavailab
     return Response.json(readFixture(resource, "complete"));
   }));
   const { container } = render(<Portfolio address={DEMO_ADDRESS} />);
-  expect(await screen.findByText("Portfolio summary unavailable — open a protocol to check it.")).toBeVisible();
+  expect(await screen.findByText("Portfolio summary unavailable. Open a protocol to check it.")).toBeVisible();
   await screen.findByText("USD Coin");
   const toggles = container.querySelectorAll<HTMLElement>(".protocol-toggle");
   expect(toggles).toHaveLength(protocolResources.length);
@@ -389,7 +389,7 @@ it("keeps a collapsed failed card counted until it loads", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Collapse Orca Whirlpools" }));
   const orca = container.querySelector<HTMLElement>("#protocol-orca")!;
   expect(within(orca).queryByText("Couldn’t load this section")).toBeNull();
-  expect(orca.querySelector(".protocol-value")).toHaveTextContent(/^—$/);
+  expect(orca.querySelector(".protocol-value")).toHaveTextContent(/^Unknown$/);
   const note = screen.getByText(/couldn’t load ·/);
   expect(note).toHaveTextContent("1 protocol couldn’t load · retry");
   // Retrying a collapsed card opens it and loads it again.
@@ -465,7 +465,7 @@ it("keeps a card opened during a summary failure mounted, without refetching, on
   }));
   render(<Portfolio address={DEMO_ADDRESS} />);
   await act(async () => {});
-  expect(screen.getByText("Portfolio summary unavailable — open a protocol to check it.")).toBeVisible();
+  expect(screen.getByText("Portfolio summary unavailable. Open a protocol to check it.")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Expand Kamino Lend" }));
   await act(async () => {});
   const kamino = document.getElementById("protocol-kamino");

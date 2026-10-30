@@ -105,18 +105,18 @@ it("keeps holdings and the independent empty stake scan usable without inventing
   vi.stubGlobal("fetch", request);
   const { container } = render(<Portfolio address={data.wallet} />);
   expect(await screen.findByText("Synthetic Token")).toBeVisible();
-  expect(container.querySelector(".summary-value")).toHaveTextContent("—");
+  expect(container.querySelector(".summary-value")).toHaveTextContent("Unknown");
   expect(request).toHaveBeenCalledTimes(3);
   expect(request.mock.calls.filter(([input]) => new URL(input, "http://test.local").pathname.endsWith("/positions"))).toHaveLength(1);
   // Without a summary every protocol card is collapsed and loads only when opened.
-  expect(screen.getByText("Portfolio summary unavailable — open a protocol to check it.")).toBeVisible();
+  expect(screen.getByText("Portfolio summary unavailable. Open a protocol to check it.")).toBeVisible();
   expect(screen.getByRole("button", { name: "Expand Native staking" })).toHaveAttribute("aria-expanded", "false");
   expect(request).toHaveBeenCalledTimes(3);
   fireEvent.click(screen.getByRole("button", { name: "Expand Native staking" }));
   expect(await screen.findByText("No positions were found in this supported scope.")).toBeVisible();
-  expect(container.querySelector(".summary-value")).toHaveTextContent("—");
+  expect(container.querySelector(".summary-value")).toHaveTextContent("Unknown");
   expect(screen.getByRole("button", { name: "Inspect SYN holding" })).toBeVisible();
-  expect(within(container.querySelector("#protocol-stake")!).getByText("—")).toBeVisible();
+  expect(within(container.querySelector("#protocol-stake")!).getByText("Unknown")).toBeVisible();
   expect(request).toHaveBeenCalledTimes(4);
 });
 
