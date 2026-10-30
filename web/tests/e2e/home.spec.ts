@@ -47,3 +47,16 @@ test("homepage fits a 390px phone without horizontal scroll", async ({ page }) =
   const card = await page.locator(".pf").boundingBox();
   expect(card!.y).toBeGreaterThan(search!.y + search!.height);
 });
+
+test("wallet pages share the homepage footer", async ({ page }) => {
+  await mockWalletResources(page);
+  for (const tab of ["", "/activity"]) {
+    await page.goto(`/wallet/${DEMO_ADDRESS}${tab}`);
+    const footer = page.locator("footer.site-footer");
+    await expect(footer).toContainText("Public wallets. Open possibilities.");
+    await expect(footer.getByRole("link", { name: "Open source on GitHub" })).toHaveAttribute("href", GITHUB_URL);
+    await expect(footer.getByRole("link", { name: "Open source on GitHub" })).toHaveAttribute("rel", "noopener noreferrer");
+    await expect(footer.getByRole("link", { name: "Powered by DMND" })).toBeVisible();
+    await expect(page.getByText("Read-only explorer")).toHaveCount(0);
+  }
+});

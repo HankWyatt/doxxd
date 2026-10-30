@@ -1,6 +1,7 @@
 "use client";
 import { createContext, useContext, useState } from "react";
 import { ArrowUpRight, RefreshCw, ChevronRight } from "lucide-react";
+import { SiteFooter } from "../site-footer";
 import {
   useWalletResource,
   WalletRefreshContext,
@@ -143,12 +144,7 @@ function FrameContent({
           {children}
         </SummaryStatusContext.Provider>
       </SummaryContext.Provider>
-      <footer className="footer">
-        <span>Public wallet data · Read-only explorer</span>
-        <a href="https://dmnd.dev" target="_blank" rel="noreferrer">
-          Powered by DMND <ArrowUpRight size={11} />
-        </a>
-      </footer>
+      <SiteFooter />
     </main>
   );
 }

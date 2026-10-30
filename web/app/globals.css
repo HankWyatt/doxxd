@@ -224,18 +224,29 @@ a svg {
   margin: auto;
   padding: 32px 40px 60px;
 }
-.footer {
+/* Shared by the homepage and the wallet pages (components/site-footer.tsx). */
+.site-footer {
   display: flex;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 28px 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 26px 0;
   border-top: 1px solid var(--line);
   margin-top: 48px;
-  font-size: 11px;
-  color: var(--faint);
-}
-.footer a {
   color: var(--muted);
+  font-size: 13px;
+}
+.site-footer .brand { --brand-gap: 7px; font-size: 18px; color: var(--text); }
+.site-footer .brand-mark { width: 22px; height: 22px; font-size: 17px; border-radius: 5px; }
+.site-footer > p { margin: 0; }
+.site-footer-links { margin-left: auto; display: flex; flex-wrap: wrap; gap: 12px 26px; align-items: center; }
+.site-footer-github { display: inline-flex; align-items: center; gap: 8px; color: var(--text); }
+.site-footer-github:hover,
+.site-footer-dmnd:hover { color: var(--accent); }
+.site-footer-dmnd > strong { color: var(--text); font-weight: 700; }
+@media (max-width: 700px) {
+  .site-footer > p { flex-basis: 100%; order: 2; }
+  .site-footer-links { margin-left: 0; order: 3; }
 }
 .search-form {
   position: relative;
@@ -1550,9 +1561,6 @@ tbody tr.data-row:hover {
   }
   .tx-amount {
     font-size: 11px;
-  }
-  .footer {
-    font-size: 10px;
   }
   .protocol-toggle {
     padding: 15px 12px;

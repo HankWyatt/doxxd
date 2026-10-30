@@ -196,25 +196,12 @@
   padding: 0;
 }
 
-.landing-footer {
+.landing .site-footer {
   max-width: 1440px;
   margin: 0 auto;
   padding: 26px var(--landing-gutter);
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 16px;
-  color: var(--muted);
-  font-size: 13px;
+  border-top: 0;
 }
-.landing-footer .brand { --brand-gap: 7px; font-size: 18px; color: var(--text); }
-.landing-footer .brand-mark { width: 22px; height: 22px; font-size: 17px; border-radius: 5px; }
-.landing-footer > p { margin: 0; }
-.landing-footer-links { margin-left: auto; display: flex; flex-wrap: wrap; gap: 12px 26px; align-items: center; }
-.landing-github { display: inline-flex; align-items: center; gap: 8px; color: var(--text); }
-.landing-github:hover,
-.landing-data-link:hover { color: var(--accent); }
-.landing-data-link > strong { color: var(--text); font-weight: 700; }
 
 @media (max-width: 1150px) {
   .landing { --landing-gutter: 40px; }
@@ -250,6 +237,4 @@
   .landing-protocols { gap: 12px; }
   .landing-protocols ul { gap: 10px 22px; }
   .landing-protocols-lead { flex-basis: 100%; }
-  .landing-footer > p { flex-basis: 100%; order: 2; }
-  .landing-footer-links { margin-left: 0; order: 3; }
 }
