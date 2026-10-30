@@ -34,6 +34,18 @@ describe("homepage", () => {
       `/wallet/${TRY_WHALE_ADDRESS}`,
     );
     expect(screen.getByRole("textbox", { name: "Solana address" })).toBeInTheDocument();
+    // A real space before the link, so it is not read as "start?Try a whale".
+    expect(screen.getByRole("link", { name: "Try a whale" }).parentElement).toHaveTextContent(
+      "Not sure where to start? Try a whale",
+      { normalizeWhitespace: false },
+    );
+  });
+
+  it("previews only what the product shows: no invented daily change, a legend-sized protocol count", () => {
+    const { container } = renderHome(false);
+    expect(container).not.toHaveTextContent(/today/i);
+    expect(screen.getByRole("img", { name: /^Example portfolio/ })).toHaveTextContent("5 protocols");
+    expect(container.querySelectorAll(".pf-legend > div")).toHaveLength(5);
   });
 
   it("drops the old explorer chrome", () => {

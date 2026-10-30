@@ -43,6 +43,13 @@ test("homepage fits a 390px phone without horizontal scroll", async ({ page }) =
   await page.goto("/");
   await waitForWalletHydration(page);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  // .landing clips overflow, so scrollWidth alone would miss a wide card or pillar.
+  for (const box of [page.locator(".pf"), ...(await page.locator(".pillar").all())]) {
+    const b = (await box.boundingBox())!;
+    expect(b.x).toBeGreaterThanOrEqual(0);
+    expect(b.x + b.width).toBeLessThanOrEqual(390);
+  }
+  expect(await page.locator(".pillar").count()).toBe(3);
   const search = await page.getByRole("search").boundingBox();
   const card = await page.locator(".pf").boundingBox();
   expect(card!.y).toBeGreaterThan(search!.y + search!.height);

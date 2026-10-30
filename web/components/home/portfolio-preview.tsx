@@ -36,7 +36,7 @@ export function PortfolioPreview() {
           </div>
           <div className="pf-who">
             412 tokens
-            <br />9 protocols
+            <br />5 protocols
           </div>
         </div>
         <div className="pf-split">

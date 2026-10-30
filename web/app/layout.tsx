@@ -4,9 +4,9 @@ import { ActionsAvailabilityProvider } from "@/lib/actions/availability";
 import { actionsEnabledFromEnv } from "@/lib/actions/enabled";
 import "./globals.css";
 export const metadata: Metadata = {
-  title: { default: "Doxxd — Solana wallet explorer", template: "%s · Doxxd" },
+  title: { default: "Doxxd · The portfolio tracker for Solana", template: "%s · Doxxd" },
   description:
-    "A clearer view of any Solana wallet. Explore token holdings, DeFi positions, and activity.",
+    "See what any Solana wallet holds — tokens, staking, lending and liquidity — follow the wallets that matter, and manage your own LP positions.",
   icons: { icon: "/favicon.svg" },
 };
 export default function RootLayout({

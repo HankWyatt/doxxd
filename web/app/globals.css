@@ -300,7 +300,7 @@ a svg {
 }
 .header-search .search-box {
   padding: 3px 4px 3px 12px;
-  border-color: var(--line);
+  border-color: var(--control-line);
   border-radius: 7px;
 }
 .header-search .search-box button {

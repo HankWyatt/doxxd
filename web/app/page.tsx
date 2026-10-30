@@ -27,7 +27,7 @@ export default function HomePage() {
             <div className="landing-search" id="explore-wallet">
               <AddressSearch />
               <p className="landing-try">
-                No wallet needed to look. Not sure where to start?
+                No wallet needed to look. Not sure where to start?{" "}
                 <a href={walletHref(TRY_WHALE_ADDRESS, "portfolio")}>Try a whale</a>
               </p>
             </div>
@@ -53,15 +53,15 @@ export default function HomePage() {
             <div className="pillar-mini" aria-hidden="true">
               <div className="pillar-row">
                 <span>Whale 3</span>
-                <span className="positive">+4.2% today</span>
+                <span className="mono muted">5Fq2…mK8d</span>
               </div>
               <div className="pillar-row">
                 <span>Fund wallet</span>
-                <span className="negative">−1.1% today</span>
+                <span className="mono muted">Hx7p…2wQe</span>
               </div>
               <div className="pillar-row">
                 <span>My main</span>
-                <span className="positive">+0.8% today</span>
+                <span className="mono muted">7xKX…9fQa</span>
               </div>
             </div>
             <a className="pillar-more" href="/watchlist">
