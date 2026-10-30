@@ -53,6 +53,7 @@ export function liquidityRows(
       legLabel(row.principal_a) + " / " + legLabel(row.principal_b),
     ),
     assets: [leg(row.principal_a), leg(row.principal_b)],
+    valueUsd: row.principal_value_usd ?? null,
     links: {
       pool: row.pool,
       position: row.position,
@@ -118,6 +119,7 @@ export function meteoraRows(
       legLabel(row.principal_x) + " / " + legLabel(row.principal_y),
     ),
     assets: [leg(row.principal_x), leg(row.principal_y)],
+    valueUsd: row.principal_value_usd ?? null,
     links: { pool: row.pair, position: row.position },
     rewards: row.rewards.map((r) => ({
       ...reward(r),
@@ -281,6 +283,7 @@ export function fungibleRows(
   return raw.data.map((row) => ({
     ...position(row.owner_token_account, "Direct LP receipt"),
     assets: row.principal.map(leg),
+    valueUsd: row.principal_value_usd ?? null,
     ...(row.pool ? { links: { pool: row.pool } } : {}),
     ...(protocol && row.status !== "refused"
       ? {
