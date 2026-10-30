@@ -27,8 +27,10 @@ import { resetLpRunStore } from "./run-store";
 const build = vi.hoisted(() => ({
   createActionRpc: vi.fn((url: string) => ({ url })),
   buildClaimGroups: vi.fn(),
+  buildCloseGroups: vi.fn(),
   runAction: vi.fn(),
   isRpcBusy: () => false,
+  unwrapsWrappedSol: vi.fn(() => false),
 }));
 vi.mock("@/lib/actions/build", () => build);
 
@@ -762,5 +764,77 @@ describe("fix round 2 (R-101..R-103)", () => {
     const before = fetch.mock.calls.length;
     await act(async () => vi.advanceTimersByTime(10_000));
     await waitFor(() => expect(fetch.mock.calls.length).toBeGreaterThan(before));
+  });
+});
+
+describe("closing empty positions", () => {
+  const EMPTY = { unlocked: "0", vested: "0", permanent_locked: "0", total: "0" };
+  // Row 4: no liquidity at all, fees still to collect.
+  function withEmptyRow(): Schemas["WalletMeteoraDammV2Positions"] {
+    const page = dammPage();
+    page.data.push(dammRow(4, { liquidity: EMPTY }));
+    page.coverage.total_positions = 4;
+    return page;
+  }
+  const closeButtons = () => screen.queryAllByRole("button", { name: "Close position" });
+
+  it("offers Close position only on an empty DAMM v2 row of your own wallet", async () => {
+    serve({ "meteora-damm-v2": withEmptyRow() });
+    mount(DAMM.wallet, "meteora-damm-v2");
+    await screen.findByText("Your wallet · Phantom");
+    await waitFor(() => expect(closeButtons()).toHaveLength(1));
+    const row = closeButtons()[0].closest("tr")!;
+    expect(within(row).queryByRole("button", { name: "Withdraw" })).toBeNull();
+    expect(within(row).queryByRole("button", { name: "🔒 Locked" })).toBeNull();
+  });
+
+  it("offers nothing on another wallet's page", async () => {
+    serve({ "meteora-damm-v2": withEmptyRow() });
+    mount(DAMM.wallet, "meteora-damm-v2", { connected: OTHER });
+    await screen.findByText(/Viewing another wallet/);
+    expect(await screen.findByText("4 positions")).toBeInTheDocument();
+    expect(closeButtons()).toHaveLength(0);
+  });
+
+  it("offers Close position on a CLMM row with no liquidity, but not with liquidity", async () => {
+    const page = clmmPage();
+    page.data[0] = { ...page.data[0], liquidity: "0" };
+    serve({ "raydium-clmm": page });
+    mount(CLMM.wallet, "raydium-clmm");
+    expect(await screen.findByRole("button", { name: "Close position" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Withdraw" })).toBeNull();
+  });
+
+  it("opens the close dialog, and a closed row says so with no buttons", async () => {
+    build.buildCloseGroups.mockImplementation(async (_rpc, owner: string) => ({
+      groups: [],
+      expectation: { kind: "close", owner, mints: [], positions: [] },
+      refundLamports: "2000000",
+    }));
+    serve({ "meteora-damm-v2": withEmptyRow() });
+    mount(DAMM.wallet, "meteora-damm-v2");
+    await waitFor(() => expect(closeButtons()).toHaveLength(1));
+    fireEvent.click(closeButtons()[0]);
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Close this empty position? Its deposit (about 0.002 SOL) comes back to your wallet."),
+    ).toBeInTheDocument();
+    expect(build.runAction).not.toHaveBeenCalled();
+  });
+
+  it("a just-closed row reads Closed · updating and offers nothing", async () => {
+    window.localStorage.setItem(
+      PENDING_ACTIONS_KEY,
+      JSON.stringify({
+        version: 1,
+        actions: [{ wallet: DAMM.wallet, positionId: R[3], kind: "close", signature: SIG, slot: 410000010, at: Date.now() }],
+      }),
+    );
+    serve({ "meteora-damm-v2": withEmptyRow() });
+    mount(DAMM.wallet, "meteora-damm-v2");
+    const status = await screen.findByText("Closed · updating");
+    const row = status.closest("tr")!;
+    expect(within(row).queryByRole("button", { name: /Claim|Withdraw|Close position/ })).toBeNull();
+    expect(closeButtons()).toHaveLength(0);
   });
 });

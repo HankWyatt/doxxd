@@ -58,6 +58,8 @@ import {
 const WithdrawDialog = lazy(() =>
   import("./lp-actions/withdraw-dialog").then((m) => ({ default: m.WithdrawDialog })),
 );
+// Likewise on the first Close position click.
+const CloseDialog = lazy(() => import("./lp-actions/close-dialog").then((m) => ({ default: m.CloseDialog })));
 
 /**
  * Reports a card's transient failure with a way to retry it, or null once it
@@ -135,6 +137,8 @@ export function ProtocolSection({
   const [failed, setFailed] = useState(false);
   // The position whose Withdraw was clicked; the withdraw dialog reads it.
   const [withdrawTarget, setWithdrawTarget] = useState<ActionTarget | null>(null);
+  // The empty position whose Close position was clicked; the close dialog reads it.
+  const [closeTarget, setCloseTarget] = useState<ActionTarget | null>(null);
   const wallet = useConnectedWallet();
   // A disconnect or account switch closes the dialog for good: it never
   // reopens on its own when that wallet comes back.
@@ -143,6 +147,7 @@ export function ProtocolSection({
   if (withdrawOwner !== owner) {
     setWithdrawOwner(owner);
     setWithdrawTarget(null);
+    setCloseTarget(null);
   }
   const definition = resources[resource];
   // DMND reports "0" for sources it has not finished: only a chip or a
@@ -226,6 +231,7 @@ export function ProtocolSection({
             limit={limit}
             report={report}
             onWithdraw={setWithdrawTarget}
+            onClosePosition={setCloseTarget}
             cardHeading={toggleButton}
           />
         </div>
@@ -250,6 +256,25 @@ export function ProtocolSection({
           </Suspense>
         </LoadBoundary>
       )}
+      {closeTarget && wallet && wallet.address === address && (
+        <LoadBoundary
+          fallback={
+            <p className="small withdraw-load-error" role="alert">
+              Couldn’t load · reload the page
+            </p>
+          }
+        >
+          <Suspense fallback={null}>
+            <CloseDialog
+              target={closeTarget}
+              wallet={wallet}
+              lookup={mintLookup([closeTarget], labels)}
+              onClose={() => setCloseTarget(null)}
+              onDone={() => setCloseTarget(null)}
+            />
+          </Suspense>
+        </LoadBoundary>
+      )}
     </section>
   );
 }
@@ -262,6 +287,7 @@ function ProtocolBody({
   limit,
   report,
   onWithdraw,
+  onClosePosition,
   cardHeading,
 }: {
   address: string;
@@ -271,6 +297,7 @@ function ProtocolBody({
   limit: number;
   report: (retry: (() => void) | null) => void;
   onWithdraw: (target: ActionTarget) => void;
+  onClosePosition: (target: ActionTarget) => void;
   /** Takes focus back when the progress panel closes without Claim all. */
   cardHeading: RefObject<HTMLButtonElement | null>;
 }) {
@@ -506,6 +533,7 @@ function ProtocolBody({
               actions={actions.tracksPending ? actions : null}
               lookup={lookup}
               onWithdraw={onWithdraw}
+              onClosePosition={onClosePosition}
             />
           ) : kind === "lending" ? (
             <LegTable
@@ -655,9 +683,11 @@ function RunProgress({
       title={
         run.kind === "withdraw"
           ? `Withdraw from ${positionName(run.targets[0], lookup)}`
-          : run.count === null
-            ? "Claiming fees from all positions"
-            : `Claiming fees from ${plural(run.count, "position")}`
+          : run.kind === "close"
+            ? `Close ${positionName(run.targets[0], lookup)}`
+            : run.count === null
+              ? "Claiming fees from all positions"
+              : `Claiming fees from ${plural(run.count, "position")}`
       }
       walletName={run.walletName}
       steps={run.steps}
@@ -675,8 +705,10 @@ function RunProgress({
       done={run.phase === "done"}
       stopping={run.stopping}
       autoFocus={actions.focusRun}
-      nothingLine={run.kind === "withdraw" ? "Nothing was withdrawn" : undefined}
-      footnote={run.kind === "withdraw" ? WITHDRAW_FOOTNOTE : undefined}
+      nothingLine={
+        run.kind === "withdraw" ? "Nothing was withdrawn" : run.kind === "close" ? "Nothing was closed" : undefined
+      }
+      footnote={run.kind === "claim" ? undefined : WITHDRAW_FOOTNOTE}
       onStop={actions.stop}
       onDone={onDone}
     />
@@ -773,11 +805,13 @@ function LiquidityTable({
   actions = null,
   lookup,
   onWithdraw,
+  onClosePosition,
 }: TableProps & {
   /** On-site actions, when this card offers them (see useLpActions). */
   actions?: LpActions | null;
   lookup?: MintLookup;
   onWithdraw?: (target: ActionTarget) => void;
+  onClosePosition?: (target: ActionTarget) => void;
 }) {
   const selecting = Boolean(actions?.active && actions.selecting);
   return (
@@ -851,6 +885,7 @@ function LiquidityTable({
                       busy={actions.busy}
                       onClaim={(target) => actions.start("claim", [target])}
                       onWithdraw={(target) => onWithdraw?.(target)}
+                      onClosePosition={onClosePosition}
                       onRefresh={actions.refresh}
                     />
                   )}

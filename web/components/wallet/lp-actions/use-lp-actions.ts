@@ -51,6 +51,8 @@ export type RowActionState = {
   /** Offer Claim: the row may hold fees and nothing is pending for it. */
   claim: boolean;
   withdraw: "yes" | "locked" | "no";
+  /** Offer Close position: the row is empty but open, and nothing is pending for it. */
+  close: boolean;
   pending: { kind: ActionKind; stale: boolean } | null;
 };
 
@@ -132,6 +134,7 @@ export function useLpActions(
         target: row.action,
         claim: caps.claim !== "no" && pending === null,
         withdraw: caps.withdraw,
+        close: caps.close === "yes" && pending === null,
         pending: pending && { kind: pending.kind, stale: pending.stale },
       });
     }

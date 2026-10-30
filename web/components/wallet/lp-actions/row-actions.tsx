@@ -8,9 +8,16 @@ import { ClaimableTotal, FeeUsd } from "../claim-value";
 import { formatAtoms, type MintLookup } from "./amounts";
 import type { RowActionState } from "./use-lp-actions";
 
+const PENDING_TEXT: Record<NonNullable<RowActionState["pending"]>["kind"], string> = {
+  claim: "Just claimed · updating",
+  withdraw: "Withdrawn · updating",
+  close: "Closed · updating",
+};
+
 /**
- * A row's Claim / Withdraw / Locked buttons, or its pending state after an
- * action. Buttons show only when `interactive` (your own wallet).
+ * A row's Claim / Withdraw / Locked / Close position buttons, or its pending
+ * state after an action. Buttons show only when `interactive` (your own
+ * wallet).
  */
 export function RowActions({
   state,
@@ -18,6 +25,7 @@ export function RowActions({
   busy,
   onClaim,
   onWithdraw,
+  onClosePosition,
   onRefresh,
 }: {
   state: RowActionState;
@@ -25,6 +33,7 @@ export function RowActions({
   busy: boolean;
   onClaim(target: ActionTarget): void;
   onWithdraw(target: ActionTarget): void;
+  onClosePosition?(target: ActionTarget): void;
   onRefresh(): void;
 }) {
   const { pending, target } = state;
@@ -38,12 +47,13 @@ export function RowActions({
         </button>
       </span>
     ) : (
-      <span className="row-pending">{pending.kind === "claim" ? "Just claimed · updating" : "Withdrawn · updating"}</span>
+      <span className="row-pending">{PENDING_TEXT[pending.kind]}</span>
     );
   const claim = interactive && state.claim;
-  // A withdrawn row waits for DMND; a just-claimed one can still withdraw.
-  const withdraw = interactive && pending?.kind !== "withdraw" ? state.withdraw : "no";
-  if (!status && !claim && withdraw === "no") return null;
+  // A withdrawn or closed row waits for DMND; a just-claimed one can still withdraw.
+  const withdraw = interactive && pending?.kind !== "withdraw" && pending?.kind !== "close" ? state.withdraw : "no";
+  const close = interactive && state.close && onClosePosition !== undefined;
+  if (!status && !claim && withdraw === "no" && !close) return null;
   return (
     <div className="row-actions">
       {status}
@@ -60,6 +70,11 @@ export function RowActions({
       {withdraw === "locked" && (
         <button type="button" className="action-pill" disabled title="Locked liquidity can't be withdrawn">
           🔒 Locked
+        </button>
+      )}
+      {close && (
+        <button type="button" className="action-pill" disabled={busy} onClick={() => onClosePosition?.(target)}>
+          Close position
         </button>
       )}
     </div>
