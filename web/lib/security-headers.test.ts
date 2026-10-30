@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GET as rpcGet, POST as rpcPost } from "@/app/api/rpc/route";
 import { securityHeaders, withSecurityHeaders } from "./security-headers";
@@ -11,6 +12,8 @@ const EXPECTED = {
   "Content-Security-Policy": "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'",
 };
 
+const HSTS = "max-age=31536000; includeSubDomains";
+
 function expectSecured(response: Response) {
   for (const [name, value] of Object.entries(EXPECTED)) expect(response.headers.get(name)).toBe(value);
 }
@@ -19,6 +22,38 @@ describe("securityHeaders", () => {
   it("is the fixed set, with no script-src", () => {
     expect(securityHeaders()).toEqual(EXPECTED);
     expect(securityHeaders()["Content-Security-Policy"]).not.toContain("script-src");
+  });
+
+  it("adds HSTS, without preload, only for HTTPS", () => {
+    expect(securityHeaders({ https: true })).toEqual({ ...EXPECTED, "Strict-Transport-Security": HSTS });
+    expect(securityHeaders({ https: false })).toEqual(EXPECTED);
+    expect(securityHeaders({ https: true })["Strict-Transport-Security"]).not.toContain("preload");
+  });
+});
+
+// Static assets bypass the Worker; Workers assets apply public/_headers
+// (copied to dist/client) to them instead. It must match the Worker's set.
+describe("public/_headers", () => {
+  function parseHeadersFile(text: string): Record<string, Record<string, string>> {
+    const rules: Record<string, Record<string, string>> = {};
+    let current: Record<string, string> | undefined;
+    for (const line of text.split("\n")) {
+      if (line.trim() === "" || line.trim().startsWith("#")) continue;
+      if (!/^\s/.test(line)) {
+        current = rules[line.trim()] = {};
+        continue;
+      }
+      const colon = line.indexOf(":");
+      expect(current, line).toBeDefined();
+      expect(colon, line).toBeGreaterThan(0);
+      current![line.slice(0, colon).trim()] = line.slice(colon + 1).trim();
+    }
+    return rules;
+  }
+
+  it("applies exactly the Worker's HTTPS security headers to every asset", () => {
+    const text = readFileSync(new URL("../public/_headers", import.meta.url), "utf8");
+    expect(parseHeadersFile(text)).toEqual({ "/*": securityHeaders({ https: true }) });
   });
 });
 
@@ -40,6 +75,7 @@ describe("withSecurityHeaders", () => {
     );
     const response = await fetch(new Request("https://doxxd.test/wallet/x"));
     expectSecured(response);
+    expect(response.headers.get("Strict-Transport-Security")).toBe(HSTS);
     expect(response.headers.get("content-type")).toBe("text/html");
     expect(await response.text()).toBe("<!doctype html><p>hi</p>");
   });
@@ -102,6 +138,35 @@ describe("withSecurityHeaders", () => {
       );
       expect(response.status).toBe(404);
       expectSecured(response);
+    }
+  });
+
+  it("sends HSTS over HTTPS only, so local http previews never get it", async () => {
+    const { fetch } = wrap(() => new Response("ok"));
+    const secure = await fetch(new Request("https://doxxd.test/"));
+    expect(secure.headers.get("Strict-Transport-Security")).toBe(HSTS);
+    const local = await fetch(new Request("http://127.0.0.1:4318/"));
+    expectSecured(local);
+    expect(local.headers.has("Strict-Transport-Security")).toBe(false);
+  });
+
+  it("answers a plain, secured 500 when the handler throws or rejects, without the error text", async () => {
+    const handlers = [
+      () => {
+        throw new Error("boom https://rpc.provider.test/?api-key=SECRET");
+      },
+      () => Promise.reject(new Error("boom https://rpc.provider.test/?api-key=SECRET")),
+    ];
+    for (const handler of handlers) {
+      const fetch = withSecurityHeaders(handler as (request: Request) => Promise<Response>);
+      const response = await fetch(new Request("https://doxxd.test/boom"));
+      expect(response.status).toBe(500);
+      expectSecured(response);
+      expect(response.headers.get("Strict-Transport-Security")).toBe(HSTS);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+      const text = await response.text();
+      expect(text).toBe("Internal Server Error");
     }
   });
 

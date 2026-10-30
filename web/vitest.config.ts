@@ -8,6 +8,7 @@ export default defineConfig({
     setupFiles: ["./tests/setup.ts"],
     include: [
       "lib/**/*.test.{ts,tsx}",
+      "worker/**/*.test.ts",
       "components/**/*.test.{ts,tsx}",
       "tests/fixtures/**/*.test.ts",
     ],

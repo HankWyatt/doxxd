@@ -4,13 +4,15 @@ import type { ConnectorBinding } from "../lib/connector-contract.mjs";
 import { withSecurityHeaders } from "../lib/security-headers";
 
 // Every page, API and error response leaves with the security headers (dev too:
-// the Cloudflare Vite plugin runs this entry).
-const securedHandler = withSecurityHeaders(
-  (request: Request, env: Cloudflare.Env, ctx: ExecutionContext) => handler.fetch(request, env, ctx),
-);
-
+// the Cloudflare Vite plugin runs this entry). The wrapper is outermost, so a
+// throw anywhere below becomes a plain, secured 500. Static assets get the same
+// headers from public/_headers.
 const worker = {
-  fetch(request: Request, env: Cloudflare.Env, ctx: ExecutionContext<{ CONNECTORS?: ConnectorBinding }>) {
+  fetch: withSecurityHeaders(function fetch(
+    request: Request,
+    env: Cloudflare.Env,
+    ctx: ExecutionContext<{ CONNECTORS?: ConnectorBinding }>,
+  ) {
     let binding = ctx.props?.CONNECTORS;
     // Local preview emulates the same request-scoped capability. This branch and
     // the auxiliary service binding are absent from production builds.
@@ -30,8 +32,8 @@ const worker = {
         },
       };
     }
-    return runWithConnectorBinding(binding, () => securedHandler(request, env, ctx));
-  },
+    return runWithConnectorBinding(binding, () => handler.fetch(request, env, ctx));
+  }),
 };
 
 export default worker;
