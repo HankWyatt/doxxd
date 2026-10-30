@@ -1,9 +1,12 @@
 # Doxxd
 
-Look up any public Solana wallet and see its holdings, staking, lending, liquidity and trading positions and activity, powered by the [DMND](https://dmnd.dev) API.
+**The portfolio tracker for Solana.** See what any wallet holds, from tokens to staking, lending and liquidity, follow the wallets that matter to you, and manage your own LP positions without leaving the page.
+
+**Live at [doxxd.io](https://doxxd.io)** · powered by the [DMND](https://dmnd.dev) API · open source under MIT
 
 [![CI](https://github.com/HankWyatt/doxxd/actions/workflows/ci.yml/badge.svg)](https://github.com/HankWyatt/doxxd/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Website](https://img.shields.io/badge/website-doxxd.io-14f195)](https://doxxd.io)
 
 ![Doxxd wallet page rendered from synthetic test fixtures](docs/screenshot.png)
 
@@ -11,11 +14,13 @@ The screenshot shows the wallet page rendered from synthetic test fixtures, not 
 
 ## Features
 
-- **No sign-up.** Paste a public address. No wallet connection or account is required.
-- **Portfolio.** The headline is DMND's authoritative known net value. The holdings list shows the top 10 priced tokens, with unpriced and tiny balances collapsed into one line; it is searchable by name, symbol or mint, and shows indexed buy/sell totals and P&L estimates where DMND has trading history. Expandable protocol views cover native staking, liquid staking, Kamino, Solend, MarginFi, Orca, Raydium, Meteora DLMM, Meteora DAMM v2, Drift and Velocity.
-- **Activity.** Observed executions, transfers, fees and net changes, with UTC date filters and opaque cursor pages kept in the URL.
-- **Watchlist.** Save addresses and optional labels in your browser. The list makes no wallet data requests.
-- **Server-only gateway.** DMND credentials never reach the browser. The browser calls same-origin `/api/wallet/...` routes, and a data error never substitutes synthetic values.
+- **Track any wallet.** Paste a public address, yours, a friend's or a whale's. No sign-up and no wallet connection needed to look.
+- **Portfolio at a glance.** A net-worth headline from DMND, a chip per protocol the wallet uses, and a card per protocol: native and liquid staking, Kamino, Solend, MarginFi, Orca, Raydium, Meteora DLMM, Meteora DAMM v2, Drift and Velocity.
+- **Every token, valued.** The top holdings by value with token images, searchable by name, symbol or mint, plus indexed buy and sell totals and P&L estimates where DMND has trading history.
+- **Activity.** Transfers, trades, fees and net changes, with date filters and pages kept in the URL.
+- **Watchlist.** Save wallets with your own labels, stored only in your browser.
+- **Manage your own positions.** Connect Phantom, Solflare or Backpack to claim LP fees and withdraw from Meteora DAMM v2 and Raydium pools right on the page. Your wallet signs every transaction; Doxxd never holds keys and charges no fee. See [On-site actions](#on-site-actions).
+- **Private by design.** DMND and RPC credentials stay on the server. The browser only calls same-origin `/api/...` routes, and a data error never shows made-up values.
 
 ## Quick start
 
@@ -27,7 +32,7 @@ npm run install:ci
 npm run dev -- --host 127.0.0.1 --port 4317
 ```
 
-Visit `http://127.0.0.1:4317/` and enter a Solana address. There is no public demo or sample-data route; synthetic fixtures are used only by the automated tests.
+Visit `http://127.0.0.1:4317/` and enter a Solana address, or use the live site at [doxxd.io](https://doxxd.io). There is no public demo or sample-data route; synthetic fixtures are used only by the automated tests.
 
 Wallet routes are `/wallet/<address>` and `/wallet/<address>/activity`. They need a DMND API key (see below). Without one they show a connection state, never synthetic data.
 
@@ -101,7 +106,7 @@ After `npm run build`, `DOXXD_E2E_BUILT=1 npm run test:e2e` runs the browser tes
 | `web/lib/fixtures/` | Synthetic test data; there is no public fixture endpoint |
 | `web/contracts/` | Pinned DMND OpenAPI contract and source revision |
 | `web/tests/` | Synthetic fixtures and isolated Chromium flows |
-| `web/scripts/` | Build, runtime and staged live-verification tooling |
+| `web/scripts/` | Build and runtime tooling |
 | `scripts/` | Contract synchronization |
 
 The application uses React, TypeScript and the Sites Vinext runtime.
