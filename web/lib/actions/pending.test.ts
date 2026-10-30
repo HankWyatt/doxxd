@@ -35,7 +35,11 @@ afterEach(() => {
 
 describe("pending action payload", () => {
   it("round-trips a versioned payload", () => {
-    const actions = [action(), action({ positionId: "position-2", kind: "withdraw", signature: signature(2) })];
+    const actions = [
+      action(),
+      action({ positionId: "position-2", kind: "withdraw", signature: signature(2) }),
+      action({ positionId: "position-3", kind: "close", signature: signature(3) }),
+    ];
     const raw = serializePendingActions(actions);
     expect(JSON.parse(raw).version).toBe(1);
     expect(parsePendingActions(raw)).toEqual({ ok: true, actions });

@@ -5,6 +5,8 @@ import type { ActionTarget } from "./types";
 export type Capabilities = {
   claim: "yes" | "maybe" | "no";
   withdraw: "yes" | "locked" | "no";
+  /** An empty position (no liquidity at all) that is still open. */
+  close: "yes" | "no";
   withdrawableBps: number;
   vestingBps: number;
 };
@@ -15,6 +17,8 @@ const TEN_THOUSAND = BigInt(10000);
 
 // Unparseable amounts count as zero, so a malformed row never offers an action.
 const big = (value: string): bigint => (/^\d+$/.test(value) ? BigInt(value) : ZERO);
+// Closing needs every amount to be a literal zero: unparseable is not empty.
+const zero = (value: string) => /^0+$/.test(value);
 
 const bps = (part: bigint, total: bigint) =>
   total > ZERO ? Number((part * TEN_THOUSAND) / total) : 0;
@@ -33,6 +37,9 @@ export function capabilities(t: ActionTarget): Capabilities {
       return {
         claim: anyClaimable ? "yes" : "no",
         withdraw: withdrawable > ZERO ? "yes" : total > ZERO ? "locked" : "no",
+        close: [t.liquidity.unlocked, t.liquidity.vested, t.liquidity.permanentLocked, t.liquidity.total].every(zero)
+          ? "yes"
+          : "no",
         withdrawableBps: bps(withdrawable, total),
         vestingBps: bps(vested, total),
       };
@@ -46,6 +53,7 @@ export function capabilities(t: ActionTarget): Capabilities {
       return {
         claim: liquid || anyOwed ? "maybe" : "no",
         withdraw: liquid ? "yes" : "no",
+        close: zero(t.liquidity) ? "yes" : "no",
         withdrawableBps: 10000,
         vestingBps: 0,
       };
@@ -59,6 +67,7 @@ export function capabilities(t: ActionTarget): Capabilities {
           t.pool !== null && big(t.lpAtoms) > ZERO && t.withdrawalAvailable !== false
             ? "yes"
             : "no",
+        close: "no",
         withdrawableBps: 10000,
         vestingBps: 0,
       };

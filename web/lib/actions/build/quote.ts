@@ -33,6 +33,7 @@ export type WithdrawQuote = {
 /** Why a position gets no claim transaction. */
 export type SkipReason =
   | "Nothing to claim"
+  | "Rewards are paused by the pool"
   | "Position no longer exists"
   | "Position data doesn't match the pool · skipped";
 
@@ -57,5 +58,27 @@ export class PositionGoneError extends Error {
   constructor() {
     super("Position no longer exists");
     this.name = "PositionGoneError";
+  }
+}
+
+const NOT_EMPTY = {
+  liquidity: "This position still holds liquidity",
+  locked: "Part of this position is locked for good",
+  vesting: "Part of this position is still vesting",
+} as const;
+
+/** A close was asked for a position that is not empty: liquidity, a lock or vesting remains. */
+export class PositionNotEmptyError extends Error {
+  constructor(readonly remains: keyof typeof NOT_EMPTY) {
+    super(NOT_EMPTY[remains]);
+    this.name = "PositionNotEmptyError";
+  }
+}
+
+/** A pending reward sits in a reward vault the pool has frozen: it can't be paid out now. */
+export class RewardsPausedError extends Error {
+  constructor() {
+    super("Rewards are paused by the pool");
+    this.name = "RewardsPausedError";
   }
 }

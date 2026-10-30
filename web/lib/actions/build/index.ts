@@ -3,15 +3,18 @@ import type { InstructionGroup } from "../pack";
 import type { ActionRpc } from "../rpc";
 import type { ActionTarget, ClmmTarget, DammV2Target, FungibleTarget } from "../types";
 import type { Expectation } from "../verify";
+import { TOKEN_2022_PROGRAM, TOKEN_CLOSE_ACCOUNT, TOKEN_PROGRAM } from "../programs";
 import {
   buildDammV2ClaimGroups,
+  buildDammV2CloseGroups,
   buildDammV2WithdrawGroups,
   quoteDammV2Withdraw,
   type ClaimBuild,
+  type CloseBuild,
 } from "./meteora-damm-v2";
 import type { WithdrawQuote } from "./quote";
 import { buildAmmV4WithdrawGroups, quoteAmmV4Withdraw } from "./raydium-amm-v4";
-import { buildClmmClaimGroups, buildClmmWithdrawGroups, quoteClmmWithdraw } from "./raydium-clmm";
+import { buildClmmClaimGroups, buildClmmCloseGroups, buildClmmWithdrawGroups, quoteClmmWithdraw } from "./raydium-clmm";
 import { buildCpmmWithdrawGroups, quoteCpmmWithdraw } from "./raydium-cpmm";
 
 export { cachedReads, createActionRpc, isRpcBusy, RpcBusyError } from "../rpc";
@@ -22,7 +25,14 @@ export { GroupTooLargeError, packGroups } from "../pack";
 export type { InstructionGroup, PackedMessage } from "../pack";
 export { computeUnitPrice, runAction } from "../run";
 export type { ActionStep, RunOptions, StepStatus } from "../run";
-export { AmountTooSmallError, NothingToWithdrawError, PositionGoneError } from "./quote";
+export {
+  AmountTooSmallError,
+  NothingToWithdrawError,
+  PositionGoneError,
+  PositionNotEmptyError,
+  RewardsPausedError,
+} from "./quote";
+export type { CloseBuild } from "./meteora-damm-v2";
 export type { SkipReason, TokenAmount, WithdrawQuote } from "./quote";
 
 function unknownProtocol(): never {
@@ -115,4 +125,33 @@ export async function buildWithdrawGroups(
   if (isCpmm(target)) return buildCpmmWithdrawGroups(rpc, owner, target, bps, slippageBps);
   if (isAmmV4(target)) return buildAmmV4WithdrawGroups(rpc, owner, target, bps, slippageBps);
   return unknownProtocol();
+}
+
+/**
+ * The group that closes `target`, an empty DAMM v2 or CLMM position, after
+ * collecting what it still holds (kind "close"), and the lamports closing
+ * returns. Built from live state; refuses a position that is not empty.
+ */
+export async function buildCloseGroups(rpc: ActionRpc, owner: string, target: ActionTarget): Promise<CloseBuild> {
+  if (isDammV2(target)) return buildDammV2CloseGroups(rpc, owner, target);
+  if (isClmm(target)) return buildClmmCloseGroups(rpc, owner, target);
+  if (isCpmm(target) || isAmmV4(target)) throw new Error("close not supported");
+  return unknownProtocol();
+}
+
+/**
+ * True when a group unwraps wrapped SOL (a Token CloseAccount of the wallet's
+ * wSOL account): any wSOL the wallet already held comes back as SOL too.
+ */
+export function unwrapsWrappedSol(groups: InstructionGroup[]): boolean {
+  return groups.some((group) =>
+    group.instructions.some((ix) => {
+      const program = ix.programId.toBase58();
+      return (
+        (program === TOKEN_PROGRAM || program === TOKEN_2022_PROGRAM) &&
+        ix.data.length === 1 &&
+        ix.data[0] === TOKEN_CLOSE_ACCOUNT
+      );
+    }),
+  );
 }

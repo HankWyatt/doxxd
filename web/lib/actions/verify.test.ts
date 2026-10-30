@@ -466,6 +466,7 @@ describe("ALLOWED_INSTRUCTIONS", () => {
     expect(Object.keys(c.roles).map((i) => at(close, Number(i)))).toEqual([
       ctx.owner.toBase58(),
       ctx.chain.clmm.positionNftAccount,
+      ctx.chain.clmm.position,
     ]);
 
     const cpmm = cpmmWithdraw(ctx);
@@ -1588,5 +1589,152 @@ describe("verifyMessage and the Memo program (S-R005)", () => {
     const ix = cpmmWithdraw(ctx);
     expect(ix.keys[13].pubkey.toBase58()).toBe(MEMO_PROGRAM);
     expect(verifyMessage(compile(ctx, [ix]), cpmmTie(ctx))).toEqual(OK);
+  });
+});
+
+// --- Closing an empty position (kind "close") --------------------------------
+
+describe("verifyMessage for a close", () => {
+  // The close of every listed DAMM v2 and CLMM position, nothing withdrawn.
+  const closing = (ctx: Ctx): Expectation => ({ ...ctx.expectation, kind: "close" });
+  const cpAmmOnly = async (ixs: Promise<TransactionInstruction[]>) => only(await ixs, PROGRAM_IDS.cpAmm);
+
+  it("accepts a DAMM v2 fee and reward collect, refresh_vesting and close_position", async () => {
+    const ctx = setup();
+    const v = ctx.chain.dammV2.variants.vested;
+    const refresh = await ctx.cpAmm.refreshVesting({
+      owner: ctx.owner,
+      position: pk(v.position),
+      positionNftAccount: pk(v.positionNftAccount),
+      pool: pk(v.pool),
+      vestingAccounts: [pk(v.vesting!)],
+    });
+    const ixs = [
+      ...budget(),
+      ...refresh.instructions,
+      ...(await dammClaim(ctx)),
+      ...(await dammClaimReward(ctx)),
+      ...(await dammClose(ctx)),
+    ];
+    expect(verifyMessage(compile(ctx, ixs), closing(ctx))).toEqual(OK);
+  });
+
+  it("accepts a CLMM zero-liquidity collect then close_position, and a close on its own", () => {
+    const ctx = setup();
+    const collect = clmmDecrease(ctx, { rewards: [rewardTriple(ctx)] });
+    expect(verifyMessage(compile(ctx, [...budget(), collect, clmmClose(ctx)]), closing(ctx))).toEqual(OK);
+    expect(verifyMessage(compile(ctx, [clmmClose(ctx)]), closing(ctx))).toEqual(OK);
+  });
+
+  it("rejects every liquidity removal", async () => {
+    const ctx = setup();
+    const [, remove] = await cpAmmOnly(dammRemoveVested(ctx));
+    const [removeAll] = await cpAmmOnly(dammRemoveAll(ctx));
+    for (const [ix, label] of [
+      [remove, "meteora-damm-v2 remove_liquidity"],
+      [removeAll, "meteora-damm-v2 remove_all_liquidity"],
+      [cpmmWithdraw(ctx), "raydium-cpmm withdraw"],
+      [ammV4Withdraw(ctx), "raydium-amm-v4 withdraw"],
+      [ammV4Withdraw11(ctx), "raydium-amm-v4 withdraw"],
+    ] as const)
+      expect(verifyMessage(compile(ctx, [ix]), closing(ctx)), label).toEqual(
+        rejected(`${label} is not allowed in a close`),
+      );
+    const zeroMessage = "raydium-clmm decrease_liquidity_v2 in a close must remove 0 liquidity with 0 minimums";
+    // With minimums, without them, and the u128::MAX probe.
+    for (const decrease of [
+      clmmDecrease(ctx, { liquidity: SYNTHETIC.clmm.liquidity, a: new BN(1), b: new BN(1) }),
+      clmmDecrease(ctx, { liquidity: new BN(1) }),
+      clmmDecrease(ctx, { liquidity: new BN(1).shln(128).subn(1), a: new BN(1) }),
+      clmmDecrease(ctx, { a: new BN(1) }),
+    ])
+      expect(verifyMessage(compile(ctx, [decrease, clmmClose(ctx)]), closing(ctx))).toEqual(rejected(zeroMessage));
+  });
+
+  it("rejects the close of a position that is not listed", async () => {
+    const ctx = setup();
+    const onlyClmm: Expectation = {
+      ...closing(ctx),
+      positions: closing(ctx).positions.filter((p) => p.protocol === "raydium-clmm"),
+    };
+    expect(verifyMessage(compile(ctx, await dammClose(ctx)), onlyClmm)).toEqual(
+      rejected("meteora-damm-v2 close_position account 1 (position_nft_account) is not an expected meteora-damm-v2 position"),
+    );
+    const onlyDamm: Expectation = {
+      ...closing(ctx),
+      positions: closing(ctx).positions.filter((p) => p.protocol === "meteora-damm-v2"),
+    };
+    expect(verifyMessage(compile(ctx, [clmmClose(ctx)]), onlyDamm)).toEqual(
+      rejected("raydium-clmm close_position account 2 (position_nft_account) is not an expected raydium-clmm position"),
+    );
+  });
+
+  it("rejects a close_position naming another position account than the listed NFT account's", async () => {
+    const ctx = setup();
+    const [close] = await dammClose(ctx);
+    const other = pk(ctx.chain.dammV2.variants.vested.position);
+    expect(verifyMessage(compile(ctx, [withKey(close, 3, other)]), closing(ctx))).toEqual(
+      rejected("meteora-damm-v2 close_position account 3 (position) is not the position of its NFT account"),
+    );
+    expect(verifyMessage(compile(ctx, [withKey(clmmClose(ctx), 3, other)]), closing(ctx))).toEqual(
+      rejected("raydium-clmm close_position account 3 (personal_position) is not the position of its NFT account"),
+    );
+    // The same holds in a withdraw that closes.
+    expect(verifyMessage(compile(ctx, [withKey(close, 3, other)]), dammTie(ctx, { closes: true }))).toEqual(
+      rejected("meteora-damm-v2 close_position account 3 (position) is not the position of its NFT account"),
+    );
+  });
+
+  it("rejects rent sent to a stranger", async () => {
+    const ctx = setup();
+    const [close] = await dammClose(ctx);
+    expect(verifyMessage(compile(ctx, [withKey(close, 5, STRANGER)]), closing(ctx))).toEqual(
+      rejected("meteora-damm-v2 close_position account 5 (rent_receiver) is not the connected wallet"),
+    );
+    // CLMM pays the rent to its nft_owner, which must be the wallet and sign.
+    expect(verifyMessage(compile(ctx, [withKey(clmmClose(ctx), 0, STRANGER)]), closing(ctx))).toEqual(
+      rejected("raydium-clmm close_position account 0 (nft_owner) is not the connected wallet"),
+    );
+  });
+
+  it("rejects closing the same position twice", async () => {
+    const ctx = setup();
+    const [close] = await dammClose(ctx);
+    const again = new TransactionInstruction({ programId: close.programId, keys: close.keys, data: close.data });
+    expect(verifyMessage(compile(ctx, [close, again]), closing(ctx))).toEqual(
+      rejected("meteora-damm-v2 close_position closes the same position twice"),
+    );
+  });
+
+  it("rejects a close expectation that lists a CPMM or AMM v4 position, or carries a withdrawal", async () => {
+    const ctx = setup();
+    const { cpmm, ammV4 } = ctx.chain;
+    for (const [protocol, account, ix] of [
+      ["raydium-cpmm", cpmm.lpAccount, cpmmWithdraw(ctx)],
+      ["raydium-amm-v4", ammV4.lpAccount, ammV4Withdraw(ctx)],
+    ] as const) {
+      const expectation: Expectation = {
+        ...closing(ctx),
+        positions: [...closing(ctx).positions, { position: account, nftAccount: account, protocol }],
+      };
+      expect(verifyMessage(compile(ctx, [ix]), expectation)).toEqual(rejected(`a close cannot act on a ${protocol} position`));
+      expect(verifyMessage(compile(ctx, [clmmClose(ctx)]), expectation)).toEqual(
+        rejected(`a close cannot act on a ${protocol} position`),
+      );
+    }
+    const tied = dammTie(ctx, { closes: true });
+    expect(verifyMessage(compile(ctx, await dammClose(ctx)), { ...tied, kind: "close" })).toEqual(
+      rejected("a close cannot carry a withdrawal"),
+    );
+  });
+
+  it("still rejects close_position in a claim", async () => {
+    const ctx = setup();
+    expect(verifyMessage(compile(ctx, await dammClose(ctx)), ctx.expectation)).toEqual(
+      rejected("meteora-damm-v2 close_position is not allowed in a claim"),
+    );
+    expect(verifyMessage(compile(ctx, [clmmClose(ctx)]), ctx.expectation)).toEqual(
+      rejected("raydium-clmm close_position is not allowed in a claim"),
+    );
   });
 });

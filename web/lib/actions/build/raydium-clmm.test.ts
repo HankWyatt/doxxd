@@ -26,10 +26,12 @@ import type { ClmmTarget, DammV2Target } from "../types";
 import {
   AmountTooSmallError,
   buildClaimGroups,
+  buildCloseGroups,
   buildWithdrawGroups,
   NothingToWithdrawError,
   packGroups,
   PositionGoneError,
+  PositionNotEmptyError,
   quoteWithdraw,
   verifyMessage,
   type Expectation,
@@ -794,5 +796,65 @@ describe("Raydium CLMM account discriminators", () => {
     expect(chain.accounts.get(chain.clmm.pool)!.data.subarray(0, 8)).toEqual(disc("PoolState"));
     expect(chain.accounts.get(chain.clmm.position)!.data.subarray(0, 8)).toEqual(disc("PersonalPositionState"));
     expect(chain.accounts.get(chain.clmm.tickArrays[0])!.data.subarray(0, 8)).toEqual(disc("TickArrayState"));
+  });
+});
+
+describe("buildCloseGroups (Raydium CLMM)", () => {
+  const empty = (chain: SyntheticChain, owed: boolean) =>
+    patchLayout(chain, chain.clmm.position, PersonalPositionLayout, (s) => {
+      s.liquidity = new BN(0);
+      if (!owed) {
+        s.tokenFeesOwedA = new BN(0);
+        s.tokenFeesOwedB = new BN(0);
+      }
+    });
+  const lamports = (chain: SyntheticChain, address: string) => chain.accounts.get(address)!.lamports;
+
+  it("collects what an empty position is owed with a zero-liquidity decrease, then closes it", async () => {
+    const chain = chainFixture();
+    empty(chain, true);
+    const owner = chain.owner.publicKey.toBase58();
+    const t = target(chain);
+    const { groups, expectation, refundLamports } = await buildCloseGroups(mockActionRpc(chain), owner, t);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].label).toBe("Close SYNX + SOL");
+    const ixs = groups[0].instructions;
+    expect(clmmNames(ixs)).toEqual(["decrease_liquidity_v2", "close_position"]);
+    const decrease = ixs.find((ix) => isClmm(ix, DECREASE))!;
+    expect(u128(decrease.data, 8).isZero()).toBe(true);
+    expect(u64(decrease.data, 24).isZero() && u64(decrease.data, 32).isZero()).toBe(true);
+    const close = ixs.find((ix) => isClmm(ix, CLOSE))!;
+    expect(keysOf(close)[0]).toBe(owner); // nft_owner receives the rent
+    expect(isUnwrap(ixs.at(-1)!)).toBe(true);
+    // Token-2022 NFT: the mint closes too.
+    expect(refundLamports).toBe(
+      String(lamports(chain, t.position) + lamports(chain, t.positionNftAccount) + lamports(chain, t.positionMint)),
+    );
+    expect(expectation.kind).toBe("close");
+    expect(expectation.positions).toEqual([
+      { position: t.position, nftAccount: t.positionNftAccount, protocol: "raydium-clmm" },
+    ]);
+    expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
+  });
+
+  it("only closes an empty position that is owed nothing", async () => {
+    const chain = chainFixture();
+    empty(chain, false);
+    const t = target(chain);
+    const { groups, expectation } = await buildCloseGroups(mockActionRpc(chain), chain.owner.publicKey.toBase58(), t);
+    expect(groups[0].instructions.map((ix) => ix.programId.toBase58())).toEqual([CLMM]);
+    expect(clmmNames(groups[0].instructions)).toEqual(["close_position"]);
+    expect(expectation.mints).toEqual([]);
+    expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
+  });
+
+  it("refuses a position that still holds liquidity, and one that is gone", async () => {
+    const chain = chainFixture();
+    const owner = chain.owner.publicKey.toBase58();
+    await expect(buildCloseGroups(mockActionRpc(chain), owner, target(chain))).rejects.toThrow(
+      new PositionNotEmptyError("liquidity"),
+    );
+    chain.accounts.delete(chain.clmm.position);
+    await expect(buildCloseGroups(mockActionRpc(chain), owner, target(chain))).rejects.toBeInstanceOf(PositionGoneError);
   });
 });

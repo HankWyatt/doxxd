@@ -17,7 +17,12 @@
 //   chose: the expected pool (and LP account, for CPMM and AMM v4), the
 //   exact amount (or all, for remove_all_liquidity) and the exact minimums,
 //   at most once per position; a position is closed only when the
-//   withdrawal closes it.
+//   withdrawal closes it;
+// - a close acts only on listed DAMM v2 and CLMM positions: it may collect
+//   (as a claim does), refresh vesting and close each listed position once,
+//   and never removes liquidity;
+// - every close_position names the position account listed with its
+//   position NFT account, and pays the rent to the wallet.
 // The wallet's ATAs are derived here from the expected mints, never taken
 // from the builder.
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
@@ -110,6 +115,8 @@ type Context = {
 const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 const TOKEN_LABEL: Record<string, string> = { [TOKEN_PROGRAM]: "Token", [TOKEN_2022_PROGRAM]: "Token-2022" };
 const CLMM_BITMAP_SEED = new TextEncoder().encode("pool_tick_array_bitmap_extension");
+/** Protocols whose empty positions a close may close. */
+const CLOSABLE: readonly ActionProtocol[] = ["meteora-damm-v2", "raydium-clmm"];
 
 export function verifyMessage(message: VersionedMessage, expect: Expectation): VerifyResult {
   try {
@@ -123,7 +130,12 @@ export function verifyMessage(message: VersionedMessage, expect: Expectation): V
 
 function check(message: VersionedMessage, expect: Expectation): void {
   if (message.addressTableLookups.length > 0) reject("address-table lookups are not allowed");
-  if (expect.kind !== "claim" && expect.kind !== "withdraw") reject("unknown action kind");
+  if (expect.kind !== "claim" && expect.kind !== "withdraw" && expect.kind !== "close") reject("unknown action kind");
+  if (expect.kind === "close")
+    for (const p of expect.positions) {
+      if (!CLOSABLE.includes(p.protocol)) reject(`a close cannot act on a ${p.protocol} position`);
+      if (p.withdraw) reject("a close cannot carry a withdrawal");
+    }
 
   const owner = parseOwner(expect.owner);
   const keys = message.staticAccountKeys.map((key) => key.toBase58());
@@ -283,6 +295,8 @@ function checkProtocol(
     const at = `${label} account ${i} (${name})`;
     if (role === "pool" || role === "lpSource") {
       continue; // checked against the withdraw expectation (checkWithdrawal)
+    } else if (role === "position") {
+      continue; // checked against the position NFT account (checkClosedPosition)
     } else if (role === "owner" || role === "rentReceiver") {
       if (key !== ctx.owner) reject(`${at} is not the connected wallet`);
       if (role === "owner" && !ctx.message.isAccountSigner(indexes[i])) reject(`${at} is not a signer`);
@@ -294,7 +308,28 @@ function checkProtocol(
   }
 
   if (spec.remaining === "clmmRewards") checkClmmRewards(ctx, label, accounts, fixed);
+  if (spec.closes) checkClosedPosition(ctx, spec, label, accounts);
   if (ctx.kind === "withdraw") checkWithdrawal(ctx, spec, label, accounts, data);
+  if (ctx.kind === "close" && spec.closes) {
+    // Each listed position closes at most once (a withdraw counts its own).
+    const key = `${spec.protocol}:${accounts[roleIndex(spec, "positionNftAccount")!]}`;
+    if (ctx.closed.has(key)) reject(`${label} closes the same position twice`);
+    ctx.closed.add(key);
+  }
+}
+
+/**
+ * A close_position names the position account listed with its position NFT
+ * account (the role loop already holds the NFT account to a listed position
+ * of this protocol).
+ */
+function checkClosedPosition(ctx: Context, spec: InstructionSpec, label: string, accounts: string[]): void {
+  const nft = accounts[roleIndex(spec, "positionNftAccount")!];
+  const i = roleIndex(spec, "position")!;
+  const listed = ctx.positions.some(
+    (p) => p.protocol === spec.protocol && p.nftAccount === nft && p.position === accounts[i],
+  );
+  if (!listed) reject(`${label} account ${i} (${spec.roles[i].name}) is not the position of its NFT account`);
 }
 
 const roleIndex = (spec: InstructionSpec, role: AccountRole): number | null => {
@@ -388,9 +423,9 @@ function checkArgs(kind: ActionKind, spec: InstructionSpec, label: string, data:
   const { amount, minimums } = decodeInstructionArgs(spec.args, data);
   const zero = BigInt(0);
   const noMinimum = minimums.every((m) => m === zero);
-  if (kind === "claim") {
+  if (kind === "claim" || kind === "close") {
     // Only a pure collect reaches here (see `kinds` in ./programs.ts).
-    if (amount !== zero || !noMinimum) reject(`${label} in a claim must remove 0 liquidity with 0 minimums`);
+    if (amount !== zero || !noMinimum) reject(`${label} in a ${kind} must remove 0 liquidity with 0 minimums`);
     return;
   }
   if (amount === zero) {

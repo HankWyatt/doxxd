@@ -49,7 +49,7 @@ function validAction(value: unknown): PendingAction | null {
   if (
     typeof wallet !== "string" || normalizeAddress(wallet) !== wallet ||
     typeof positionId !== "string" || !positionId || positionId.length > MAX_POSITION_ID_LENGTH ||
-    (kind !== "claim" && kind !== "withdraw") ||
+    (kind !== "claim" && kind !== "withdraw" && kind !== "close") ||
     !validSignature(signature) ||
     !Number.isSafeInteger(slot) || (slot as number) < 0 ||
     !Number.isSafeInteger(at) || (at as number) < 0

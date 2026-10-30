@@ -64,12 +64,14 @@ import {
   MISMATCH,
   readAccounts,
   type ClaimBuild,
+  type CloseBuild,
   type LiveMint,
 } from "./meteora-damm-v2";
 import {
   AmountTooSmallError,
   NothingToWithdrawError,
   PositionGoneError,
+  PositionNotEmptyError,
   type SkipReason,
   type TokenAmount,
   type WithdrawQuote,
@@ -341,21 +343,22 @@ function positionInstructions(
     minimums[1],
     live.bitmapExtension ?? undefined,
   );
-  const closeIxs = close
-    ? [
-        ClmmInstrument.closePositionInstruction(
-          CLMM,
-          wallet,
-          live.nftMint,
-          nftAccount,
-          personalPosition,
-          live.nftProgram.equals(TOKEN_2022_PROGRAM_ID),
-          poolKey,
-        ),
-      ]
-    : [];
+  const closeIxs = close ? [closeInstruction(wallet, live)] : [];
   const unwraps = wsolUnwraps(wallet, mints);
   return [...creates, decrease, ...closeIxs, ...unwraps];
+}
+
+/** close_position: burns the NFT and returns the position's rent to the wallet (nft_owner). */
+function closeInstruction(wallet: PublicKey, live: Live): TransactionInstruction {
+  return ClmmInstrument.closePositionInstruction(
+    CLMM,
+    wallet,
+    live.nftMint,
+    new PublicKey(live.target.positionNftAccount),
+    new PublicKey(live.target.position),
+    live.nftProgram.equals(TOKEN_2022_PROGRAM_ID),
+    new PublicKey(live.target.pool),
+  );
 }
 
 const legLabel = (leg: ClmmTarget["tokenA"]) => leg.symbol ?? `${leg.mint.slice(0, 4)}…`;
@@ -622,5 +625,54 @@ export async function buildClmmWithdrawGroups(
       ],
     },
     closes: plan.quote.closes,
+  };
+}
+
+// --- Close -----------------------------------------------------------------
+
+/**
+ * One group that closes an empty position (no liquidity, from live state).
+ * When the position is still owed fees or rewards, they are collected first
+ * with decrease_liquidity_v2(liquidity 0, minimums 0) after the needed ATA
+ * creates, and the wSOL unwrap ends the group; close_position (rent to the
+ * wallet) needs nothing owed. With liquidity 0 nothing accrues, so what is
+ * owed is the position's stored counters. Throws PositionNotEmptyError or
+ * PositionGoneError.
+ */
+export async function buildClmmCloseGroups(rpc: ActionRpc, owner: string, target: ClmmTarget): Promise<CloseBuild> {
+  const wallet = new PublicKey(owner);
+  const [result] = await loadPositions(rpc, wallet, [target]);
+  if (!result.ok) {
+    if (result.reason === GONE) throw new PositionGoneError();
+    throw new Error("Position data doesn't match the pool");
+  }
+  const live = result.live;
+  const { pool, position } = live;
+  if (!position.liquidity.isZero()) throw new PositionNotEmptyError("liquidity");
+  const fees = PositionUtils.GetPositionFees(pool, position, live.tickLower, live.tickUpper);
+  const rewards = PositionUtils.GetPositionRewards(
+    { tickCurrent: pool.tickCurrent, rewardInfos: live.rewards },
+    position,
+    live.tickLower,
+    live.tickUpper,
+  );
+  const owed =
+    !fees.tokenFeeAmountA.isZero() ||
+    !fees.tokenFeeAmountB.isZero() ||
+    rewards.some((r) => !r.isZero()) ||
+    position.rewardInfos.some((r) => !r.rewardAmountOwed.isZero());
+  const zero = new BN(0);
+  const instructions = owed
+    ? positionInstructions(wallet, live, await existingAtas(rpc, wallet, paidMints(live)), zero, [zero, zero], true)
+    : [closeInstruction(wallet, live)];
+  return {
+    groups: [{ positionIds: [target.id], instructions, label: `Close ${pair(target)}` }],
+    expectation: {
+      kind: "close",
+      owner,
+      mints: owed ? mintExpectations([live]) : [],
+      positions: [positionExpectation(target)],
+    },
+    refundLamports: String(live.closeLamports),
   };
 }

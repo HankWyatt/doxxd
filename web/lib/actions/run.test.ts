@@ -601,6 +601,25 @@ describe("runAction", () => {
     expect(steps[0].reason).toBe("Doesn't match the action you chose · not sent");
   });
 
+  it("refuses a close run whose expectation is a claim, and a claim run whose expectation is a close", async () => {
+    for (const [kind, intent] of [
+      ["claim", "close"],
+      ["close", "claim"],
+      ["close", "withdraw"],
+    ] as const) {
+      const ctx = setup();
+      const { steps, wallet, rpc } = await run(ctx, {
+        groups: groups(ctx, 1),
+        rpc: claimed(ctx),
+        expectation: { ...ctx.expectation, kind },
+        intent,
+      });
+      expect(wallet.calls).toHaveLength(0);
+      expect(rpc.sent).toHaveLength(0);
+      expect(steps.map((s) => [s.status, s.reason])).toEqual([["failed", "Doesn't match the action you chose · not sent"]]);
+    }
+  });
+
   it("signs 25 messages in 3 wallet prompts of 10, 10 and 5", async () => {
     const ctx = setup();
     const { steps, wallet } = await run(ctx, { groups: groups(ctx, 25), rpc: claimed(ctx) });

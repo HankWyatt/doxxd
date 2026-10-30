@@ -180,3 +180,27 @@ describe("CPMM and AMM v4 capabilities", () => {
     },
   );
 });
+
+describe("close capability", () => {
+  const zero = { unlocked: "0", vested: "0", permanentLocked: "0", total: "0" };
+  it("is yes for an empty DAMM v2 position, even with fees or rewards left to collect", () => {
+    expect(capabilities(damm({ liquidity: zero })).close).toBe("yes");
+    expect(capabilities(damm({ liquidity: zero, feeAAtoms: "5" })).close).toBe("yes");
+    expect(capabilities(damm()).close).toBe("no");
+    for (const part of ["unlocked", "vested", "permanentLocked", "total"] as const)
+      expect(capabilities(damm({ liquidity: { ...zero, [part]: "1" } })).close, part).toBe("no");
+  });
+
+  it("is yes for a CLMM position with no liquidity", () => {
+    expect(capabilities(clmm({ liquidity: "0" })).close).toBe("yes");
+    expect(capabilities(clmm({ liquidity: "0", feeOwedAAtoms: "9" })).close).toBe("yes");
+    expect(capabilities(clmm()).close).toBe("no");
+  });
+
+  it("is no for an unparseable amount and for CPMM and AMM v4", () => {
+    expect(capabilities(damm({ liquidity: { ...zero, unlocked: "?" } })).close).toBe("no");
+    expect(capabilities(clmm({ liquidity: "" })).close).toBe("no");
+    expect(capabilities(fungible({ lpAtoms: "0" })).close).toBe("no");
+    expect(capabilities(fungible({ protocol: "raydium-amm-v4", lpAtoms: "0" })).close).toBe("no");
+  });
+});

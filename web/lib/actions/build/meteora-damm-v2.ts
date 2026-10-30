@@ -23,6 +23,7 @@ import {
   calculateTransferFeeExcludedAmount,
   getAvailableVestingLiquidity,
   getTokenProgram,
+  getTotalLockedLiquidity,
   getUnClaimLpFee,
   isVestingComplete,
   type PoolState,
@@ -62,6 +63,8 @@ import {
   AmountTooSmallError,
   NothingToWithdrawError,
   PositionGoneError,
+  PositionNotEmptyError,
+  RewardsPausedError,
   type SkipReason,
   type TokenAmount,
   type WithdrawQuote,
@@ -290,11 +293,20 @@ async function loadVestings(
   live: Live,
 ): Promise<{ account: PublicKey; vestingState: VestingState }[]> {
   if (live.position.vestedLiquidity.isZero()) return [];
+  return readVestings(cpAmm, rpc, live.target.position);
+}
+
+/** Every vesting account of `position`, in address order. */
+async function readVestings(
+  cpAmm: CpAmm,
+  rpc: ActionRpc,
+  position: string,
+): Promise<{ account: PublicKey; vestingState: VestingState }[]> {
   const found = await rpc.connection.getProgramAccounts(CP_AMM, {
     commitment: "confirmed",
     filters: [
       { dataSize: VESTING_SIZE },
-      { memcmp: { offset: VESTING_POSITION_OFFSET, bytes: live.target.position } },
+      { memcmp: { offset: VESTING_POSITION_OFFSET, bytes: position } },
     ],
   });
   const coder = cpAmm._program.coder.accounts;
@@ -303,7 +315,7 @@ async function loadVestings(
       account: pubkey,
       vestingState: coder.decode<VestingState>("vesting", account.data),
     }))
-    .filter((v) => v.vestingState.position.toBase58() === live.target.position)
+    .filter((v) => v.vestingState.position.toBase58() === position)
     .sort((a, b) => a.account.toBase58().localeCompare(b.account.toBase58()));
 }
 
@@ -404,7 +416,11 @@ export async function buildDammV2ClaimGroups(
       ({ index }) => pending.rewards[index].gt(ZERO) && !live.tokens.unclaimableRewards.has(index),
     );
     if (pending.feeTokenA.isZero() && pending.feeTokenB.isZero() && rewards.length === 0) {
-      skipped.push({ positionId: target.id, reason: "Nothing to claim" });
+      // Something pending, but only in reward slots whose vault can't pay out.
+      const paused = initializedRewards(live.pool).some(
+        ({ index }) => pending.rewards[index].gt(ZERO) && live.tokens.unclaimableRewards.has(index),
+      );
+      skipped.push({ positionId: target.id, reason: paused ? "Rewards are paused by the pool" : "Nothing to claim" });
       continue;
     }
     const fee = await cpAmm.claimPositionFee2({ owner: wallet, receiver: wallet, ...feeAccounts(live) });
@@ -738,5 +754,96 @@ export async function buildDammV2WithdrawGroups(
       ],
     },
     closes: plan.quote.closes,
+  };
+}
+
+// --- Close -----------------------------------------------------------------
+
+export type CloseBuild = {
+  groups: InstructionGroup[];
+  expectation: Expectation;
+  /** Lamports closing returns to the wallet (the position's deposit). */
+  refundLamports: string;
+};
+
+/**
+ * One group that closes an empty position (no unlocked, vesting or locked
+ * liquidity, from live state): [refresh_vesting of its fully released
+ * vesting accounts], idempotent ATA creates, claim_position_fee when fees are
+ * pending, claim_reward per reward slot with a pending amount, close_position
+ * (rent to the wallet), then the wSOL unwrap. Nothing removes liquidity.
+ * Throws PositionNotEmptyError, RewardsPausedError (a pending reward in a
+ * vault that can't pay out: closing would forfeit it) or PositionGoneError.
+ */
+export async function buildDammV2CloseGroups(rpc: ActionRpc, owner: string, target: DammV2Target): Promise<CloseBuild> {
+  const wallet = new PublicKey(owner);
+  const cpAmm = new CpAmm(rpc.connection);
+  const {
+    loaded: [result],
+    clock,
+  } = await loadPositions(cpAmm, rpc, wallet, [target]);
+  if (!result.ok) {
+    if (result.reason === GONE) throw new PositionGoneError();
+    throw new Error("Position data doesn't match the pool");
+  }
+  const live = result.live;
+  const { pool, position } = live;
+  if (!position.permanentLockedLiquidity.isZero()) throw new PositionNotEmptyError("locked");
+  if (!position.unlockedLiquidity.isZero()) throw new PositionNotEmptyError("liquidity");
+  if (!position.vestedLiquidity.isZero()) throw new PositionNotEmptyError("vesting");
+  // A vesting account left behind must have released everything: refreshing
+  // one that has not would put liquidity back into the position.
+  const vestings = await readVestings(cpAmm, rpc, target.position);
+  if (vestings.some((v) => v.vestingState.innerVesting.totalReleasedLiquidity.lt(getTotalLockedLiquidity(v.vestingState))))
+    throw new PositionNotEmptyError("vesting");
+
+  const pending = getUnClaimLpFee(pool, position, clock.unixTimestamp);
+  const rewards = initializedRewards(pool).filter(({ index }) => pending.rewards[index].gt(ZERO));
+  if (rewards.some(({ index }) => live.tokens.unclaimableRewards.has(index))) throw new RewardsPausedError();
+  const fees = !pending.feeTokenA.isZero() || !pending.feeTokenB.isZero();
+
+  const accounts = feeAccounts(live);
+  const first = vestings.length
+    ? (
+        await cpAmm.refreshVesting({
+          owner: wallet,
+          position: accounts.position,
+          positionNftAccount: accounts.positionNftAccount,
+          pool: accounts.pool,
+          vestingAccounts: vestings.map((v) => v.account),
+        })
+      ).instructions
+    : [];
+  const parts = [];
+  if (fees) parts.push(await cpAmm.claimPositionFee2({ owner: wallet, receiver: wallet, ...accounts }));
+  for (const { index } of rewards)
+    parts.push(
+      await cpAmm.claimReward({
+        user: wallet,
+        position: accounts.position,
+        positionNftAccount: accounts.positionNftAccount,
+        poolState: pool,
+        positionState: position,
+        rewardIndex: index,
+        isSkipReward: false,
+      }),
+    );
+  parts.push(
+    await cpAmm.closePosition({
+      owner: wallet,
+      pool: accounts.pool,
+      position: accounts.position,
+      positionNftMint: new PublicKey(target.positionMint),
+      positionNftAccount: accounts.positionNftAccount,
+    }),
+  );
+  const paid = [
+    ...(fees ? [pool.tokenAMint.toBase58(), pool.tokenBMint.toBase58()] : []),
+    ...rewards.map(({ info }) => info.mint.toBase58()),
+  ];
+  return {
+    groups: [{ positionIds: [target.id], instructions: assemble(first, parts), label: `Close ${pair(target)}` }],
+    expectation: { kind: "close", owner, mints: mintExpectations([live], paid), positions: [positionExpectation(target)] },
+    refundLamports: String(live.closeLamports),
   };
 }

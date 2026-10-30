@@ -60,7 +60,9 @@ export const TOKEN_CLOSE_ACCOUNT = 9;
  * - `pool` and `lpSource` (liquidity-removing instructions only): in a
  *   withdraw, the pool the visitor chose to withdraw from and, for CPMM and
  *   AMM v4, the LP token account the LP tokens are burned from, both taken
- *   from the position's `withdraw` expectation.
+ *   from the position's `withdraw` expectation;
+ * - `position` (close_position only): the position account the expectation
+ *   lists with the instruction's position NFT account.
  * Indexes without a role are left to the program's own constraints.
  */
 export type AccountRole =
@@ -69,7 +71,8 @@ export type AccountRole =
   | "positionNftAccount"
   | "rentReceiver"
   | "pool"
-  | "lpSource";
+  | "lpSource"
+  | "position";
 
 /**
  * Accounts after the fixed list:
@@ -81,8 +84,12 @@ export type AccountRole =
  */
 export type RemainingAccounts = "none" | "vestings" | "optionalPool" | "clmmRewards";
 
-/** What the visitor asked for. Set by the UI from the visitor's intent. */
-export type ActionKind = "claim" | "withdraw";
+/**
+ * What the visitor asked for. Set by the UI from the visitor's intent. A
+ * "close" closes empty positions: it may collect their fees and rewards and
+ * close them, never remove liquidity.
+ */
+export type ActionKind = "claim" | "withdraw" | "close";
 
 /**
  * An instruction's data, decoded with an exact length:
@@ -155,7 +162,7 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       protocol: "meteora-damm-v2",
       name: "claim_position_fee", // dist/index.js:181
       discriminator: [180, 38, 154, 17, 133, 33, 162, 211],
-      kinds: ["claim", "withdraw"],
+      kinds: ["claim", "withdraw", "close"],
       args: { length: 8, minimums: [] },
       accounts: 15,
       remaining: "none",
@@ -165,7 +172,7 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       protocol: "meteora-damm-v2",
       name: "claim_reward", // dist/index.js:367
       discriminator: [149, 95, 181, 242, 94, 90, 158, 162],
-      kinds: ["claim", "withdraw"],
+      kinds: ["claim", "withdraw", "close"],
       // reward_index: u8, skip_reward: u8 (dist/index.js:427-438).
       args: { length: 10, minimums: [] },
       // 0 pool_authority, 1 pool, 2 position, 3 reward_vault, 4 reward_mint,
@@ -209,7 +216,7 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       protocol: "meteora-damm-v2",
       name: "close_position", // dist/index.js:514
       discriminator: [123, 134, 81, 0, 49, 68, 98, 98],
-      kinds: ["withdraw"],
+      kinds: ["withdraw", "close"],
       args: { length: 8, minimums: [] },
       closes: true,
       // 0 position_nft_mint, 1 position_nft_account, 2 pool, 3 position,
@@ -219,6 +226,7 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       remaining: "none",
       roles: {
         1: { role: "positionNftAccount", name: "position_nft_account" },
+        3: { role: "position", name: "position" },
         5: { role: "rentReceiver", name: "rent_receiver" },
         6: { role: "owner", name: "owner" },
       },
@@ -227,7 +235,7 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       protocol: "meteora-damm-v2",
       name: "refresh_vesting", // dist/index.js:2251
       discriminator: [9, 94, 216, 14, 116, 204, 247, 0],
-      kinds: ["withdraw"],
+      kinds: ["withdraw", "close"],
       args: { length: 8, minimums: [] },
       // 0 pool, 1 position, 2 position_nft_account, 3 owner, then the
       // position's vesting accounts (buildRefreshVestingInstruction,
@@ -251,9 +259,10 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       // 12 Token-2022 program, 13 memo program, 14 mintA, 15 mintB, then an
       // optional exTickArrayBitmap and reward triples (:584-591).
       discriminator: [58, 127, 188, 62, 79, 82, 196, 96],
-      kinds: ["claim", "withdraw"],
+      kinds: ["claim", "withdraw", "close"],
       // liquidity u128, amountMinA u64, amountMinB u64 (instrument.ts:564).
-      // Liquidity 0 with minimums 0 is the fee and reward collect a claim uses.
+      // Liquidity 0 with minimums 0 is the fee and reward collect a claim (and
+      // a close) uses.
       args: { length: 40, amount: { offset: 8, bytes: 16 }, minimums: [24, 32] },
       collectWhenZero: true,
       removes: "amount",
@@ -275,7 +284,7 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       // 2 positionNftAccount, 3 personalPosition, 4 system program,
       // 5 token program, then the optional poolId (:358).
       discriminator: [123, 134, 81, 0, 49, 68, 98, 98],
-      kinds: ["withdraw"],
+      kinds: ["withdraw", "close"],
       args: { length: 8, minimums: [] },
       closes: true,
       accounts: 6,
@@ -283,6 +292,7 @@ export const ALLOWED_INSTRUCTIONS: Readonly<Record<string, readonly InstructionS
       roles: {
         0: { role: "owner", name: "nft_owner" },
         2: { role: "positionNftAccount", name: "position_nft_account" },
+        3: { role: "position", name: "personal_position" },
       },
     },
   ],

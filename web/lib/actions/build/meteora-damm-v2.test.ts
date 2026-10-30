@@ -32,11 +32,15 @@ import type { DammV2Target, FungibleTarget } from "../types";
 import {
   AmountTooSmallError,
   buildClaimGroups,
+  buildCloseGroups,
   buildWithdrawGroups,
   NothingToWithdrawError,
   packGroups,
   PositionGoneError,
+  PositionNotEmptyError,
   quoteWithdraw,
+  RewardsPausedError,
+  unwrapsWrappedSol,
   verifyMessage,
   type Expectation,
   type InstructionGroup,
@@ -82,7 +86,7 @@ function target(chain: SyntheticChain, variant: Variant): DammV2Target {
 function patchCpAmm(
   chain: SyntheticChain,
   address: string,
-  name: "Pool" | "Position",
+  name: "Pool" | "Position" | "Vesting",
   mutate: (state: Record<string, any>) => void, // eslint-disable-line @typescript-eslint/no-explicit-any
 ) {
   const info = chain.accounts.get(address)!;
@@ -700,5 +704,155 @@ describe("quoteWithdraw / buildWithdrawGroups (Meteora DAMM v2)", () => {
     await expect(buildWithdrawGroups(rpc, owner, t, 10_001, 100)).rejects.toThrow(RangeError);
     await expect(buildWithdrawGroups(rpc, owner, t, 5_000, 501)).rejects.toThrow(RangeError);
     await expect(quoteWithdraw(rpc, owner, t, 2.5, 100)).rejects.toThrow(RangeError);
+  });
+});
+
+describe("buildCloseGroups (Meteora DAMM v2)", () => {
+  const empty = (chain: SyntheticChain, variant: Variant, extra: (s: Record<string, any>) => void = () => {}) => // eslint-disable-line @typescript-eslint/no-explicit-any
+    patchCpAmm(chain, chain.dammV2.variants[variant].position, "Position", (s) => {
+      s.unlocked_liquidity = new BN(0);
+      s.vested_liquidity = new BN(0);
+      s.permanent_locked_liquidity = new BN(0);
+      extra(s);
+    });
+  const lamports = (chain: SyntheticChain, v: DammV2Fixture) =>
+    [v.position, v.positionNftAccount, v.positionMint].reduce((sum, a) => sum + chain.accounts.get(a)!.lamports, 0);
+
+  it("collects the fees and rewards left in an empty position, then closes it, rent to the wallet", async () => {
+    const chain = chainFixture();
+    empty(chain, "unlocked");
+    const owner = chain.owner.publicKey.toBase58();
+    const t = target(chain, "unlocked");
+    const { groups, expectation, refundLamports } = await buildCloseGroups(mockActionRpc(chain), owner, t);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].positionIds).toEqual([t.id]);
+    expect(groups[0].label).toBe("Close SYNA + SOL");
+    const ixs = groups[0].instructions;
+    expect(cpAmmNames(ixs)).toEqual(["claim_position_fee", "claim_reward", "close_position"]);
+    const close = ixs.find((ix) => isCpAmm(ix, "close_position"))!;
+    expect(close.keys[5].pubkey.toBase58()).toBe(owner); // rent_receiver
+    expect(close.keys[1].pubkey.toBase58()).toBe(t.positionNftAccount);
+    expect(isUnwrap(ixs.at(-1)!)).toBe(true);
+    expect(refundLamports).toBe(String(lamports(chain, chain.dammV2.variants.unlocked)));
+    expect(expectation).toEqual({
+      kind: "close",
+      owner,
+      mints: expect.arrayContaining([
+        { mint: chain.mints.syna, tokenProgram: PROGRAM_IDS.token },
+        { mint: chain.mints.wsol, tokenProgram: PROGRAM_IDS.token },
+        { mint: chain.mints.reward, tokenProgram: PROGRAM_IDS.token },
+      ]),
+      positions: [{ position: t.position, nftAccount: t.positionNftAccount, protocol: "meteora-damm-v2" }],
+    });
+    expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
+  });
+
+  it("only closes an empty position with nothing to collect: no token accounts, no unwrap", async () => {
+    const chain = chainFixture();
+    empty(chain, "noFees");
+    const t = target(chain, "noFees");
+    const { groups, expectation } = await buildCloseGroups(mockActionRpc(chain), chain.owner.publicKey.toBase58(), t);
+    expect(groups[0].instructions.map((ix) => ix.programId.toBase58())).toEqual([CP_AMM]);
+    expect(cpAmmNames(groups[0].instructions)).toEqual(["close_position"]);
+    expect(expectation.mints).toEqual([]);
+    expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
+  });
+
+  it("refreshes a fully released vesting account first (liquidity_per_period 0)", async () => {
+    const chain = chainFixture();
+    empty(chain, "vested", (s) => {
+      s.fee_a_pending = new BN(0);
+    });
+    patchCpAmm(chain, chain.dammV2.variants.vested.vesting!, "Vesting", (s) => {
+      s.inner_vesting.liquidity_per_period = new BN(0);
+      s.inner_vesting.total_released_liquidity = s.inner_vesting.cliff_unlock_liquidity;
+    });
+    const t = target(chain, "vested");
+    const { groups, expectation } = await buildCloseGroups(mockActionRpc(chain), chain.owner.publicKey.toBase58(), t);
+    const ixs = groups[0].instructions;
+    expect(cpAmmNames(ixs)[0]).toBe("refresh_vesting");
+    expect(cpAmmNames(ixs).at(-1)).toBe("close_position");
+    expect(ixs[0].keys.slice(4).map((k) => k.pubkey.toBase58())).toEqual([chain.dammV2.variants.vested.vesting]);
+    expect(cpAmmNames(ixs)).not.toContain("remove_liquidity");
+    expect(cpAmmNames(ixs)).not.toContain("remove_all_liquidity");
+    expect(packAndVerify(chain, groups, expectation)).toEqual([{ ok: true }]);
+  });
+
+  it("refuses a position that still holds liquidity, a lock or unreleased vesting", async () => {
+    const chain = chainFixture();
+    const rpc = mockActionRpc(chain);
+    const owner = chain.owner.publicKey.toBase58();
+    await expect(buildCloseGroups(rpc, owner, target(chain, "unlocked"))).rejects.toThrow(
+      new PositionNotEmptyError("liquidity"),
+    );
+    patchCpAmm(chain, chain.dammV2.variants.locked.position, "Position", (s) => {
+      s.unlocked_liquidity = new BN(0);
+    });
+    await expect(buildCloseGroups(rpc, owner, target(chain, "locked"))).rejects.toThrow(
+      new PositionNotEmptyError("locked"),
+    );
+    patchCpAmm(chain, chain.dammV2.variants.vested.position, "Position", (s) => {
+      s.unlocked_liquidity = new BN(0);
+    });
+    await expect(buildCloseGroups(rpc, owner, target(chain, "vested"))).rejects.toThrow(
+      new PositionNotEmptyError("vesting"),
+    );
+    // No vesting liquidity on the position, but its vesting account has not released everything.
+    empty(chain, "vested");
+    await expect(buildCloseGroups(rpc, owner, target(chain, "vested"))).rejects.toBeInstanceOf(PositionNotEmptyError);
+    expect(new PositionNotEmptyError("liquidity").message).toBe("This position still holds liquidity");
+    expect(new PositionNotEmptyError("locked").message).toBe("Part of this position is locked for good");
+    expect(new PositionNotEmptyError("vesting").message).toBe("Part of this position is still vesting");
+  });
+
+  it("refuses when a pending reward sits in a frozen vault, and when the position is gone", async () => {
+    const chain = chainFixture();
+    empty(chain, "unlocked");
+    freezeRewardVault(chain);
+    const owner = chain.owner.publicKey.toBase58();
+    await expect(buildCloseGroups(mockActionRpc(chain), owner, target(chain, "unlocked"))).rejects.toThrow(
+      new RewardsPausedError(),
+    );
+    expect(new RewardsPausedError().message).toBe("Rewards are paused by the pool");
+    chain.accounts.delete(chain.dammV2.variants.noFees.position);
+    await expect(buildCloseGroups(mockActionRpc(chain), owner, target(chain, "noFees"))).rejects.toBeInstanceOf(
+      PositionGoneError,
+    );
+  });
+
+  it("refuses CPMM and AMM v4 positions", async () => {
+    const chain = chainFixture();
+    const cpmm = { protocol: "raydium-cpmm", id: "c" } as FungibleTarget;
+    await expect(buildCloseGroups(mockActionRpc(chain), chain.owner.publicKey.toBase58(), cpmm)).rejects.toThrow(
+      "close not supported",
+    );
+  });
+});
+
+describe("buildClaimGroups (Meteora DAMM v2): paused rewards", () => {
+  it('skips a position whose only pending amount is in a frozen reward vault as "Rewards are paused by the pool"', async () => {
+    const chain = chainFixture();
+    const pool = cpAmmCoder.accounts.decode("Pool", chain.accounts.get(chain.dammV2.pool)!.data);
+    patchCpAmm(chain, chain.dammV2.position, "Position", (s) => {
+      s.fee_a_pending = new BN(0);
+      s.fee_b_per_token_checkpoint = pool.fee_b_per_liquidity;
+    });
+    freezeRewardVault(chain);
+    const t = target(chain, "unlocked");
+    const { groups, skipped } = await buildClaimGroups(mockActionRpc(chain), chain.owner.publicKey.toBase58(), [t]);
+    expect(groups).toEqual([]);
+    expect(skipped).toEqual([{ positionId: t.id, reason: "Rewards are paused by the pool" }]);
+  });
+});
+
+describe("unwrapsWrappedSol", () => {
+  it("is true for a group that unwraps wSOL, and false otherwise", async () => {
+    const chain = chainFixture();
+    const owner = chain.owner.publicKey.toBase58();
+    const wsol = await buildClaimGroups(mockActionRpc(chain), owner, [target(chain, "unlocked")]);
+    const plain = await buildClaimGroups(mockActionRpc(chain), owner, [target(chain, "transferFee")]);
+    expect(unwrapsWrappedSol(wsol.groups)).toBe(true);
+    expect(unwrapsWrappedSol(plain.groups)).toBe(false);
+    expect(unwrapsWrappedSol([])).toBe(false);
   });
 });
