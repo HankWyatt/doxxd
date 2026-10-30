@@ -36,6 +36,7 @@ import { useConnectedWallet } from "@/components/wallet-connect/provider";
 import { LoadBoundary } from "../load-boundary";
 import { ResourceState, LoadingRows } from "../resource-state";
 import { Amounts, PositionDetail } from "./position-detail";
+import { LegIcon, legName } from "./token-meta";
 import { RecoveryNotice } from "./recovery-notice";
 import { mintLookup, positionName, type MintLookup } from "./lp-actions/amounts";
 import { ClaimProgress } from "./lp-actions/claim-progress";
@@ -86,8 +87,6 @@ const NOT_ENABLED: ResourceError["kind"][] = [
 ];
 const plural = (count: number, noun: string) =>
   count + " " + noun + (count === 1 ? "" : "s");
-const legName = (a: AmountView, labels: Record<string, string>) =>
-  a.mint ? (labels[a.mint] ?? a.label) : a.label;
 
 export function ProtocolSection({
   address,
@@ -718,7 +717,10 @@ function Claimable({
       {values.map((a, i) => (
         <div key={i}>
           <span className="numeric">{formatAmount(a.amount)}</span>{" "}
-          <span className="muted">{legName(a, labels)}</span>
+          <LegIcon leg={a} name={legName(a, labels)} />
+          <span className="muted" title={a.mint}>
+            {legName(a, labels)}
+          </span>
           {a.valueUsd != null && (
             <span className="faint"> ({formatUsd(a.valueUsd)})</span>
           )}
@@ -786,14 +788,15 @@ function LiquidityTable({
                 <td>
                   <div className="pool-cell">
                     <span className="pair-icons" aria-hidden="true">
-                      {legs.slice(0, 2).map((name, i) => (
-                        <span className="token-icon" key={i}>
-                          {name.slice(0, 1)}
-                        </span>
+                      {row.assets.slice(0, 2).map((a, i) => (
+                        <LegIcon key={i} leg={a} name={legs[i]} initials />
                       ))}
                     </span>
                     <span className="stack">
-                      <strong>{legs.length ? legs.join(" + ") : row.label}</strong>
+                      {/* Symbols are creator-supplied: the mints stay a hover away and in details. */}
+                      <strong title={row.assets.flatMap((a) => (a.mint ? [a.mint] : [])).join(" + ") || undefined}>
+                        {legs.length ? legs.join(" + ") : row.label}
+                      </strong>
                       <span className="pool-meta">
                         {row.locked && (
                           <span
@@ -949,7 +952,8 @@ function LegTable({
                 {legs.map((leg, j) => (
                   <tr className="leg-row" key={j}>
                     <td>
-                      {legName(leg, labels)}
+                      <LegIcon leg={leg} name={legName(leg, labels)} />
+                      <span title={leg.mint}>{legName(leg, labels)}</span>
                       {leg.qualifier && (
                         <span className="faint small"> · {leg.qualifier}</span>
                       )}

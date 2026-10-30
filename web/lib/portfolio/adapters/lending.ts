@@ -1,6 +1,6 @@
 import type { Schemas } from "../../dmnd/contracts";
 import type { PositionView } from "../model";
-import { position, leg, mintName, sourceDetail, sourceClockNote } from "./shared";
+import { position, leg, legLabel, sourceDetail, sourceClockNote } from "./shared";
 function reserveLeg(row: Schemas["WalletDefiLeg"] | Schemas["WalletSolendLeg"]) {
   return {
     ...leg(row),
@@ -40,7 +40,7 @@ export function marginfiRows(
     assets: row.legs
       .filter((l) => l.asset_shares !== "0")
       .map((l) => ({
-        label: mintName(l.mint),
+        label: legLabel({ mint: l.mint }),
         mint: l.mint,
         amount: l.deposit_ui_amount ?? null,
         valueUsd: l.known_deposit_value_usd ?? null,
@@ -50,7 +50,7 @@ export function marginfiRows(
     debts: row.legs
       .filter((l) => l.liability_shares !== "0")
       .map((l) => ({
-        label: mintName(l.mint),
+        label: legLabel({ mint: l.mint }),
         mint: l.mint,
         amount: l.debt_ui_amount ?? null,
         valueUsd: l.known_debt_value_usd ?? null,

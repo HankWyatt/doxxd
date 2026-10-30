@@ -863,11 +863,24 @@ tbody tr.data-row:hover {
   color: var(--accent);
   font-size: 10px;
   font-weight: 650;
+  overflow: hidden;
 }
 .token-icon + .token-icon {
   margin-left: -9px;
   outline: 2px solid var(--panel);
   color: var(--violet);
+}
+.token-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* Beside an amount: only a real image or the SOL mark, never initials. */
+.inline-token-icon {
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  vertical-align: -3px;
 }
 .pool-meta {
   display: flex;

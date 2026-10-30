@@ -27,6 +27,10 @@ export type AmountView = {
   label: string;
   amount: string | null;
   mint?: string;
+  /** DMND's creator-supplied token labels, when it has them (see tokenLabels). */
+  symbol?: string;
+  name?: string;
+  image?: string;
   valueUsd?: string | null;
   qualifier?: string;
   sourceDetails?: { label: string; value: string }[];

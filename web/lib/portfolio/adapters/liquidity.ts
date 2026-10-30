@@ -10,8 +10,8 @@ import {
   position,
   leg,
   legLabel,
-  mintName,
   sourceDetail,
+  tokenLabels,
   sourceClockNote,
 } from "./shared";
 export function sourceContextDetails(
@@ -32,6 +32,16 @@ const actionLeg = (source: {
   decimals: source.decimals ?? null,
   symbol: source.symbol ?? null,
 });
+// A reward's labels; with a mint it reads like a leg, and its details keep the mint.
+const reward = (r: Parameters<typeof tokenLabels>[0]) =>
+  r.mint
+    ? {
+        label: legLabel({ mint: r.mint, symbol: r.symbol }),
+        mint: r.mint,
+        ...tokenLabels(r),
+        sourceDetails: [{ label: "Mint", value: r.mint }],
+      }
+    : { label: "Reward" };
 // Only Raydium CLMM rows get actions; Orca rows share this adapter without.
 export function liquidityRows(
   raw: Schemas["WalletLiquidityPositions"],
@@ -75,8 +85,7 @@ export function liquidityRows(
         }
       : {}),
     rewards: row.rewards.map((r) => ({
-      label: r.mint ? mintName(r.mint) : "Reward",
-      mint: r.mint ?? undefined,
+      ...reward(r),
       amount: r.owed_atoms,
       qualifier: "raw atoms; settled owed counter",
     })),
@@ -111,8 +120,7 @@ export function meteoraRows(
     assets: [leg(row.principal_x), leg(row.principal_y)],
     links: { pool: row.pair, position: row.position },
     rewards: row.rewards.map((r) => ({
-      label: r.mint ? mintName(r.mint) : "Reward",
-      mint: r.mint ?? undefined,
+      ...reward(r),
       amount: r.pending_atoms,
       qualifier: "raw atoms; pending counter",
     })),
@@ -138,22 +146,25 @@ export function meteoraRows(
 }
 // Exact atoms scaled by DMND's decimals; without decimals the atoms stay raw.
 function claimable(
-  label: string,
-  mint: string,
+  token: Parameters<typeof tokenLabels>[0] & { mint: string },
   atoms: string,
   decimals: number | null | undefined,
   kind: string,
 ): AmountView {
   const amount = decimals == null ? null : atomsToUi(atoms, decimals);
   return {
-    label,
-    mint,
+    label: legLabel(token),
+    mint: token.mint,
+    ...tokenLabels(token),
     amount: amount ?? atoms,
     qualifier:
       (amount === null ? "raw atoms; " : "") +
       kind +
       "; before any Token-2022 transfer fee",
-    sourceDetails: [{ label: "Raw atoms", value: atoms }],
+    sourceDetails: [
+      { label: "Mint", value: token.mint },
+      { label: "Raw atoms", value: atoms },
+    ],
   };
 }
 export function dammV2Rows(
@@ -172,8 +183,8 @@ export function dammV2Rows(
     );
     const [a, b] = assets;
     const fees = [
-      claimable(a.label, a.mint!, row.fee_a_claimable_atoms, row.token_a.decimals, "claimable fee"),
-      claimable(b.label, b.mint!, row.fee_b_claimable_atoms, row.token_b.decimals, "claimable fee"),
+      claimable(row.token_a, row.fee_a_claimable_atoms, row.token_a.decimals, "claimable fee"),
+      claimable(row.token_b, row.fee_b_claimable_atoms, row.token_b.decimals, "claimable fee"),
     ];
     return {
       ...position(row.position, a.label + " / " + b.label),
@@ -221,7 +232,7 @@ export function dammV2Rows(
       rewards: [
         ...fees,
         ...row.rewards.map((r) =>
-          claimable(mintName(r.mint), r.mint, r.claimable_atoms, r.decimals, "claimable reward, no USD value"),
+          claimable(r, r.claimable_atoms, r.decimals, "claimable reward, no USD value"),
         ),
       ],
       details: [

@@ -11,7 +11,8 @@ export type MintLookup = (mint: string) => MintInfo;
 const legsOf = (t: ActionTarget): Leg[] => ("legs" in t ? t.legs : [t.tokenA, t.tokenB]);
 
 /**
- * Names and decimals for the mints in `targets`. The runner reports SOL in
+ * Names and decimals for the mints in `targets`: DMND's leg symbol, then the
+ * holdings label, then the short mint. The runner reports SOL in
  * lamports under the wSOL mint, so that mint always reads as SOL.
  */
 export function mintLookup(targets: readonly ActionTarget[], labels: Record<string, string>): MintLookup {
@@ -20,7 +21,7 @@ export function mintLookup(targets: readonly ActionTarget[], labels: Record<stri
   return (mint) => {
     if (mint === WSOL_MINT) return { decimals: 9, name: "SOL" };
     const leg = legs.get(mint);
-    return { decimals: leg?.decimals ?? null, name: labels[mint] ?? leg?.symbol ?? mintName(mint) };
+    return { decimals: leg?.decimals ?? null, name: leg?.symbol?.trim() || labels[mint] || mintName(mint) };
   };
 }
 

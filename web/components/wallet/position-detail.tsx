@@ -1,6 +1,7 @@
 "use client";
 import type { PositionView, AmountView } from "@/lib/portfolio/model";
 import { formatAmount, formatUsd } from "@/lib/decimal";
+import { LegIcon, legName } from "./token-meta";
 export function Amounts({
   values,
   labels = {},
@@ -16,8 +17,9 @@ export function Amounts({
       {values.map((a, i) => (
         <div key={i}>
           <span className="numeric">{formatAmount(a.amount)}</span>{" "}
-          <span className="muted">
-            {a.mint ? (labels[a.mint] ?? a.label) : a.label}
+          <LegIcon leg={a} name={legName(a, labels)} />
+          <span className="muted" title={a.mint}>
+            {legName(a, labels)}
           </span>
           {a.qualifier && <span className="faint small"> · {a.qualifier}</span>}
           {showSources && a.sourceDetails && (

@@ -1,6 +1,6 @@
 import type { Schemas } from "../../dmnd/contracts";
 import type { PositionView } from "../model";
-import { position, leg, mintName, sourceDetail, sourceClockNote } from "./shared";
+import { position, leg, legLabel, sourceDetail, sourceClockNote } from "./shared";
 import { sourceContextDetails } from "./liquidity";
 export function farmRows(raw: Schemas["WalletFarmPositions"]): PositionView[] {
   return raw.data.map((row) => ({
@@ -10,14 +10,14 @@ export function farmRows(raw: Schemas["WalletFarmPositions"]): PositionView[] {
       : [
           {
             label: row.deposited_mint
-              ? mintName(row.deposited_mint)
+              ? legLabel({ mint: row.deposited_mint })
               : "Deposit",
             mint: row.deposited_mint ?? undefined,
             amount: row.deposited_ui_amount ?? null,
           },
         ],
     rewards: row.rewards.map((r) => ({
-      label: r.mint ? mintName(r.mint) : "Reward",
+      label: r.mint ? legLabel({ mint: r.mint }) : "Reward",
       mint: r.mint ?? undefined,
       amount: r.estimated_pending_atoms ?? null,
       valueUsd: r.value_usd ?? null,

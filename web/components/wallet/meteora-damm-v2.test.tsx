@@ -472,7 +472,7 @@ it.each([
     <ProtocolSection address={DEMO_ADDRESS} resource={resource} mode={{ kind: "live" }} labels={{}} defaultOpen />,
   );
   expect(screen.getByRole("button", { name: "Collapse " + label })).toBeVisible();
-  fireEvent.click(await screen.findByRole("button", { name: /WSOL \/ USDC/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /^SOL \/ USDC/ }));
   const detail = document.querySelector(".detail-row") as HTMLElement;
   expect(within(detail).getByText(copycat)).toBeVisible();
 });

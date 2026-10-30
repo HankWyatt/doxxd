@@ -45,17 +45,17 @@ it("never derives a leg amount the source left unknown", () => {
   expect(b.sourceDetails).toContainEqual({ label: "Raw atoms", value: "1234500000" });
 });
 
-it("labels a wrapped SOL pair consistently and trims symbols", () => {
+it("labels a wrapped SOL pair as SOL and trims symbols", () => {
   const data = dammV2Page();
   data.data[0].token_a.mint = "So11111111111111111111111111111111111111112";
   data.data[0].token_a.symbol = "SOL";
   data.data[0].token_b.symbol = "  SYNB  ";
   const row = view(data).positions[0];
-  expect(row.label).toBe("WSOL / SYNB");
-  expect(row.assets.map((a) => a.label)).toEqual(["WSOL", "SYNB"]);
-  expect(row.rewards.slice(0, 2).map((a) => a.label)).toEqual(["WSOL", "SYNB"]);
+  expect(row.label).toBe("SOL / SYNB");
+  expect(row.assets.map((a) => a.label)).toEqual(["SOL", "SYNB"]);
+  expect(row.rewards.slice(0, 2).map((a) => a.label)).toEqual(["SOL", "SYNB"]);
   data.data[0].token_b.symbol = " \t ";
-  expect(view(data).positions[0].label).toBe("WSOL / " + short(DAMM.tokenB));
+  expect(view(data).positions[0].label).toBe("SOL / " + short(DAMM.tokenB));
 });
 
 it("shows claimable fees and rewards without a USD value", () => {
@@ -149,8 +149,8 @@ it("labels shared liquidity legs with a provided symbol", () => {
   result.data.data[0].principal_b.symbol = " SYNB ";
   result.data.data[0].principal_a.symbol = "SOL";
   const row = toProtocolView({ resource: "orca", data: result.data }).positions[0];
-  expect(row.assets.map((a) => a.label)).toEqual(["WSOL", "SYNB"]);
-  expect(row.label).toBe("WSOL / SYNB");
+  expect(row.assets.map((a) => a.label)).toEqual(["SOL", "SYNB"]);
+  expect(row.label).toBe("SOL / SYNB");
 });
 
 it("titles DLMM pairs with the same leg labels", () => {
@@ -180,6 +180,6 @@ it("titles DLMM pairs with the same leg labels", () => {
   ];
   expect(validResourcePayload("meteora", result.data)).toBe(true);
   const row = toProtocolView({ resource: "meteora", data: result.data }).positions[0];
-  expect(row.label).toBe("WSOL / SYNB");
-  expect(row.assets.map((a) => a.label)).toEqual(["WSOL", "SYNB"]);
+  expect(row.label).toBe("SOL / SYNB");
+  expect(row.assets.map((a) => a.label)).toEqual(["SOL", "SYNB"]);
 });

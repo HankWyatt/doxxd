@@ -11,8 +11,9 @@ import {
   atomsToUi,
   isAtLeast,
 } from "@/lib/decimal";
-import { tokenImageCandidates, explorerHref } from "@/lib/safe-url";
+import { explorerHref } from "@/lib/safe-url";
 import { short } from "@/lib/portfolio/adapters/shared";
+import { TokenImage } from "./token-meta";
 import {
   indexedPnl,
   formatSignedUsd,
@@ -114,34 +115,13 @@ function receiptGroups(receipts: Row[]) {
   return [...groups.values()];
 }
 function AssetIcon({ row }: { row: Row }) {
-  const candidates = tokenImageCandidates(row.image);
-  const imageKey = candidates.join("\n");
-  const [failed, setFailed] = useState({ key: "", urls: [] as string[] });
-  const failures = failed.key === imageKey ? failed.urls : [];
-  const image = candidates.find((candidate) => !failures.includes(candidate));
   return (
     <span className="asset-icon">
-      {row.id === "native-sol" ? (
-        <svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true">
-          <path fill="#80F5CF" d="M9 6h20l-6 5H3z" />
-          <path fill="#A4A5F8" d="M3 13.5h20l6 5H9z" />
-          <path fill="#B77BF3" d="M9 21h20l-6 5H3z" />
-        </svg>
-      ) : image ? (
-        <img
-          src={image}
-          alt=""
-          loading="lazy"
-          decoding="async"
-          referrerPolicy="no-referrer"
-          onError={() => setFailed((previous) => ({
-            key: imageKey,
-            urls: [...(previous.key === imageKey ? previous.urls : []), image],
-          }))}
-        />
-      ) : (
-        row.symbol.slice(0, 2)
-      )}
+      <TokenImage
+        image={row.image}
+        sol={row.id === "native-sol"}
+        fallback={row.symbol.slice(0, 2)}
+      />
     </span>
   );
 }

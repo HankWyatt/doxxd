@@ -20,6 +20,8 @@ import {
 import { Holdings } from "./holdings";
 import { ProtocolSection, type ProtocolStatus } from "./protocol-section";
 import { RecoveryNotice } from "./recovery-notice";
+import { HoldingsTokens, type TokenMetaMap } from "./token-meta";
+import { WSOL_MINT } from "@/lib/actions/programs";
 export function Portfolio({
   address,
   mode = LIVE_MODE,
@@ -174,12 +176,21 @@ function PortfolioContent({
       )}
     />
   );
-  const labels: Record<string, string> = {
-    So11111111111111111111111111111111111111112: "WSOL",
-  };
+  // Holdings labels by mint: the fallback for legs DMND sent without labels.
+  // Wrapped SOL in a protocol position always reads as SOL.
+  const tokens: TokenMetaMap = {};
+  const labels: Record<string, string> = { [WSOL_MINT]: "SOL" };
   if (overview.result?.ok)
-    for (const a of overview.result.data.assets)
-      if (a.symbol) labels[a.mint] = a.symbol;
+    for (const a of overview.result.data.assets) {
+      if (a.mint === WSOL_MINT || a.position) continue;
+      const symbol = a.symbol?.trim();
+      tokens[a.mint] = {
+        ...(symbol ? { symbol } : {}),
+        ...(a.name?.trim() ? { name: a.name.trim() } : {}),
+        image: a.image_url ?? null,
+      };
+      if (symbol) labels[a.mint] = symbol;
+    }
   return (
     <>
       {summary && (
@@ -263,21 +274,23 @@ function PortfolioContent({
             </p>
           )}
           {/* One keyed list, so a card keeps its state when it changes group. */}
-          <div className="protocol-list">
-            {[
-              ...main.map(card),
-              ...(unchecked.length
-                ? [
-                    <p className="small faint protocol-group-note" key="unchecked">
-                      Not checked yet · {unchecked.length}{" "}
-                      {unchecked.length === 1 ? "protocol" : "protocols"} still
-                      updating or not available. Open one to check it.
-                    </p>,
-                  ]
-                : []),
-              ...unchecked.map(card),
-            ]}
-          </div>
+          <HoldingsTokens.Provider value={tokens}>
+            <div className="protocol-list">
+              {[
+                ...main.map(card),
+                ...(unchecked.length
+                  ? [
+                      <p className="small faint protocol-group-note" key="unchecked">
+                        Not checked yet · {unchecked.length}{" "}
+                        {unchecked.length === 1 ? "protocol" : "protocols"} still
+                        updating or not available. Open one to check it.
+                      </p>,
+                    ]
+                  : []),
+                ...unchecked.map(card),
+              ]}
+            </div>
+          </HoldingsTokens.Provider>
         </>
       )}
       <p className="small faint" style={{ lineHeight: 1.7, marginTop: 18 }}>

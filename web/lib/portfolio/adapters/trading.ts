@@ -1,9 +1,9 @@
 import type { Schemas } from "../../dmnd/contracts";
 import type { PositionView } from "../model";
-import { position, mintName, sourceDetail, sourceClockNote } from "./shared";
+import { position, legLabel, sourceDetail, sourceClockNote } from "./shared";
 function spotAmount(s: Schemas["WalletDriftSpot"] | Schemas["WalletVelocitySpot"]) {
   return {
-    label: s.amount ? mintName(s.amount.mint) : "Spot market " + s.market_index,
+    label: s.amount ? legLabel({ mint: s.amount.mint }) : "Spot market " + s.market_index,
     mint: s.amount?.mint,
     amount: s.amount?.ui_amount ?? null,
     qualifier: s.amount_status,
