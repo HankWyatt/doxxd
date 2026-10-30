@@ -23,6 +23,7 @@ import { useWalletResource } from "@/lib/use-wallet-resource";
 import {
   toProtocolView,
   type AmountView,
+  type ClaimableView,
   type PositionView,
   type ProtocolPayload,
   type ProtocolView,
@@ -42,6 +43,7 @@ import { RecoveryNotice } from "./recovery-notice";
 import { mintLookup, positionName, type MintLookup } from "./lp-actions/amounts";
 import { ClaimProgress } from "./lp-actions/claim-progress";
 import { RowActions, RowFees } from "./lp-actions/row-actions";
+import { ClaimableTotal, Estimate, FeeUsd } from "./claim-value";
 import { WITHDRAW_FOOTNOTE } from "./lp-actions/run-store";
 import { SelectionBar } from "./lp-actions/selection-bar";
 import {
@@ -418,6 +420,12 @@ function ProtocolBody({
   const claimable = view.positions.flatMap((p) =>
     actions.row(p)?.claim ? [p.action!] : [],
   );
+  // DMND's known claimable sum for this page; blank when it values none.
+  const feesUsd = formatUsd(view.pageClaimableUsd);
+  // DMND sums fees and rewards it values for the page; settled counters make it a lower bound.
+  const claimableText = feesUsd
+    ? "claimable: " + (view.pageClaimableLowerBound ? "at least " : "") + feesUsd
+    : null;
   const firstPage = request.result.data;
   // The card holds every row only on an unpaged first page.
   const allLoaded = !cursor && !view.hasMore;
@@ -446,7 +454,13 @@ function ProtocolBody({
             {plural(view.totalPositions ?? view.positions.length, "position") +
               // Only this page's count is known: until every page is loaded,
               // a count would understate the fees elsewhere (F-R003).
-              (allLoaded ? " · fees to claim on " + claimable.length : "")}
+              (allLoaded
+                ? " · fees to claim on " +
+                  claimable.length +
+                  (claimableText ? " · " + claimableText : "")
+                : claimableText
+                  ? " · " + claimableText + " on this page"
+                  : "")}
           </span>
           {/* Other pages may hold fees even when this one has none. */}
           {(claimable.length > 0 || !allLoaded) && (
@@ -475,8 +489,13 @@ function ProtocolBody({
         </div>
       ) : (
         kind === "liquidity" &&
-        view.totalPositions !== null && (
-          <p className="card-summary">{plural(view.totalPositions, "position")}</p>
+        (view.totalPositions !== null || claimableText) && (
+          <p className="card-summary">
+            {plural(view.totalPositions ?? view.positions.length, "position") +
+              (claimableText
+                ? " · " + claimableText + (allLoaded ? "" : " on this page")
+                : "")}
+          </p>
         )
       )}
       {view.positions.length > 0 ? (
@@ -708,32 +727,39 @@ function DetailRow({
   );
 }
 
-/** Claimable amounts; USD only when the source values them. */
+/**
+ * Claimable amounts; USD only when the source values them. Settled counters
+ * are lower bounds ("at least"); accrued amounts read plainly.
+ */
 function Claimable({
   values,
   labels,
+  claimable,
 }: {
   values: AmountView[];
   labels: Record<string, string>;
+  claimable?: ClaimableView;
 }) {
-  if (!values.length) return <UnknownValue />;
+  if (!values.length && !claimable?.valueUsd) return <UnknownValue />;
   return (
     <div className="stack">
       {values.map((a, i) => (
         <div key={i}>
-          <span className="numeric">{orUnknown(formatAmount(a.amount))}</span>{" "}
+          <span className="numeric">
+            {a.lowerBound && /[1-9]/.test(a.amount ?? "") ? "at least " : ""}
+            {orUnknown(formatAmount(a.amount))}
+          </span>{" "}
           <LegIcon leg={a} name={legName(a, labels)} />
           <span className="muted" title={a.mint}>
             {legName(a, labels)}
           </span>
-          {a.valueUsd != null && (
-            <span className="faint"> ({orUnknown(formatUsd(a.valueUsd))})</span>
-          )}
+          <FeeUsd value={a.valueUsd} estimated={a.estimated} />
           {a.qualifier?.startsWith("raw atoms") && (
             <span className="faint small"> · raw atoms</span>
           )}
         </div>
       ))}
+      <ClaimableTotal claimable={claimable} />
     </div>
   );
 }
@@ -843,14 +869,17 @@ function LiquidityTable({
                   {/* Fees only: rewards and raw counters stay under details. */}
                   {/* Action wording on your own wallet; an unknown marker wherever a row is pending. */}
                   {state && lookup && (actions?.active || state.pending) ? (
-                    <RowFees state={state} lookup={lookup}>
-                      <Claimable values={row.fees ?? []} labels={labels} />
+                    <RowFees state={state} lookup={lookup} position={row}>
+                      <Claimable values={row.fees ?? []} labels={labels} claimable={row.claimable} />
                     </RowFees>
                   ) : (
-                    <Claimable values={row.fees ?? []} labels={labels} />
+                    <Claimable values={row.fees ?? []} labels={labels} claimable={row.claimable} />
                   )}
                 </td>
-                <td className="right numeric">{orUnknown(formatUsd(row.valueUsd))}</td>
+                <td className="right numeric">
+                  {orUnknown(formatUsd(row.valueUsd))}
+                  {row.valueUsd != null && row.assets.some((a) => a.estimated) && <Estimate />}
+                </td>
               </tr>
               {expanded === row.id && (
                 <DetailRow row={row} labels={labels} span={selecting ? 5 : 4} />

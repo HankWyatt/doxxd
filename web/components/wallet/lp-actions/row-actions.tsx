@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 import { claimableLabel } from "@/lib/actions/capabilities";
 import type { ActionTarget } from "@/lib/actions/types";
 import { UnknownValue } from "@/components/unknown-value";
+import type { PositionView } from "@/lib/portfolio/model";
+import { ClaimableTotal, FeeUsd } from "../claim-value";
 import { formatAtoms, type MintLookup } from "./amounts";
 import type { RowActionState } from "./use-lp-actions";
 
@@ -67,15 +69,18 @@ export function RowActions({
 /**
  * The claimable-fees cell for a row with on-site actions. Values are DMND's;
  * a pending row shows an unknown marker, and exact fees keep the card's usual cell
- * (`children`).
+ * (`children`). CLMM owed counters read "at least" only while DMND marks them
+ * `settled` (or does not say); `accrued` ones are plain amounts.
  */
 export function RowFees({
   state,
   lookup,
+  position,
   children,
 }: {
   state: RowActionState;
   lookup: MintLookup;
+  position: PositionView;
   children: ReactNode;
 }) {
   const { target } = state;
@@ -83,7 +88,8 @@ export function RowFees({
   const label = claimableLabel(target);
   if (label === "included") return <span className="faint">Included in your LP tokens</span>;
   if (label === "lower-bound" && target.protocol === "raydium-clmm") {
-    // DMND's owed counters are settled lower bounds: "at least" when above 0.
+    // Settled counters are lower bounds: "at least" when above 0. Accrued ones are plain.
+    const lowerBound = position.claimable?.basis !== "accrued";
     const owed = [
       { mint: target.tokenA.mint, atoms: target.feeOwedAAtoms },
       { mint: target.tokenB.mint, atoms: target.feeOwedBAtoms },
@@ -91,11 +97,17 @@ export function RowFees({
     if (!owed.length) return <UnknownValue reason="No claimable fees recorded" />;
     return (
       <div className="stack">
-        {owed.map((fee) => (
-          <span key={fee.mint} className="numeric">
-            at least {formatAtoms(fee.mint, fee.atoms, lookup)}
-          </span>
-        ))}
+        {owed.map((fee) => {
+          const priced = position.fees?.find((f) => f.mint === fee.mint);
+          return (
+            <span key={fee.mint} className="numeric">
+              {lowerBound ? "at least " : ""}
+              {formatAtoms(fee.mint, fee.atoms, lookup)}
+              <FeeUsd value={priced?.valueUsd} estimated={priced?.estimated} />
+            </span>
+          );
+        })}
+        <ClaimableTotal claimable={position.claimable} />
       </div>
     );
   }

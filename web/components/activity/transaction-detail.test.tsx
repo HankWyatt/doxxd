@@ -146,3 +146,19 @@ it.each(syntheticChanges)("retains $label as source text", async ({ change, inde
   }
   expect(data).toEqual(snapshot);
 });
+
+it("shows wrapped SOL as SOL in activity, with the mint still in the details", () => {
+  const WSOL = "So11111111111111111111111111111111111111112";
+  const result = readFixture("transactions", "complete");
+  if (!result.ok) throw new Error("Fixture must succeed");
+  const row = structuredClone(result.data.data[1]);
+  row.changes = [];
+  row.change_count = 0;
+  expect(row.observed_transfers.length).toBeGreaterThan(0);
+  row.observed_transfers[0].mint = WSOL;
+  // A holdings label of WSOL does not win over SOL.
+  const { container } = render(<TransactionDetail row={row} labels={{ [WSOL]: "WSOL" }} />);
+  expect(container).not.toHaveTextContent("WSOL");
+  expect(screen.getByText(WSOL, { exact: true })).toBeVisible();
+  expect(screen.getByText("SOL", { exact: true })).toBeVisible();
+});

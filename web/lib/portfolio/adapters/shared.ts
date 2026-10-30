@@ -1,4 +1,5 @@
-import type { AmountView, PositionView } from "../model";
+import { compareDecimalDesc } from "../../decimal";
+import type { AmountView, ClaimableView, PositionView } from "../model";
 export const sourceDetail = (
   label: string,
   value: string | number | boolean | null | undefined,
@@ -59,6 +60,7 @@ export const leg = (row: {
   image_url?: string | null;
   ui_amount?: string | null;
   value_usd?: string | null;
+  price_source?: string | null;
   amount_reason?: string | null;
 }): AmountView => ({
   label: legLabel(row),
@@ -66,9 +68,48 @@ export const leg = (row: {
   ...tokenLabels(row),
   amount: row.ui_amount ?? null,
   valueUsd: row.value_usd ?? null,
+  ...(isPoolImplied(row) ? { estimated: true } : {}),
   // Symbols are not identity: the expanded row always shows the mint.
   sourceDetails: [{ label: "Mint", value: row.mint }],
   ...(row.amount_reason
     ? { qualifier: row.amount_reason.replaceAll("_", " ") }
     : {}),
 });
+
+/**
+ * DMND's claimable sums read 0 both when nothing is valued and when the valued
+ * amounts are zero, so a 0 is ambiguous. Only a positive sum is shown; blank
+ * is the safe reading of anything else, never $0.
+ */
+export const positiveUsd = (value: string | null | undefined) =>
+  value && compareDecimalDesc(value, "0") < 0 ? value : null;
+
+export const isPoolImplied = (row: { price_source?: string | null }) =>
+  row.price_source === "dmnd_pool_implied";
+
+export const claimableBasis = (
+  basis: string | null | undefined,
+): ClaimableView["basis"] =>
+  basis === "accrued" || basis === "settled" ? basis : null;
+
+/** Only an `accrued` basis is exact; settled or unstated counters are lower bounds. */
+export const isLowerBound = (basis: ClaimableView["basis"]) =>
+  basis !== "accrued";
+
+/** A position's claimable totals, from DMND's value, basis and clock. */
+export function claimableView(
+  row: {
+    claimable_value_usd?: string | null;
+    claimable_basis?: string | null;
+    claimable_at?: string | null;
+  },
+  priced: { price_source?: string | null }[],
+  basis = claimableBasis(row.claimable_basis),
+): ClaimableView {
+  return {
+    valueUsd: positiveUsd(row.claimable_value_usd),
+    basis,
+    at: row.claimable_at ?? null,
+    estimated: priced.some(isPoolImplied),
+  };
+}

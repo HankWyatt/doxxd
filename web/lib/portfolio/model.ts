@@ -14,7 +14,7 @@ import {
 } from "./adapters/liquidity";
 import { farmRows } from "./adapters/farms";
 import { tradingRows } from "./adapters/trading";
-import { sourceDetail } from "./adapters/shared";
+import { positiveUsd, sourceDetail } from "./adapters/shared";
 import type { ActionTarget } from "../actions/types";
 export type SummaryView = {
   label: string;
@@ -32,9 +32,23 @@ export type AmountView = {
   name?: string;
   image?: string;
   valueUsd?: string | null;
+  /** The USD value rests on DMND's pool-implied price: an estimate. */
+  estimated?: boolean;
+  /** A settled counter: the amount is at least this much. */
+  lowerBound?: boolean;
   qualifier?: string;
   sourceDetails?: { label: string; value: string }[];
 };
+/** DMND's claimable fee and reward totals for one LP position. */
+export type ClaimableView = {
+  /** DMND's sum of the valued fees and rewards; null when none is valued. */
+  valueUsd: string | null;
+  /** `accrued` includes accrual at `at`; `settled` counters are lower bounds. */
+  basis: "accrued" | "settled" | null;
+  at: string | null;
+  estimated: boolean;
+};
+
 export type PositionView = {
   id: string;
   label: string;
@@ -46,6 +60,8 @@ export type PositionView = {
   links?: { pool?: string; position?: string; positionMint?: string };
   /** DMND's claimable LP fees, when it reports them (Meteora DAMM v2). */
   fees?: AmountView[];
+  /** DMND's claimable totals for LP rows that report them. */
+  claimable?: ClaimableView;
   /** Some liquidity is permanently locked or vesting (Meteora DAMM v2). */
   locked?: boolean;
   /** Native stake: the validator vote account, when delegated. */
@@ -61,6 +77,10 @@ export type ProtocolView = {
   coverage: CoverageView;
   coverageClocks: { label: string; value: string }[];
   pageValueUsd: string | null;
+  /** DMND's known claimable USD for this page; null unless positive. */
+  pageClaimableUsd: string | null;
+  /** Some row's claimables are settled (or unstated) counters: the total is a lower bound. */
+  pageClaimableLowerBound: boolean;
   cursor: string | null;
   hasMore: boolean;
   continuationUnavailable: boolean;
@@ -181,6 +201,13 @@ export function toProtocolView(
       "page_known_principal_value_usd" in raw
         ? (raw.page_known_principal_value_usd ?? null)
         : null,
+    pageClaimableUsd:
+      "page_known_claimable_value_usd" in raw
+        ? positiveUsd(raw.page_known_claimable_value_usd)
+        : null,
+    pageClaimableLowerBound: positions.some(
+      (p) => p.claimable && p.claimable.basis !== "accrued",
+    ),
     cursor,
     hasMore,
     continuationUnavailable: hasMore && !usableCursor,

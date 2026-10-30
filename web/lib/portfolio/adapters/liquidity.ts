@@ -13,6 +13,10 @@ import {
   sourceDetail,
   tokenLabels,
   sourceClockNote,
+  claimableBasis,
+  claimableView,
+  isLowerBound,
+  isPoolImplied,
 } from "./shared";
 export function sourceContextDetails(
   sources: Schemas["WalletFungibleLiquiditySource"][],
@@ -42,6 +46,37 @@ const reward = (r: Parameters<typeof tokenLabels>[0]) =>
         sourceDetails: [{ label: "Mint", value: r.mint }],
       }
     : { label: "Reward" };
+type Priced = {
+  ui_amount?: string | null;
+  value_usd?: string | null;
+  price_source?: string | null;
+};
+// A reward on its position's claimable basis. Settled counters are lower bounds.
+const rewardView = (
+  r: Parameters<typeof reward>[0] & Priced,
+  atoms: string,
+  rawBasis: string | null | undefined,
+): AmountView => ({
+  ...reward(r),
+  amount: r.ui_amount ?? atoms,
+  valueUsd: r.value_usd ?? null,
+  ...(isPoolImplied(r) ? { estimated: true } : {}),
+  qualifier:
+    (r.ui_amount == null ? "raw atoms; " : "") +
+    (isLowerBound(claimableBasis(rawBasis))
+      ? "settled counter, a lower bound"
+      : "accrued"),
+});
+const claimableDetails = (row: {
+  claimable_basis?: string | null;
+  claimable_at?: string | null;
+}) => [
+  sourceDetail(
+    "Claimable basis",
+    claimableBasis(row.claimable_basis) ?? "Unknown (read as a lower bound)",
+  ),
+  sourceDetail("Claimable as of", row.claimable_at ?? "Not reported (settled counters)"),
+];
 // Only Raydium CLMM rows get actions; Orca rows share this adapter without.
 export function liquidityRows(
   raw: Schemas["WalletLiquidityPositions"],
@@ -54,6 +89,11 @@ export function liquidityRows(
     ),
     assets: [leg(row.principal_a), leg(row.principal_b)],
     valueUsd: row.principal_value_usd ?? null,
+    fees: [
+      fee(row.principal_a, row.fee_owed_a, row.fee_a, row.claimable_basis),
+      fee(row.principal_b, row.fee_owed_b, row.fee_b, row.claimable_basis),
+    ].flatMap((f) => f ?? []),
+    claimable: claimableView(row, [row.fee_a ?? {}, row.fee_b ?? {}, ...row.rewards]),
     links: {
       pool: row.pool,
       position: row.position,
@@ -85,11 +125,9 @@ export function liquidityRows(
           } satisfies ActionTarget,
         }
       : {}),
-    rewards: row.rewards.map((r) => ({
-      ...reward(r),
-      amount: r.owed_atoms,
-      qualifier: "raw atoms; settled owed counter",
-    })),
+    rewards: row.rewards.map((r) =>
+      rewardView(r, r.owed_atoms, row.claimable_basis),
+    ),
     details: [
       { label: "Pool", value: row.pool },
       { label: "Position", value: row.position },
@@ -98,6 +136,7 @@ export function liquidityRows(
         label: "Owed fee counters (raw atoms)",
         value: row.fee_owed_a + " / " + row.fee_owed_b,
       },
+      ...claimableDetails(row),
       sourceDetail("Owner token slot", row.owner_token_slot),
       sourceDetail("Position account slot", row.position_slot),
       sourceDetail("Pool slot", row.pool_slot),
@@ -105,7 +144,8 @@ export function liquidityRows(
       sourceClockNote,
       {
         label: "Valuation",
-        value: "Principal only. Fees and reward counters are shown separately.",
+        value:
+          "Principal only. Fees and rewards are shown separately, with the USD value DMND reports for them.",
       },
     ],
   }));
@@ -120,12 +160,15 @@ export function meteoraRows(
     ),
     assets: [leg(row.principal_x), leg(row.principal_y)],
     valueUsd: row.principal_value_usd ?? null,
+    fees: [
+      fee(row.principal_x, row.fee_pending_x_atoms, row.fee_x, row.claimable_basis),
+      fee(row.principal_y, row.fee_pending_y_atoms, row.fee_y, row.claimable_basis),
+    ].flatMap((f) => f ?? []),
+    claimable: claimableView(row, [row.fee_x ?? {}, row.fee_y ?? {}, ...row.rewards]),
     links: { pool: row.pair, position: row.position },
-    rewards: row.rewards.map((r) => ({
-      ...reward(r),
-      amount: r.pending_atoms,
-      qualifier: "raw atoms; pending counter",
-    })),
+    rewards: row.rewards.map((r) =>
+      rewardView(r, r.pending_atoms, row.claimable_basis),
+    ),
     details: [
       { label: "Pair", value: row.pair },
       { label: "Position", value: row.position },
@@ -137,6 +180,7 @@ export function meteoraRows(
         label: "Pending fee counters (raw atoms)",
         value: row.fee_pending_x_atoms + " / " + row.fee_pending_y_atoms,
       },
+      ...claimableDetails(row),
       sourceDetail("Owner slot", row.owner_slot),
       sourceDetail("Position account slot", row.position_slot),
       sourceDetail("Pair slot", row.pair_slot),
@@ -146,23 +190,53 @@ export function meteoraRows(
     ],
   }));
 }
+// A fee on its position's basis, from DMND's fee leg (none when it sends none:
+// the raw owed counters stay in the details). Settled counters are lower bounds.
+function fee(
+  token: Parameters<typeof tokenLabels>[0] & {
+    mint: string;
+    decimals?: number | null;
+  },
+  atoms: string,
+  priced: (Priced & { decimals?: number | null }) | null | undefined,
+  rawBasis: string | null | undefined,
+): AmountView | null {
+  if (!priced) return null;
+  const lowerBound = isLowerBound(claimableBasis(rawBasis));
+  return claimable(
+    token,
+    atoms,
+    priced?.decimals ?? token.decimals,
+    lowerBound ? "claimable fee, settled lower bound" : "claimable fee",
+    { priced, lowerBound, transferFeeNote: false },
+  );
+}
 // Exact atoms scaled by DMND's decimals; without decimals the atoms stay raw.
 function claimable(
   token: Parameters<typeof tokenLabels>[0] & { mint: string },
   atoms: string,
   decimals: number | null | undefined,
   kind: string,
+  {
+    priced,
+    lowerBound = false,
+    transferFeeNote = true,
+  }: { priced?: Priced | null; lowerBound?: boolean; transferFeeNote?: boolean } = {},
 ): AmountView {
-  const amount = decimals == null ? null : atomsToUi(atoms, decimals);
+  const amount =
+    priced?.ui_amount ?? (decimals == null ? null : atomsToUi(atoms, decimals));
   return {
     label: legLabel(token),
     mint: token.mint,
     ...tokenLabels(token),
     amount: amount ?? atoms,
+    ...(priced?.value_usd != null ? { valueUsd: priced.value_usd } : {}),
+    ...(priced && isPoolImplied(priced) ? { estimated: true } : {}),
+    lowerBound,
     qualifier:
       (amount === null ? "raw atoms; " : "") +
       kind +
-      "; before any Token-2022 transfer fee",
+      (transferFeeNote ? "; before any Token-2022 transfer fee" : ""),
     sourceDetails: [
       { label: "Mint", value: token.mint },
       { label: "Raw atoms", value: atoms },
@@ -184,9 +258,15 @@ export function dammV2Rows(
       }),
     );
     const [a, b] = assets;
+    // DAMM v2 computes claimables at the snapshot clock: always accrued.
+    const claim = claimableView(
+      { ...row, claimable_at: row.snapshot_block_time },
+      [row.fee_a ?? {}, row.fee_b ?? {}, ...row.rewards],
+      "accrued",
+    );
     const fees = [
-      claimable(row.token_a, row.fee_a_claimable_atoms, row.token_a.decimals, "claimable fee"),
-      claimable(row.token_b, row.fee_b_claimable_atoms, row.token_b.decimals, "claimable fee"),
+      claimable(row.token_a, row.fee_a_claimable_atoms, row.token_a.decimals, "claimable fee", { priced: row.fee_a }),
+      claimable(row.token_b, row.fee_b_claimable_atoms, row.token_b.decimals, "claimable fee", { priced: row.fee_b }),
     ];
     return {
       ...position(row.position, a.label + " / " + b.label),
@@ -231,10 +311,11 @@ export function dammV2Rows(
         (units) => compareDecimalDesc(units, "0") < 0,
       ),
       fees,
+      claimable: claim,
       rewards: [
         ...fees,
         ...row.rewards.map((r) =>
-          claimable(r, r.claimable_atoms, r.decimals, "claimable reward, no USD value"),
+          claimable(r, r.claimable_atoms, r.decimals, "claimable reward", { priced: r }),
         ),
       ],
       details: [
@@ -268,7 +349,7 @@ export function dammV2Rows(
         {
           label: "Valuation",
           value:
-            "Principal only, when the source values both legs. Claimable fees and rewards are shown separately without USD value.",
+            "Principal only, when the source values both legs. Claimable fees and rewards are shown separately, with the USD value DMND reports for them.",
         },
       ],
     };

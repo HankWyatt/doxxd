@@ -265,6 +265,25 @@ describe("row buttons and fee cells", () => {
     expect(screen.getByText("at least 0.25 " + short(CLMM.tokenB))).toBeInTheDocument();
     expect(screen.getByText("1 position · fees to claim on 1")).toBeInTheDocument();
   });
+
+  it("accrued CLMM fees read plainly, with DMND's USD, and the summary adds the page total", async () => {
+    const page = clmmPage();
+    Object.assign(page.data[0], {
+      claimable_basis: "accrued",
+      claimable_at: "2026-09-14T11:59:45Z",
+      claimable_value_usd: "4.5",
+      fee_a: { mint: CLMM.tokenA, symbol: "SYNA", decimals: 9, ui_amount: "0.0015", value_usd: "4.5", price_source: "dmnd_pool_implied" },
+    });
+    page.page_known_claimable_value_usd = "4.5";
+    serve({ "raydium-clmm": page });
+    mount(CLMM.wallet, "raydium-clmm");
+    expect(await screen.findByRole("button", { name: "Claim" })).toBeInTheDocument();
+    expect(screen.getByText("0.0015 SYNA")).toBeInTheDocument();
+    expect(screen.queryByText(/at least/)).toBeNull();
+    expect(screen.getAllByText("($4.50)").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("est.").length).toBeGreaterThan(0);
+    expect(screen.getByText("1 position · fees to claim on 1 · claimable: $4.50")).toBeInTheDocument();
+  });
 });
 
 describe("selection", () => {

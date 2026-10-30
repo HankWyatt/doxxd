@@ -33,21 +33,26 @@ function SolGlyph({ size }: { size: number }) {
 
 /**
  * A token's picture: the SOL mark, else its image through the holdings URL
- * rules (credential-free HTTPS, IPFS gateways, next candidate on error), else
- * the fallback (initials, or nothing).
+ * rules (credential-free HTTPS, IPFS gateways, next candidate on error, then
+ * the fallback image), else the fallback (initials, or nothing).
  */
 export function TokenImage({
   image,
+  fallbackImage,
   sol = false,
   fallback,
   size = 24,
 }: {
   image?: string | null;
+  /** Tried after every candidate of `image` (the holdings image, for a leg). */
+  fallbackImage?: string | null;
   sol?: boolean;
   fallback: string | null;
   size?: number;
 }) {
-  const candidates = tokenImageCandidates(image);
+  const candidates = [
+    ...new Set([image, fallbackImage].flatMap(tokenImageCandidates)),
+  ];
   const imageKey = candidates.join("\n");
   const [failed, setFailed] = useState({ key: "", urls: [] as string[] });
   const failures = failed.key === imageKey ? failed.urls : [];
@@ -87,8 +92,15 @@ export function LegIcon({
 }) {
   const holdings = useContext(HoldingsTokens);
   const sol = leg.mint === WSOL_MINT;
-  const image = leg.mint ? (leg.image ?? holdings[leg.mint]?.image) : null;
-  if (!initials && !sol && !tokenImageCandidates(image).length) return null;
+  // DMND's leg image first; an unsafe or failing one falls back to the holdings image.
+  const image = leg.mint ? leg.image : null;
+  const holdingsImage = leg.mint ? holdings[leg.mint]?.image : null;
+  if (
+    !initials &&
+    !sol &&
+    ![image, holdingsImage].flatMap(tokenImageCandidates).length
+  )
+    return null;
   return (
     <span
       className={initials ? "token-icon" : "token-icon inline-token-icon"}
@@ -96,6 +108,7 @@ export function LegIcon({
     >
       <TokenImage
         image={image}
+        fallbackImage={holdingsImage}
         sol={sol}
         fallback={initials ? name.slice(0, 1) : null}
         size={initials ? 22 : 14}

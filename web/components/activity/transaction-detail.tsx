@@ -2,9 +2,14 @@
 import { orUnknown } from "@/components/unknown-value";
 import type { Schemas } from "@/lib/dmnd/contracts";
 import { formatAmount, atomsToUi } from "@/lib/decimal";
+import { WSOL_MINT } from "@/lib/actions/programs";
 import { short, mintName } from "@/lib/portfolio/adapters/shared";
 import { explorerHref } from "@/lib/safe-url";
 import { CopyButton } from "../copy-button";
+// Wrapped SOL reads as SOL, like the protocol cards; the mint stays in the details.
+const tokenName = (mint: string, labels: Record<string, string>) =>
+  mint === WSOL_MINT ? "SOL" : (labels[mint] ?? mintName(mint));
+
 export function ChangeAmount({
   row,
   labels = {},
@@ -15,7 +20,7 @@ export function ChangeAmount({
   const amount = row.ui_amount ?? row.delta;
   const negative = amount.startsWith("-");
   const label = row.mint
-    ? (labels[row.mint] ?? mintName(row.mint))
+    ? tokenName(row.mint, labels)
     : row.kind === "native_sol_balance_change"
       ? "SOL"
       : "Unknown asset";
@@ -138,11 +143,11 @@ export function TransactionDetail({
                 <p key={i}>
                   {trade.exchange.replaceAll("_", " ")} · {trade.side}{" "}
                   {orUnknown(formatAmount(trade.amount_tokens))}{" "}
-                  {labels[trade.mint] ?? mintName(trade.mint)}
+                  {tokenName(trade.mint, labels)}
                   <br />
                   <span className="muted">
                     Quote: {orUnknown(formatAmount(trade.quote_amount))}{" "}
-                    {labels[trade.quote_mint] ?? mintName(trade.quote_mint)}
+                    {tokenName(trade.quote_mint, labels)}
                   </span>
                 </p>
               ))
@@ -176,7 +181,7 @@ export function TransactionDetail({
                   {transfer.mint && (
                     <>
                       <span>
-                        {labels[transfer.mint] ?? mintName(transfer.mint)}
+                        {tokenName(transfer.mint, labels)}
                       </span>
                       <br />
                       <a
