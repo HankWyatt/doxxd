@@ -5,9 +5,11 @@
 // upstream Solana RPC with only `content-type: application/json` and the
 // pass-through's own request id, never following a redirect. The upstream URL
 // may carry an API key: it, upstream HTTP error bodies and network error
-// messages never reach a response, and nothing here logs. The answer carries
-// the client's id back, put in after the secret scan, so a client cannot
-// probe the scan with ids the upstream echoes.
+// messages never reach a response, and nothing here logs. The reply is
+// re-serialised and that text is scanned for the upstream URL's secrets, so a
+// JSON \u-escaped key cannot slip through. The answer carries the client's id
+// back, put in after the secret scan, so a client cannot probe the scan with
+// ids the upstream echoes.
 import { checkRpcRequest, type JsonRpcRequest } from "./policy";
 import { LIMITER_REFUSAL, rateLimitKey, type RateLimiter } from "./rate-limit";
 
@@ -19,7 +21,12 @@ export type RpcEnv = {
 };
 
 const MAX_REQUEST_BYTES = 64 * 1024;
-const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+// The largest legitimate reply is a getMultipleAccounts of the policy's 100
+// accounts: Raydium CLMM tick arrays are about 10 KB each, so about 1.4 MB as
+// base64 JSON.
+const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+// Shorter query values and credentials are too common to scan for.
+const MIN_SECRET_LENGTH = 4;
 const UPSTREAM_TIMEOUT_MS = 10_000;
 const DEFAULT_RETRY_AFTER_SEC = 2;
 // The id every upstream request carries.
@@ -44,14 +51,17 @@ function rpcError(
   );
 }
 
-// Reads at most `limit` bytes. Returns null when the stream is longer.
-async function readCapped(
+// Reads at most `limit` bytes, decoding each chunk as it arrives so the body
+// is held once, as text. Returns null when the stream is longer. Throws when
+// `decoder` is fatal and the bytes are not valid UTF-8.
+async function readCappedText(
   stream: ReadableStream<Uint8Array> | null,
   limit: number,
-): Promise<Uint8Array | null> {
-  if (!stream) return new Uint8Array();
+  decoder: TextDecoder,
+): Promise<string | null> {
+  if (!stream) return "";
   const reader = stream.getReader();
-  const chunks: Uint8Array[] = [];
+  const parts: string[] = [];
   let total = 0;
   for (;;) {
     const { done, value } = await reader.read();
@@ -61,31 +71,26 @@ async function readCapped(
       await reader.cancel().catch(() => undefined);
       return null;
     }
-    chunks.push(value);
+    parts.push(decoder.decode(value, { stream: true }));
   }
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return out;
+  parts.push(decoder.decode());
+  return parts.join("");
 }
 
 // Substrings of the upstream URL that would identify or unlock it: the URL
-// itself, its host, credentials, the query string and its parts, and long
-// path segments (some providers put the key in the path).
+// itself, its host, credentials, the query string and its values, and long
+// path segments (some providers put the key in the path). Query parameter
+// names are not secret: a name like `token` also appears in ordinary replies.
 function secretParts(upstream: string): string[] {
   const parts = [upstream];
   try {
     const url = new URL(upstream);
     parts.push(url.href, url.host);
-    if (url.username) parts.push(url.username);
-    if (url.password) parts.push(url.password);
+    for (const credential of [url.username, url.password])
+      if (credential.length >= MIN_SECRET_LENGTH) parts.push(credential);
     if (url.search.length > 1) parts.push(url.search.slice(1));
-    for (const [name, value] of url.searchParams)
-      for (const part of [name, value])
-        if (part.length >= 4) parts.push(part, encodeURIComponent(part));
+    for (const value of url.searchParams.values())
+      if (value.length >= MIN_SECRET_LENGTH) parts.push(value, encodeURIComponent(value));
     for (const segment of url.pathname.split("/"))
       if (segment.length >= 8) parts.push(segment);
   } catch {
@@ -117,7 +122,7 @@ async function forward(
   const doFetch = env.fetch;
   try {
     let upstream: Response;
-    let body: Uint8Array | null;
+    let text: string | null;
     try {
       upstream = await doFetch(env.upstream, {
         method: "POST",
@@ -138,20 +143,21 @@ async function forward(
         await upstream.body?.cancel().catch(() => undefined);
         return unavailable();
       }
-      body = await readCapped(upstream.body, MAX_RESPONSE_BYTES);
+      text = await readCappedText(upstream.body, MAX_RESPONSE_BYTES, new TextDecoder());
     } catch {
       if (controller.signal.aborted)
         return rpcError(504, -32603, "Upstream RPC timed out", request.id);
       return unavailable();
     }
-    if (!body) return unavailable();
-    const text = new TextDecoder().decode(body);
+    if (text === null) return unavailable();
     let parsed: unknown;
     try {
       parsed = JSON.parse(text);
     } catch {
       return unavailable();
     }
+    // Only the parsed reply is needed from here on.
+    text = null;
     if (
       typeof parsed !== "object" ||
       parsed === null ||
@@ -161,15 +167,16 @@ async function forward(
       !("result" in parsed || "error" in parsed)
     )
       return unavailable();
-    // Scanned as the upstream sent it, before the client's id goes in.
-    if (secretParts(env.upstream).some((part) => text.includes(part)))
-      return unavailable();
     const reply = parsed as { result?: unknown; error?: unknown };
-    const out =
-      "result" in reply
-        ? { jsonrpc: "2.0", id: request.id, result: reply.result }
-        : { jsonrpc: "2.0", id: request.id, error: reply.error };
-    return new Response(JSON.stringify(out), {
+    // Re-serialised once, so escapes are decoded, and scanned before the
+    // client's id goes in. What is scanned is exactly what follows the id.
+    const payload = JSON.stringify(
+      "result" in reply ? { result: reply.result } : { error: reply.error },
+    );
+    if (secretParts(env.upstream).some((part) => payload.includes(part)))
+      return unavailable();
+    const out = `{"jsonrpc":"2.0","id":${JSON.stringify(request.id)},${payload.slice(1)}`;
+    return new Response(out, {
       status: 200,
       headers: { ...BASE_HEADERS, "content-type": "application/json" },
     });
@@ -194,16 +201,20 @@ export async function handleRpc(request: Request, env: RpcEnv): Promise<Response
   const declared = Number(request.headers.get("content-length") ?? "0");
   if (!Number.isFinite(declared) || declared > MAX_REQUEST_BYTES)
     return rpcError(413, -32600, "Request too large");
-  let raw: Uint8Array | null;
+  let raw: string | null;
   try {
-    raw = await readCapped(request.body, MAX_REQUEST_BYTES);
+    raw = await readCappedText(
+      request.body,
+      MAX_REQUEST_BYTES,
+      new TextDecoder("utf-8", { fatal: true }),
+    );
   } catch {
     return rpcError(400, -32700, "Parse error");
   }
-  if (!raw) return rpcError(413, -32600, "Request too large");
+  if (raw === null) return rpcError(413, -32600, "Request too large");
   let body: unknown;
   try {
-    body = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(raw));
+    body = JSON.parse(raw);
   } catch {
     return rpcError(400, -32700, "Parse error");
   }

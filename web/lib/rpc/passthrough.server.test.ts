@@ -27,12 +27,12 @@ type Upstream = (input: string, init: RequestInit) => Promise<Response>;
 const answer = (init: RequestInit, body: Record<string, unknown>) =>
   Response.json({ jsonrpc: "2.0", id: JSON.parse(String(init.body)).id, ...body });
 
-function setup(upstream?: Upstream, enabled = true) {
+function setup(upstream?: Upstream, enabled = true, upstreamUrl = UPSTREAM) {
   const fetch = vi.fn<Upstream>(upstream ?? (async (_input, init) => answer(init, { result: 42 })));
   const limiter = createRateLimiter({ windowMs: 60_000, general: 120, send: 20 });
   const env = {
     enabled,
-    upstream: UPSTREAM,
+    upstream: upstreamUrl,
     fetch: fetch as unknown as typeof globalThis.fetch,
     limiter,
   };
@@ -206,6 +206,106 @@ describe("handleRpc", () => {
       const { response } = await call(post(slotRequest), env);
       expect(response.status).toBe(502);
     }
+  });
+
+  it("does not treat query parameter names as secrets, only their values (#12)", async () => {
+    // Synthetic provider URLs: a Helius-style ?api-key= and a ?token= whose
+    // name shows up in ordinary program logs.
+    const cases = [
+      { url: "https://rpc.example.test/?api-key=SYNTHETIC-KEY-1", name: "api-key", value: "SYNTHETIC-KEY-1" },
+      { url: "https://rpc.example.test/v2?token=SYNTHETIC-TOKEN-2", name: "token", value: "SYNTHETIC-TOKEN-2" },
+    ];
+    for (const { url, name, value } of cases) {
+      const logs = [`Program log: Instruction: Transfer ${name}`, "Program log: token account closed"];
+      const { env } = setup(async (_input, init) => answer(init, { result: { logs } }), true, url);
+      const ok = await handleRpc(post(slotRequest), env);
+      expect(ok.status, name).toBe(200);
+      expect(await ok.json()).toEqual({ jsonrpc: "2.0", id: ID, result: { logs } });
+
+      const leaky = setup(
+        async (_input, init) => answer(init, { result: { logs: [`Program log: ${value}`] } }),
+        true,
+        url,
+      );
+      const refused = await handleRpc(post(slotRequest), leaky.env);
+      expect(refused.status, name).toBe(502);
+      expect(await refused.text()).not.toContain(value);
+    }
+  });
+
+  it("scans the re-serialised reply, so a \\u-escaped secret cannot slip through (#12)", async () => {
+    const escape = (text: string) =>
+      [...text].map((c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`).join("");
+    for (const secret of ["SECRET", "rpc.provider.test"]) {
+      const { env } = setup(
+        async () =>
+          new Response(`{"jsonrpc":"2.0","id":1,"result":{"logs":["Program log: ${escape(secret)}"]}}`, {
+            status: 200,
+          }),
+      );
+      const { response } = await call(post(slotRequest), env);
+      expect(response.status, secret).toBe(502);
+    }
+    const { env } = setup(
+      async () =>
+        new Response(`{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"${escape("SECRET")}"}}`, {
+          status: 200,
+        }),
+    );
+    expect((await call(post(slotRequest), env)).response.status).toBe(502);
+  });
+
+  it("answers a reply of exactly 2 MiB and refuses one byte more (#12)", async () => {
+    const CAP = 2 * 1024 * 1024;
+    const sized = (bytes: number) => {
+      const prefix = '{"jsonrpc":"2.0","id":1,"result":"';
+      const suffix = '"}';
+      return prefix + "A".repeat(bytes - prefix.length - suffix.length) + suffix;
+    };
+    // Streamed in 64 KiB chunks, as a provider would send it.
+    const streamed = (text: string) => {
+      const bytes = new TextEncoder().encode(text);
+      let offset = 0;
+      return new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (offset >= bytes.byteLength) return controller.close();
+          controller.enqueue(bytes.slice(offset, offset + 64 * 1024));
+          offset += 64 * 1024;
+        },
+      });
+    };
+    const atCap = setup(async () => new Response(streamed(sized(CAP)), { status: 200 }));
+    const ok = await call(post(slotRequest), atCap.env);
+    expect(ok.response.status).toBe(200);
+    expect(ok.json().result).toMatch(/^A+$/);
+
+    const overCap = setup(async () => new Response(streamed(sized(CAP + 1)), { status: 200 }));
+    expect((await call(post(slotRequest), overCap.env)).response.status).toBe(502);
+  });
+
+  it("stops reading an endless reply at the cap and cancels it (#12)", async () => {
+    let pulled = 0;
+    let cancelled = false;
+    const { env } = setup(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            pull(controller) {
+              pulled += 1;
+              controller.enqueue(new Uint8Array(64 * 1024).fill(0x41));
+            },
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    const { response } = await call(post(slotRequest), env);
+    expect(response.status).toBe(502);
+    expect(cancelled).toBe(true);
+    // 2 MiB is 32 chunks; the 33rd crosses the cap (plus the stream's own read-ahead).
+    expect(pulled).toBeLessThanOrEqual(34);
   });
 
   it("passes JSON-RPC errors from the node through (preflight logs)", async () => {
