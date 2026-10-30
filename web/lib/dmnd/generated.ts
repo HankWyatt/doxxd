@@ -119,7 +119,7 @@ export interface paths {
         };
         /**
          * Get a pool
-         * @description Statistics for one pool, whatever its quote asset. Prices and volumes are in whole, decimal-adjusted units of the pool's quote asset, named by `quote_mint`. `liquidity_sol` requires known quote liquidity and a qualified current SOL conversion; `liquidity_usd` also requires a qualified current SOL/USD reference. A stored price on the quote token alone does not establish conversion eligibility. Nonstable quotes need a direct SOL market with a recorded trade slot, a positive finite price, a trade within 120 seconds, and at least 50 SOL daily volume and one tenth of the deepest ten-minute candidate's daily volume. Conversion does not follow token-to-token chains. A null conversion can coexist with fresh reserves; responses currently do not identify which conversion requirement failed. See [Reading token statistics](/token-statistics).
+         * @description Statistics for one pool, whatever its quote asset. Prices and volumes are in whole, decimal-adjusted units of the pool's quote asset, named by `quote_mint`. `liquidity_sol` requires known quote liquidity and a qualified current SOL conversion; `liquidity_usd` also requires a qualified current SOL/USD reference. A stored price on the quote token alone does not establish conversion eligibility. Only USDC and USDT conversions and the SOL/USD reference expire after 120 seconds. Another quote converts at a direct SOL market with a recorded trade slot and a positive finite price, never from a future trade: a market that traded within 120 seconds with at least 50 SOL daily volume and one tenth of the deepest ten-minute candidate's daily volume is preferred; otherwise the deepest market (24-hour volume, then latest trade) converts at its last trade at any age. Conversion does not follow token-to-token chains. A null conversion can coexist with fresh reserves; responses currently do not identify which conversion requirement failed. See [Reading token statistics](/token-statistics).
          */
         get: operations["getPool"];
         put?: never;
@@ -1025,7 +1025,7 @@ export interface paths {
         };
         /**
          * List a wallet's Kamino Lend collateral and debt
-         * @description Pages stored finalized KLend obligation positions owned by this wallet. Background standard Solana RPC scans are bounded; public reads never call an upstream provider. Only Kamino Lend obligations are included. USD values require a selected-pool token trade at most one hour old, with required quote conversion and SOL/USD observations no more than 120 seconds old. Known USD sums cover every stored position but exclude unpriced legs and are not portfolio net worth. A fresh complete empty scan verifies no supported obligations at its slot; pending or stale empty data does not.
+         * @description Pages stored finalized KLend obligation positions owned by this wallet. Background standard Solana RPC scans are bounded; public reads never call an upstream provider. Only Kamino Lend obligations are included. USD values use the selected price pool's last trade at any age, converted with the SOL/USD reference (and any stablecoin quote) no more than 120 seconds old; any other quote converts at its deepest SOL pool's last trade, at any age. Known USD sums cover every stored position but exclude unpriced legs and are not portfolio net worth. A fresh complete empty scan verifies no supported obligations at its slot; pending or stale empty data does not.
          */
         get: operations["getWalletDefiPositions"];
         put?: never;
@@ -1085,7 +1085,7 @@ export interface paths {
         };
         /**
          * Read saved Raydium farm positions
-         * @description Reads saved source-validated Raydium v3/v5/v6 farm ledgers from DMND without request-time RPC. Deposit quantities use captured mint decimals. Voting locks are a subset of deposits; the custody vault is shared and is not the wallet balance. Pending rewards are gross SDK clock estimates, without verified reward funding, payout type, fees or USD value. Saved AMM v4 and CPMM backing can expose this ledger's underlying LP share using the protocol accounted denominator. AMM v4 excludes reserve/PnL deductions; CPMM excludes accrued protocol/fund/creator fees and applies captured mint transfer fees at the bank epoch. USD marks require fresh DMND price/conversion evidence with matching captured decimals; missing prices remain null. Marks are independent of source slots and unverified farm withdrawal conditions, and do not promise executable proceeds. Other deposited-token backing remains unqualified. Without recorded LP backing, the deposited mint may have an independent DMND market mark; this does not unwrap an unknown LP or verify withdrawal permission. When backing is present, its underlying marks are used exclusively. Coverage states its discovery scope. Legacy indexed transaction hints remain partial, including empty inventories. Owner scans enumerate all five supported ledger layouts before and after current capture, retain a witness, and certify only that stated current scope when membership is stable and every ledger is captured without refusal. Historical discovery and other farm programs remain unsupported. Each claim captures five accounts, eleven unique farm/AMM inputs, or ten unique farm/CPMM inputs, at one finalized bank; a scan may span up to 750 slots from its anchor. Cursors bind wallet and generation. Refresh is bounded and disabled by default; saved records remain readable when disabled.
+         * @description Reads saved source-validated Raydium v3/v5/v6 farm ledgers from DMND without request-time RPC. Deposit quantities use captured mint decimals. Voting locks are a subset of deposits; the custody vault is shared and is not the wallet balance. Pending rewards are gross SDK clock estimates, without verified reward funding, payout type, fees or USD value. Saved AMM v4 and CPMM backing can expose this ledger's underlying LP share using the protocol accounted denominator. AMM v4 excludes reserve/PnL deductions; CPMM excludes accrued protocol/fund/creator fees and applies captured mint transfer fees at the bank epoch. USD marks require fresh DMND price/conversion evidence with matching captured decimals; missing prices remain null. Marks are independent of source slots and unverified farm withdrawal conditions, and do not promise executable proceeds. Other deposited-token backing remains unqualified. Without recorded LP backing, the deposited mint may have an independent DMND market mark; this does not unwrap an unknown LP or verify withdrawal permission. When backing is present, its underlying marks are used exclusively. Coverage states its discovery scope. Legacy indexed transaction hints remain partial, including empty inventories. Owner scans enumerate all five supported ledger layouts before and after current capture, retain a witness, and certify only that stated current scope when membership is stable and every ledger is captured without refusal. Historical discovery and other farm programs remain unsupported. Each claim captures five accounts, eleven unique farm/AMM inputs, or ten unique farm/CPMM inputs, at one finalized bank; a scan may span up to 750 slots from its anchor. Cursors bind wallet and generation. Refresh is bounded and disabled by default; saved records remain readable when disabled. Legs carry name, symbol and image_url from DMND's token index, else from the mint's latest saved metadata inspection.
          */
         get: operations["getWalletFarmPositions"];
         put?: never;
@@ -1125,7 +1125,7 @@ export interface paths {
         };
         /**
          * Read saved direct fungible LP positions
-         * @description Reads saved Raydium CPMM or AMM v4 direct LP token-account inventory without request-time RPC. Atom amounts use the protocol accounted LP denominator, model-specific reserve fee/PnL exclusions and integer floor rounding. CPMM applies observed-epoch mint transfer fees; AMM v4 uses its captured LP decimals and post-PnL reserves. LP dust and frozen/disabled withdrawals remain visible. Refused candidates have no certified pool or principal. Amounts, inventory and price reads have independent slots/timestamps and are not an atomic net-worth snapshot. Page value sums available net-of-transfer-fee principal legs only; unknown positions and prices prevent a whole-wallet total or lower-bound claim. Ordinary lists expose source hashes without account bytes. Cursors bind protocol, wallet and saved generation; a replaced inventory retires its cursor. Refresh queues are bounded and disabled by default. Farming, custody, other LP protocols and LP trading-cost history are outside this inventory.
+         * @description Reads saved Raydium CPMM or AMM v4 direct LP token-account inventory without request-time RPC. Atom amounts use the protocol accounted LP denominator, model-specific reserve fee/PnL exclusions and integer floor rounding. CPMM applies observed-epoch mint transfer fees; AMM v4 uses its captured LP decimals and post-PnL reserves. LP dust and frozen/disabled withdrawals remain visible. Refused candidates have no certified pool or principal. Amounts, inventory and price reads have independent slots/timestamps and are not an atomic net-worth snapshot. Page value sums the valued net-of-transfer-fee principal legs. Unpriced legs and refused candidates mean the page value is neither a whole-wallet total nor a lower bound. A principal leg without a market price is valued from the claim's own pool reserves (the saved available vault atoms) at the saved context slot against the other leg's market price (`price_source` `dmnd_pool_implied`, with `price_pool` and `price_slot` = `context_slot`); neither leg is valued when both lack a market price, an implied price never implies another, and a quarantined mint or pool is never valued. `principal_value_usd` is set when both legs are valued, and `page_fallback_value_usd` is the part of the page's known value from implied legs. A refused candidate counts as two unpriced legs and is never valued. Ordinary lists expose source hashes without account bytes. Cursors bind protocol, wallet and saved generation; a replaced inventory retires its cursor. Refresh queues are bounded and disabled by default. Farming, custody, other LP protocols and LP trading-cost history are outside this inventory. Legs carry name, symbol and image_url from DMND's token index, else from the mint's latest saved metadata inspection.
          */
         get: operations["getWalletFungibleLiquidityPositions"];
         put?: never;
@@ -1165,7 +1165,7 @@ export interface paths {
         };
         /**
          * List token accounts and snapshot coverage for a wallet
-         * @description Positive token accounts seen by DMND's balance stream or an owner-wide background snapshot, including airdrops, transfers and non-associated accounts. Each account is a separate row. When coverage.complete is true, token-account holdings excluding WSOL have been scanned and reconciled with uninterrupted live ingest. An incomplete empty page does not establish a zero balance. Native SOL and wrapped SOL are reported separately as decimal lamports at their own snapshot slots, if available. WSOL is not live-stream complete. USD prices require a selected-pool token trade at most one hour old, with required quote conversion and SOL/USD observations no more than 120 seconds old; responses can be cached for up to five seconds, bounded by actual conversion expiry. Confirmed NFTs and one-unit zero-decimal candidates awaiting a fresh non-NFT inspection are left unpriced. DeFi positions are not included. name, symbol and image_url come from DMND's token index; where it has none, they come from the mint's latest saved metadata inspection, which reads Token-2022 TokenMetadata (in the mint or through its metadata pointer) before Metaplex Token Metadata. The request itself never reads upstream RPC; when enabled, it queues a bounded background scan.
+         * @description Positive token accounts seen by DMND's balance stream or an owner-wide background snapshot, including airdrops, transfers and non-associated accounts. Each account is a separate row. When coverage.complete is true, token-account holdings excluding WSOL have been scanned and reconciled with uninterrupted live ingest. An incomplete empty page does not establish a zero balance. Native SOL and wrapped SOL are reported separately as decimal lamports at their own snapshot slots, if available. WSOL is not live-stream complete. USD prices use the selected price pool's last trade at any age, converted with the SOL/USD reference (and any stablecoin quote) no more than 120 seconds old; any other quote converts at its deepest SOL pool's last trade, at any age; responses can be cached for up to five seconds, bounded by actual conversion expiry. Confirmed NFTs and one-unit zero-decimal candidates awaiting a fresh non-NFT inspection are left unpriced. price_source labels each price: dmnd_pool_trade_sol (the mint's price pool), dmnd_pool_trade_inverse (a mint with no price pool of its own, priced at that pool's base market price over its last trade) or dmnd_sol_reference (the SOL/USD reference); it is null when price_usd is null. price_pool_liquidity_usd and price_pool_liquidity_at give the price pool's liquidity at current rates and when its reserves were read, alongside the price and never gating it; both are null without a reserve reading and for the SOL reference. DeFi positions are not included. name, symbol and image_url come from DMND's token index; where it has none, they come from the mint's latest saved metadata inspection, which reads Token-2022 TokenMetadata (in the mint or through its metadata pointer) before Metaplex Token Metadata. The request itself never reads upstream RPC; when enabled, it queues a bounded background scan.
          */
         get: operations["getWalletHoldings"];
         put?: never;
@@ -1265,7 +1265,7 @@ export interface paths {
         };
         /**
          * List a wallet's Orca or Raydium CLMM LP positions
-         * @description Pages saved finalized positions for one supported protocol: Orca Whirlpools on both official mainnet deployments or directly held Raydium CLMM positions. Bounded standard Solana RPC background scans check Token and Token-2022 position-NFT ownership; this public read uses DMND data only. Principal atoms use protocol-specific integer math from saved position and pool states. USD values require a selected-pool token trade at most one hour old, with required quote conversion and SOL/USD observations no more than 120 seconds old; they remain separate from token-holdings known value. Owed fee and reward counters are raw lower-bound facts. Only a fresh complete zero-row scan verifies no positions in the selected scope. Raydium locked/staked positions, Raydium AMM v4/CPMM, Meteora and vaults are excluded.
+         * @description Pages saved finalized positions for one supported protocol: Orca Whirlpools on both official mainnet deployments or directly held Raydium CLMM positions. Bounded standard Solana RPC background scans check Token and Token-2022 position-NFT ownership; this public read uses DMND data only. Principal atoms use protocol-specific integer math from saved position and pool states. USD values use the selected price pool's last trade at any age, converted with the SOL/USD reference (and any stablecoin quote) no more than 120 seconds old; any other quote converts at its deepest SOL pool's last trade, at any age; they remain separate from token-holdings known value. A principal leg without a market price is valued from the position's own pool at its saved pool slot against the other leg's market price (`price_source` `dmnd_pool_implied`, with `price_pool` and `price_slot`); neither leg is valued when both lack a market price, an implied price never implies another, and a quarantined mint or pool is never valued. `principal_value_usd` is set when both legs are valued. Rows saved without a pool price gain the implied value at their next scan. Fees and rewards are claimable atoms including accrual at `claimable_at` (`claimable_basis` `accrued`), rewards before the reward vault balance cap; a null `claimable_at` (`claimable_basis` `settled`) marks settled counters from an earlier scan, which are lower bounds. `fee_a` and `fee_b` value the fees at the price their principal leg finally carries, `dmnd_pool_implied` included; a reward takes a leg's price only when its mint is that leg's mint, otherwise only a market price, and its decimals come from DMND token metadata. `claimable_value_usd` sums a position's valued fees and rewards and `page_known_claimable_value_usd` the page's; unvalued ones are left out and never counted in `page_unpriced_leg_count`. `page_fallback_value_usd` is the part of the page's known principal and claimable value priced `dmnd_pool_implied`. Only a fresh complete zero-row scan verifies no positions in the selected scope. Raydium locked/staked positions, Raydium AMM v4/CPMM, Meteora and vaults are excluded. Legs, fees and rewards carry name, symbol and image_url from DMND's token index, else from the mint's latest saved metadata inspection.
          */
         get: operations["getWalletLiquidityPositions"];
         put?: never;
@@ -1305,7 +1305,7 @@ export interface paths {
         };
         /**
          * List held Meteora DAMM v2 positions
-         * @description Pages saved finalized Meteora DAMM v2 (cp-amm) positions whose position NFT the wallet holds directly. A bounded background scan uses standard Solana RPC to find one-unit, zero-decimal token accounts in both token programs, derive each Position account, read each position with its pool and the Clock sysvar at one finalized slot, and confirm the holdings again before saving. The public read uses DMND rows only. Token amounts are exact atoms for the position's total liquidity (unlocked, vesting and permanently locked) at the saved pool price, floored as cp-amm floors a withdrawal and before any Token-2022 transfer fee. Claimable fees and rewards are exact atoms at the snapshot clock; rewards have no USD value. USD values require a selected-pool token trade at most one hour old, with required quote conversion and SOL/USD observations no more than 120 seconds old. Fresh complete zero-row coverage verifies that no position NFT is directly held at the snapshot slot; positions held through custody, vaults or lockers, and DAMM v1 positions, are outside this scope.
+         * @description Pages saved finalized Meteora DAMM v2 (cp-amm) positions whose position NFT the wallet holds directly. A bounded background scan uses standard Solana RPC to find one-unit, zero-decimal token accounts in both token programs, derive each Position account, read each position with its pool and the Clock sysvar at one finalized slot, and confirm the holdings again before saving. The public read uses DMND rows only. Token amounts are exact atoms for the position's total liquidity (unlocked, vesting and permanently locked) at the saved pool price, floored as cp-amm floors a withdrawal and before any Token-2022 transfer fee. Claimable fees and rewards are exact atoms at the snapshot clock. USD values use the selected price pool's last trade at any age, converted with the SOL/USD reference (and any stablecoin quote) no more than 120 seconds old; any other quote converts at its deepest SOL pool's last trade, at any age. A leg without a market price is valued from the position's own pool at its saved pool slot against the other leg's market price (`price_source` `dmnd_pool_implied`, with `price_pool` and `price_slot`); neither leg is valued when both lack a market price, an implied price never implies another, and a quarantined mint or pool is never valued. `principal_value_usd` is set when both legs are valued. `fee_a` and `fee_b` value the claimable fees at the price their leg finally carries, `dmnd_pool_implied` included; a reward takes a leg's price only when its mint is that leg's mint, otherwise only a market price, and its decimals are those observed on the mint at the scan, else DMND token metadata's. `claimable_value_usd` sums a position's valued fees and rewards and `page_known_claimable_value_usd` the page's; unvalued ones are left out and never counted in `page_unpriced_leg_count`. `page_fallback_value_usd` is the part of the page's known principal and claimable value priced `dmnd_pool_implied`. Fresh complete zero-row coverage verifies that no position NFT is directly held at the snapshot slot; positions held through custody, vaults or lockers, and DAMM v1 positions, are outside this scope. Legs, fees and rewards carry name, symbol and image_url from DMND's token index, else from the mint's latest saved metadata inspection.
          */
         get: operations["getWalletMeteoraDammV2Positions"];
         put?: never;
@@ -1325,7 +1325,7 @@ export interface paths {
         };
         /**
          * List directly owned Meteora DLMM positions
-         * @description Pages saved finalized directly owned Meteora PositionV2 accounts. A bounded background scan uses standard Solana RPC to discover old and current positions, verify ownership and compute exact per-bin principal atoms. The public read uses DMND rows only. USD values require a selected-pool token trade at most one hour old, with required quote conversion and SOL/USD observations no more than 120 seconds old. Pending fee and reward counters are lower bounds. Fresh complete zero-row coverage verifies no directly owned PositionV2 at the snapshot slot; custody, staking, DAMM v1 and vault positions are outside this scope; DAMM v2 positions have their own resource.
+         * @description Pages saved finalized directly owned Meteora PositionV2 accounts. A bounded background scan uses standard Solana RPC to discover old and current positions, verify ownership and compute exact per-bin principal atoms. The public read uses DMND rows only. USD values use the selected price pool's last trade at any age, converted with the SOL/USD reference (and any stablecoin quote) no more than 120 seconds old; any other quote converts at its deepest SOL pool's last trade, at any age. A principal leg without a market price is valued from the position's own pair at its saved active bin, the pair state at or before `pair_slot` (`price_source` `dmnd_pool_implied`, with `price_pool` and `price_slot` = `pair_slot`), against the other leg's market price; neither leg is valued when both lack a market price, an implied price never implies another, and a quarantined mint or pair is never valued. `principal_value_usd` is set when both legs are valued. Rows saved without an active bin keep market prices until rescanned. Fees and rewards are pending atoms including accrual from the position's bins at `claimable_at` (`claimable_basis` `accrued`); a null `claimable_at` (`claimable_basis` `settled`) marks settled PositionV2 counters from an earlier scan, which are lower bounds. `fee_x` and `fee_y` value the fees at the price their principal leg finally carries, `dmnd_pool_implied` included; a reward takes a leg's price only when its mint is that leg's mint, otherwise only a market price, and its decimals come from DMND token metadata. `claimable_value_usd` sums a position's valued fees and rewards and `page_known_claimable_value_usd` the page's; unvalued ones are left out and never counted in `page_unpriced_leg_count`. `page_fallback_value_usd` is the part of the page's known principal and claimable value priced `dmnd_pool_implied`. Fresh complete zero-row coverage verifies no directly owned PositionV2 at the snapshot slot; custody, staking, DAMM v1 and vault positions are outside this scope; DAMM v2 positions have their own resource. Legs, fees and rewards carry name, symbol and image_url from DMND's token index, else from the mint's latest saved metadata inspection.
          */
         get: operations["getWalletMeteoraDlmmPositions"];
         put?: never;
@@ -1385,7 +1385,7 @@ export interface paths {
         };
         /**
          * Aggregate a wallet's token assets and known USD value
-         * @description Groups positive SPL Token and Token-2022 accounts by mint, up to 5,000 accounts. Native SOL and wrapped SOL are separate slot-stamped snapshot balances; WSOL token rows are excluded from assets and known value to avoid counting the snapshot balance twice. known_value_usd sums assets with a known quantity and USD conversion whose selected-pool token trade is at most one hour old and required quote conversion and SOL/USD observations are no more than 120 seconds old. observed_price_usd keeps an older selected-pool observation separate and converts it through the same fresh conversion references; estimated_value_usd and estimated_known_value_usd identify values derived from those observations. Trailing 24-hour volume uses current conversion legs and remains null if an active pool volume cannot be converted. This optional volume read admits at most 256 distinct requested mints and 2,048 pools across those mints. Above either work limit, all assets' volume_24h_usd values remain null; token quantities, metadata and prices still use the normal reader. These limits are work bounds, not a throughput guarantee. Responses can be cached for up to five seconds, bounded by actual conversion expiry; unavailable optional volume is not cached. Confirmed NFTs and one-unit zero-decimal candidates awaiting a fresh non-NFT inspection are excluded from both valuation paths. It is not net worth. Use coverage to distinguish an incomplete wallet scan from an empty wallet. NFT valuations and DeFi positions are not included. name, symbol and image_url come from DMND's token index; where it has none, they come from the mint's latest saved metadata inspection, which reads Token-2022 TokenMetadata (in the mint or through its metadata pointer) before Metaplex Token Metadata. This request never calls upstream RPC. `position` labels a held LP position NFT (Meteora DAMM v2, Orca Whirlpools or Raydium CLMM) from the wallet's latest saved scan. Until the wallet has a completed DAMM v2 scan, a one-unit zero-decimal holding whose inspected mint authority equals the cp-amm pool authority is marked `meteora_damm_v2` with null position and pool. Labelled NFTs are never valued here.
+         * @description Groups positive SPL Token and Token-2022 accounts by mint, up to 5,000 accounts. Native SOL and wrapped SOL are separate slot-stamped snapshot balances; WSOL token rows are excluded from assets and known value to avoid counting the snapshot balance twice. known_value_usd sums assets with a known quantity and USD conversion. USD values use the selected price pool's last trade at any age, converted with the SOL/USD reference (and any stablecoin quote) no more than 120 seconds old; any other quote converts at its deepest SOL pool's last trade, at any age. price_source labels each price: dmnd_pool_trade_sol (the mint's price pool), dmnd_pool_trade_inverse (a mint with no price pool of its own, priced at that pool's base market price over its last trade) or dmnd_sol_reference (the SOL/USD reference); it is null when price_usd is null. price_pool_liquidity_usd and price_pool_liquidity_at give the price pool's liquidity at current rates and when its reserves were read, alongside the price and never gating it; both are null without a reserve reading and for the SOL reference. observed_price_usd and estimated_value_usd now equal price_usd and value_usd and are kept for compatibility. Trailing 24-hour volume uses current conversion legs and remains null if an active pool volume cannot be converted. This optional volume read admits at most 256 distinct requested mints and 2,048 pools across those mints. Above either work limit, all assets' volume_24h_usd values remain null; token quantities, metadata and prices still use the normal reader. These limits are work bounds, not a throughput guarantee. Responses can be cached for up to five seconds, bounded by actual conversion expiry; unavailable optional volume is not cached. Confirmed NFTs and one-unit zero-decimal candidates awaiting a fresh non-NFT inspection are excluded from both valuation paths. It is not net worth. Use coverage to distinguish an incomplete wallet scan from an empty wallet. NFT valuations and DeFi positions are not included. name, symbol and image_url come from DMND's token index; where it has none, they come from the mint's latest saved metadata inspection, which reads Token-2022 TokenMetadata (in the mint or through its metadata pointer) before Metaplex Token Metadata. This request never calls upstream RPC. `position` labels a held LP position NFT (Meteora DAMM v2, Orca Whirlpools or Raydium CLMM) from the wallet's latest saved scan. Until the wallet has a completed DAMM v2 scan, a one-unit zero-decimal holding whose inspected mint authority equals the cp-amm pool authority is marked `meteora_damm_v2` with null position and pool. Labelled NFTs are never valued here.
          */
         get: operations["getWalletOverview"];
         put?: never;
@@ -1467,7 +1467,7 @@ export interface paths {
         };
         /**
          * Compose known wallet token, stake, lending and LP values
-         * @description Composes DMND's saved wallet endpoints without request-time RPC. The known component net value sums only available token/native SOL, native stake, Kamino, Solend, MarginFi and complete saved Orca/Raydium/Meteora DLMM/Meteora DAMM v2 principal inventories, plus direct CPMM/AMM v4 principal and Velocity account equity with fresh complete same-slot valuation coverage. Fungible LP principal replaces a token receipt only after its aggregate amount and account count match the overview; a mismatch preserves the token value and excludes that LP component. Velocity account equity includes funding and live-price isolated deposits; it excludes health and withdrawal limits. Otherwise unpriced direct JitoSOL, bSOL and mSOL can receive a protocol-claim fallback after complete owner snapshots, exact receipt atoms, account counts and token slots match. Existing market marks take precedence. The fallback recalculates the floor SOL claim from a supported saved finalized rate no older than one hour and the overview SOL/USD mark no older than 120 seconds; future observations are refused. Its liquid_staking_fallback metadata preserves independent source clocks and identifies withdrawal fees, slippage and withdrawal restrictions as excluded. Components expose independent coverage and snapshot slots. Unpriced assets and liabilities, NFT values, unsupported protocols and non-atomic snapshots mean this is neither full net worth nor a lower bound. Each LP venue is valued from one saved-inventory and price read, bounded by its scanner limit (2,000 Orca or Raydium positions; 500 Meteora DLMM or DAMM v2 positions); a capped or inconsistent inventory is excluded rather than partially summed. While Meteora DAMM v2 positions are disabled on this deployment, that component reports coverage_status disabled and saved rows are not read or counted.
+         * @description Composes DMND's saved wallet endpoints without request-time RPC. The known component net value sums only available token/native SOL, native stake, Kamino, Solend, MarginFi and complete saved Orca/Raydium/Meteora DLMM/Meteora DAMM v2 inventories (principal plus claimable fees and rewards), plus direct CPMM/AMM v4 principal and Velocity account equity with fresh complete same-slot valuation coverage. Fungible LP principal replaces a token receipt only after its aggregate amount and account count match the overview; a mismatch preserves the token value and excludes that LP component. Velocity account equity includes funding and live-price isolated deposits; it excludes health and withdrawal limits. Otherwise unpriced direct JitoSOL, bSOL and mSOL can receive a protocol-claim fallback after complete owner snapshots, exact receipt atoms, account counts and token slots match. Existing market marks take precedence. The fallback recalculates the floor SOL claim from a supported saved finalized rate no older than one hour and the overview SOL/USD mark no older than 120 seconds; future observations are refused. Its liquid_staking_fallback metadata preserves independent source clocks and identifies withdrawal fees, slippage and withdrawal restrictions as excluded. Components expose independent coverage and snapshot slots. Unpriced assets and liabilities, NFT values, unsupported protocols and non-atomic snapshots mean this is neither full net worth nor a lower bound. Each LP venue is valued from one saved-inventory and price read, bounded by its scanner limit (2,000 Orca or Raydium positions; 500 Meteora DLMM or DAMM v2 positions); a capped or inconsistent inventory is excluded rather than partially summed. An LP leg without a market price can be valued from its own pool; that value is included in the known value, and `fallback_value_usd` is the pool-implied (`dmnd_pool_implied`) part of the known value, per LP component and summed over the components included in the known total (null when none carries one); it does not include the liquid-staking protocol-claim fallback, and because a lending component's net can be negative it can exceed the known component net value. The Orca, Raydium CLMM, Meteora DLMM and DAMM v2 components also count their valued claimable fees and rewards in their known value and report them as `claimable_value_usd`, summed the same way on the summary; Raydium CPMM and AMM v4 fees accrue into the pool reserves, so those components carry none. While Meteora DAMM v2 positions are disabled on this deployment, that component reports coverage_status disabled and saved rows are not read or counted.
          */
         get: operations["getWalletPortfolioSummary"];
         put?: never;
@@ -1487,7 +1487,7 @@ export interface paths {
         };
         /**
          * Page saved wallet composition observations
-         * @description Returns immutable forward samples of known components captured from current portfolio-summary requests. Reads saved DMND rows only and never queues a scan. Source snapshots and prices are independent, missing intervals are not filled, and the known sum is neither whole-wallet net worth nor a lower bound. At most one sample per wallet per hour is retained for 90 days.
+         * @description Returns immutable forward samples of known components captured from current portfolio-summary requests. Reads saved DMND rows only and never queues a scan. Source snapshots and prices are independent, missing intervals are not filled, and the known sum is neither whole-wallet net worth nor a lower bound. At most one sample per wallet per hour is retained for 90 days. Each component carries `fallback_value_usd` and `claimable_value_usd` as in the portfolio summary; both are null in samples saved before they existed. An observed Orca, Raydium CLMM, Meteora DLMM or DAMM v2 component with a null `claimable_value_usd` was saved before claimable fees and rewards counted, so its known value excludes them. Samples saved before that release also predate prices at any age and pool-implied LP leg values, so the series steps up once at that release.
          */
         get: operations["getWalletPortfolioSummaryHistory"];
         put?: never;
@@ -1507,7 +1507,7 @@ export interface paths {
         };
         /**
          * List a wallet's positions
-         * @description Every token attributed to the wallet by indexed trades (from `positions_since` on), with what it bought and sold, its PnL by average cost, and its balance now in all indexed positive accounts owned by the exact wallet/mint, including non-associated accounts. Current SOL marks require a selected-pool token trade at most one hour old. Required quote conversion and SOL/USD observations must be no more than 120 seconds old. Unknown or stale marks leave current values/PnL null while preserving original trading totals and realized PnL. Ordered by `sort`: `total_pnl` (the default), `unrealized_pnl`, `value` (all in SOL, unknown values last) or `last_active` (the position's last trade).
+         * @description Every token attributed to the wallet by indexed trades (from `positions_since` on), with what it bought and sold, its PnL by average cost, and its balance now in all indexed positive accounts owned by the exact wallet/mint, including non-associated accounts. Current SOL marks use the selected price pool's last trade at any age. The SOL/USD observation and any stablecoin quote must be no more than 120 seconds old; any other quote converts at its deepest SOL pool's last trade at any age. Unknown or stale marks leave current values/PnL null while preserving original trading totals and realized PnL. Ordered by `sort`: `total_pnl` (the default), `unrealized_pnl`, `value` (all in SOL, unknown values last) or `last_active` (the position's last trade).
          *
          *     Tokens the wallet holds but never traded (airdrops, transfers) are not listed; use holdings/overview for inventory and scan coverage. Indexed balances do not imply a complete wallet snapshot. More than 10,000 positions or 20,000 positive token accounts answers 422 `too_large` (kept for 60 s). The required owner index being absent or invalid answers 503 `wallet_holdings_unavailable`.
          *
@@ -5893,6 +5893,8 @@ export interface components {
              * Format: date-time
              * @description Oldest available quote-conversion source time across non-SOL pools.
              *     Null for SOL-only pools or missing quote-source timestamps.
+             *     Informational: a non-stable quote converts at its deepest SOL pool's
+             *     last trade at any age, so this can be days old without nulling a value.
              */
             oldest_quote_rate_at?: string | null;
             /**
@@ -6395,7 +6397,7 @@ export interface components {
             amount: string;
             /** Format: int32 */
             decimals?: number | null;
-            /** @description Holding quantity multiplied by `observed_price_usd`; this is an estimate. */
+            /** @description Equal to `value_usd`; kept for compatibility. */
             estimated_value_usd?: string | null;
             image_url?: string | null;
             /** Format: int64 */
@@ -6404,17 +6406,37 @@ export interface components {
             name?: string | null;
             /**
              * Format: date-time
-             * @description Actual selected-pool trade time for `observed_price_usd`.
+             * @description Selected price pool's last trade time for `observed_price_usd`.
              */
             observed_price_at?: string | null;
-            /** @description Last selected-pool observation converted through references no more than 120 seconds old. */
+            /** @description Equal to `price_usd`; kept for compatibility. */
             observed_price_usd?: string | null;
             position?: null | components["schemas"]["WalletAssetPosition"];
             /** @description Selected market's 24-hour price change percentage as exact decimal text. */
             price_change_24h?: string | null;
             /**
              * Format: date-time
-             * @description Oldest of the selected pool trade, required quote conversion and SOL/USD reference.
+             * @description When the price pool's reserves were read; null exactly when
+             *     `price_pool_liquidity_usd` is.
+             */
+            price_pool_liquidity_at?: string | null;
+            /**
+             * @description The price pool's liquidity in USD at current rates, decimal text. Shown
+             *     alongside the price, never gating it. Null when DMND has no reserve
+             *     reading for the pool, for the SOL reference, or when `price_usd` is null.
+             */
+            price_pool_liquidity_usd?: string | null;
+            /**
+             * @description `dmnd_pool_trade_sol` (the mint's price pool's last trade),
+             *     `dmnd_pool_trade_inverse` (the mint is its price pool's quote: the base's
+             *     market price over that pool's last trade) or `dmnd_sol_reference`. Null
+             *     when `price_usd` is null.
+             */
+            price_source?: string | null;
+            /**
+             * Format: date-time
+             * @description Oldest of the selected price pool's last trade (at any age), required quote
+             *     conversion and SOL/USD reference; the trade time for a quiet token.
              */
             price_updated_at?: string | null;
             price_usd?: string | null;
@@ -6422,8 +6444,10 @@ export interface components {
             ui_amount?: string | null;
             value_usd?: string | null;
             /**
-             * @description Trailing 24-hour indexed volume converted through current references (120 seconds),
-             *     encoded as exact decimal USD text. Null if any active pool volume cannot be converted.
+             * @description Trailing 24-hour indexed volume converted through current references, encoded as
+             *     exact decimal USD text: the SOL/USD reference and USDC or USDT quotes no more than
+             *     120 seconds old, any other quote at its deepest SOL pool's last trade at any age.
+             *     Null if any active pool volume cannot be converted.
              */
             volume_24h_usd?: string | null;
         };
@@ -7118,12 +7142,42 @@ export interface components {
             /** Format: int32 */
             decimals: number;
             gross_atoms: string;
+            /**
+             * @description Same as `WalletLiquidityLeg.image_url`; null in an observation
+             *     response, which looks up no labels.
+             */
+            image_url?: string | null;
             mint: string;
+            /**
+             * @description Same as `WalletLiquidityLeg.name`; null in an observation response,
+             *     which looks up no labels.
+             */
+            name?: string | null;
             net_atoms: string;
+            /** @description Same as `WalletLiquidityLeg.price_pool`. */
+            price_pool?: string | null;
+            /**
+             * Format: date-time
+             * @description Same as `WalletLiquidityLeg.price_pool_liquidity_at`.
+             */
+            price_pool_liquidity_at?: string | null;
+            /** @description Same as `WalletLiquidityLeg.price_pool_liquidity_usd`. */
+            price_pool_liquidity_usd?: string | null;
+            /**
+             * Format: int64
+             * @description Same as `WalletLiquidityLeg.price_slot`.
+             */
+            price_slot?: number | null;
+            /** @description Same labels as `WalletLiquidityLeg.price_source`. */
             price_source?: string | null;
             /** Format: date-time */
             price_updated_at?: string | null;
             price_usd?: string | null;
+            /**
+             * @description Same as `WalletLiquidityLeg.symbol`. An observation response looks up
+             *     no labels: there it is null, except `SOL` for wrapped SOL.
+             */
+            symbol?: string | null;
             transfer_fee_atoms: string;
             ui_amount: string;
             value_reason?: string | null;
@@ -7154,6 +7208,11 @@ export interface components {
             owner_token_account: string;
             pool?: string | null;
             principal: components["schemas"]["WalletFungibleLiquidityLeg"][];
+            /**
+             * @description Sum of both principal legs' `value_usd`, whether a market or a
+             *     `dmnd_pool_implied` price values them; absent unless both legs are valued.
+             */
+            principal_value_usd?: string | null;
             reason?: string | null;
             sources: components["schemas"]["WalletFungibleLiquiditySource"][];
             status: components["schemas"]["WalletFungibleLiquidityStatus"];
@@ -7164,6 +7223,11 @@ export interface components {
             cursor?: string | null;
             data: components["schemas"]["WalletFungibleLiquidityPosition"][];
             has_more: boolean;
+            /**
+             * @description The part of `page_known_principal_value_usd` from legs priced
+             *     `dmnd_pool_implied`; no snapshot => null.
+             */
+            page_fallback_value_usd?: string | null;
             /** @description Known net-of-transfer-fee principal value on this page; no snapshot => null. */
             page_known_principal_value_usd?: string | null;
             /** Format: int64 */
@@ -7221,6 +7285,15 @@ export interface components {
             last_slot: number;
             mint: string;
             name?: string | null;
+            /**
+             * Format: date-time
+             * @description Same as `WalletAsset.price_pool_liquidity_at`.
+             */
+            price_pool_liquidity_at?: string | null;
+            /** @description Same as `WalletAsset.price_pool_liquidity_usd`. */
+            price_pool_liquidity_usd?: string | null;
+            /** @description Same labels as `WalletAsset.price_source`. */
+            price_source?: string | null;
             /** @description USD per whole token, decimal text. Null when price is unknown. */
             price_usd?: string | null;
             symbol?: string | null;
@@ -7417,18 +7490,67 @@ export interface components {
             /** Format: int64 */
             total_positions: number;
         };
-        /** @description Principal estimated from saved protocol position and pool account state. */
+        /**
+         * @description A token amount in an LP position, with its labels and USD value: a
+         *     principal leg estimated from saved protocol position and pool account
+         *     state, or a claimable fee leg (`fee_a`/`fee_b`, `fee_x`/`fee_y`) on its
+         *     position's claimable basis.
+         */
         WalletLiquidityLeg: {
             amount_atoms?: string | null;
             amount_reason?: string | null;
             /** Format: int32 */
             decimals?: number | null;
+            /**
+             * @description Token image from DMND's token index, else from the mint's latest saved
+             *     metadata inspection, as for a held asset.
+             */
+            image_url?: string | null;
             mint: string;
+            /**
+             * @description Token name from DMND's token index, else from the mint's latest saved
+             *     metadata inspection, as for a held asset.
+             */
+            name?: string | null;
+            /**
+             * @description The pool the price is read off: the inverse pool for
+             *     `dmnd_pool_trade_inverse` and the LP pool for `dmnd_pool_implied`;
+             *     otherwise null.
+             */
+            price_pool?: string | null;
+            /**
+             * Format: date-time
+             * @description When the price pool's reserves were read; null exactly when
+             *     `price_pool_liquidity_usd` is.
+             */
+            price_pool_liquidity_at?: string | null;
+            /**
+             * @description The price pool's liquidity in USD at current rates, decimal text. Shown
+             *     alongside the price, never gating it. Null when DMND has no reserve
+             *     reading for the pool, for the SOL reference, or when `price_usd` is null.
+             */
+            price_pool_liquidity_usd?: string | null;
+            /**
+             * Format: int64
+             * @description The saved pool slot of a `dmnd_pool_implied` price; otherwise null.
+             */
+            price_slot?: number | null;
+            /**
+             * @description `dmnd_pool_trade_sol` (the mint's price pool's last trade),
+             *     `dmnd_pool_trade_inverse` (the mint is its price pool's quote: the
+             *     base's market price over that pool's last trade), `dmnd_sol_reference`
+             *     (SOL/USD reference) or `dmnd_pool_implied` (this LP pool's saved price
+             *     against the other leg's market price). Null when `price_usd` is null.
+             */
             price_source?: string | null;
             /** Format: date-time */
             price_updated_at?: string | null;
             price_usd?: string | null;
-            /** @description Token symbol from DMND metadata; always `SOL` for wrapped SOL. */
+            /**
+             * @description Token symbol from DMND's token index, else from the mint's latest
+             *     saved metadata inspection, as for a held asset; always `SOL` for
+             *     wrapped SOL.
+             */
             symbol?: string | null;
             ui_amount?: string | null;
             value_reason?: string | null;
@@ -7438,8 +7560,33 @@ export interface components {
             /** Format: int32 */
             bundle_index?: number | null;
             bundle_mint?: string | null;
+            /**
+             * Format: date-time
+             * @description Clock sysvar time of the read the claimable fees and rewards are
+             *     computed at; null for settled counters.
+             */
+            claimable_at?: string | null;
+            /**
+             * @description `accrued` when fees and rewards include accrual at `claimable_at`, or
+             *     `settled` when they are settled counters from an earlier scan, which
+             *     are lower bounds.
+             */
+            claimable_basis?: string | null;
+            /**
+             * @description Sum of the fee legs' and rewards' `value_usd` that are set; `0` when
+             *     none is valued. Unvalued fees and rewards are left out.
+             */
+            claimable_value_usd?: string | null;
             deployment: string;
+            fee_a?: null | components["schemas"]["WalletLiquidityLeg"];
+            fee_b?: null | components["schemas"]["WalletLiquidityLeg"];
+            /**
+             * @description Token A fee atoms owed at `claimable_at`, including accrual; when
+             *     `claimable_at` is null, a settled counter from an earlier scan, which
+             *     is a lower bound.
+             */
             fee_owed_a: string;
+            /** @description Token B fee atoms on the same basis as `fee_owed_a`. */
             fee_owed_b: string;
             liquidity: string;
             owner_token_account: string;
@@ -7454,6 +7601,11 @@ export interface components {
             position_slot: number;
             principal_a: components["schemas"]["WalletLiquidityLeg"];
             principal_b: components["schemas"]["WalletLiquidityLeg"];
+            /**
+             * @description Sum of both principal legs' `value_usd`, whether a market or a
+             *     `dmnd_pool_implied` price values them; absent unless both legs are valued.
+             */
+            principal_value_usd?: string | null;
             program: string;
             rewards: components["schemas"]["WalletLiquidityReward"][];
             /** Format: int64 */
@@ -7469,6 +7621,19 @@ export interface components {
             cursor?: string | null;
             data: components["schemas"]["WalletLiquidityPosition"][];
             has_more: boolean;
+            /**
+             * @description The part of `page_known_principal_value_usd` plus
+             *     `page_known_claimable_value_usd` from legs, fees and rewards priced
+             *     `dmnd_pool_implied`; absent before any saved scan.
+             */
+            page_fallback_value_usd?: string | null;
+            /**
+             * @description Known claimable USD value for this page only: the sum of the
+             *     positions' `claimable_value_usd`. Unvalued fees and rewards are left
+             *     out and not counted in `page_unpriced_leg_count`. Absent before any
+             *     saved scan.
+             */
+            page_known_claimable_value_usd?: string | null;
             /** @description Known principal USD value for this page only; absent before any saved scan. */
             page_known_principal_value_usd?: string | null;
             /**
@@ -7479,10 +7644,39 @@ export interface components {
             protocol: string;
             wallet: string;
         };
-        /** @description Raw settled owed counter; additional accrued rewards may be absent. */
+        /**
+         * @description Reward atoms owed at the position's `claimable_at`, including accrual and
+         *     before the reward vault balance cap; when `claimable_at` is null, a settled
+         *     counter from an earlier scan, which is a lower bound. The value fields read
+         *     like a `WalletLiquidityLeg`'s: decimals come from DMND token metadata,
+         *     and the reward takes a leg's price, `dmnd_pool_implied` included, only when
+         *     its mint is that leg's mint; any other mint needs a market price. A reward
+         *     without a mint has no value and `value_reason` `decimals_unknown`.
+         */
         WalletLiquidityReward: {
+            /** Format: int32 */
+            decimals?: number | null;
+            /** @description Same as `WalletLiquidityLeg.image_url`; null without a mint. */
+            image_url?: string | null;
             mint?: string | null;
+            /** @description Same as `WalletLiquidityLeg.name`; null without a mint. */
+            name?: string | null;
             owed_atoms: string;
+            price_pool?: string | null;
+            /** Format: date-time */
+            price_pool_liquidity_at?: string | null;
+            price_pool_liquidity_usd?: string | null;
+            /** Format: int64 */
+            price_slot?: number | null;
+            price_source?: string | null;
+            /** Format: date-time */
+            price_updated_at?: string | null;
+            price_usd?: string | null;
+            /** @description Same as `WalletLiquidityLeg.symbol`; null without a mint. */
+            symbol?: string | null;
+            ui_amount?: string | null;
+            value_reason?: string | null;
+            value_usd?: string | null;
         };
         WalletMarginfiLeg: {
             /** @description Signed I80F48 raw integer represented as a decimal string. */
@@ -7565,13 +7759,20 @@ export interface components {
             vested: string;
         };
         WalletMeteoraDammV2Position: {
+            /**
+             * @description Sum of the fee legs' and rewards' `value_usd` that are set; `0` when
+             *     none is valued. Unvalued fees and rewards are left out.
+             */
+            claimable_value_usd?: string | null;
             /** @description Pool fee collection mode: `both_token`, `only_b` or `compounding`. */
             collect_fee_mode: string;
+            fee_a?: null | components["schemas"]["WalletLiquidityLeg"];
             /**
              * @description Claimable token A fee atoms at `snapshot_block_time` (pending plus
              *     accrual, as cp-amm computes it), before any Token-2022 transfer fee.
              */
             fee_a_claimable_atoms: string;
+            fee_b?: null | components["schemas"]["WalletLiquidityLeg"];
             /** @description Claimable token B fee atoms on the same basis as `fee_a_claimable_atoms`. */
             fee_b_claimable_atoms: string;
             liquidity: components["schemas"]["WalletMeteoraDammV2Liquidity"];
@@ -7591,7 +7792,10 @@ export interface components {
             position_mint: string;
             /** Format: int64 */
             position_slot: number;
-            /** @description Sum of both legs' `value_usd`; absent unless both legs are valued. */
+            /**
+             * @description Sum of both legs' `value_usd`, whether a market or a
+             *     `dmnd_pool_implied` price values them; absent unless both legs are valued.
+             */
             principal_value_usd?: string | null;
             program: string;
             rewards: components["schemas"]["WalletMeteoraDammV2Reward"][];
@@ -7626,6 +7830,19 @@ export interface components {
             cursor?: string | null;
             data: components["schemas"]["WalletMeteoraDammV2Position"][];
             has_more: boolean;
+            /**
+             * @description The part of `page_known_principal_value_usd` plus
+             *     `page_known_claimable_value_usd` from legs, fees and rewards priced
+             *     `dmnd_pool_implied`; absent before any saved scan.
+             */
+            page_fallback_value_usd?: string | null;
+            /**
+             * @description Known claimable USD value for this page only: the sum of the
+             *     positions' `claimable_value_usd`. Unvalued fees and rewards are left
+             *     out and not counted in `page_unpriced_leg_count`. Absent before any
+             *     saved scan.
+             */
+            page_known_claimable_value_usd?: string | null;
             /** @description Known principal USD value for this page only; absent before any saved scan. */
             page_known_principal_value_usd?: string | null;
             /**
@@ -7638,26 +7855,75 @@ export interface components {
         };
         /**
          * @description Claimable reward atoms at `snapshot_block_time` (pending plus accrual, as
-         *     cp-amm computes it), before any Token-2022 transfer fee. Rewards carry no
-         *     USD value.
+         *     cp-amm computes it), before any Token-2022 transfer fee. The value fields
+         *     read like a `WalletLiquidityLeg`'s: the reward takes a leg's price,
+         *     `dmnd_pool_implied` included, only when its mint is that leg's mint; any
+         *     other mint needs a market price.
          */
         WalletMeteoraDammV2Reward: {
             claimable_atoms: string;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Decimals observed on the reward mint at the scan, else from DMND token
+             *     metadata.
+             */
             decimals?: number | null;
+            /** @description Same as `WalletLiquidityLeg.image_url`. */
+            image_url?: string | null;
             /**
              * Format: int32
              * @description Pool reward slot, 0 or 1.
              */
             index: number;
             mint: string;
+            /** @description Same as `WalletLiquidityLeg.name`. */
+            name?: string | null;
+            price_pool?: string | null;
+            /** Format: date-time */
+            price_pool_liquidity_at?: string | null;
+            price_pool_liquidity_usd?: string | null;
+            /** Format: int64 */
+            price_slot?: number | null;
+            price_source?: string | null;
+            /** Format: date-time */
+            price_updated_at?: string | null;
+            price_usd?: string | null;
+            /** @description Same as `WalletLiquidityLeg.symbol`. */
+            symbol?: string | null;
+            ui_amount?: string | null;
+            value_reason?: string | null;
+            value_usd?: string | null;
         };
         WalletMeteoraPosition: {
             /** Format: int64 */
             bin_arrays_slot: number;
-            /** @description Raw pending counters; accrued but unsettled amounts can be higher. */
+            /**
+             * Format: date-time
+             * @description Clock sysvar time of the read the claimable fees and rewards are
+             *     computed at; null for settled counters.
+             */
+            claimable_at?: string | null;
+            /**
+             * @description `accrued` when fees and rewards include accrual at `claimable_at`, or
+             *     `settled` when they are settled counters from an earlier scan, which
+             *     are lower bounds.
+             */
+            claimable_basis?: string | null;
+            /**
+             * @description Sum of the fee legs' and rewards' `value_usd` that are set; `0` when
+             *     none is valued. Unvalued fees and rewards are left out.
+             */
+            claimable_value_usd?: string | null;
+            /**
+             * @description Token X fee atoms pending at `claimable_at`, including accrual from
+             *     the position's bins; when `claimable_at` is null, a settled counter
+             *     from an earlier scan, which is a lower bound.
+             */
             fee_pending_x_atoms: string;
+            /** @description Token Y fee atoms on the same basis as `fee_pending_x_atoms`. */
             fee_pending_y_atoms: string;
+            fee_x?: null | components["schemas"]["WalletLiquidityLeg"];
+            fee_y?: null | components["schemas"]["WalletLiquidityLeg"];
             /** Format: int32 */
             lower_bin_id: number;
             /** Format: int64 */
@@ -7668,6 +7934,11 @@ export interface components {
             position: string;
             /** Format: int64 */
             position_slot: number;
+            /**
+             * @description Sum of both principal legs' `value_usd`, whether a market or a
+             *     `dmnd_pool_implied` price values them; absent unless both legs are valued.
+             */
+            principal_value_usd?: string | null;
             principal_x: components["schemas"]["WalletLiquidityLeg"];
             principal_y: components["schemas"]["WalletLiquidityLeg"];
             program: string;
@@ -7682,16 +7953,58 @@ export interface components {
             cursor?: string | null;
             data: components["schemas"]["WalletMeteoraPosition"][];
             has_more: boolean;
+            /**
+             * @description The part of `page_known_principal_value_usd` plus
+             *     `page_known_claimable_value_usd` from legs, fees and rewards priced
+             *     `dmnd_pool_implied`; absent before any saved scan.
+             */
+            page_fallback_value_usd?: string | null;
+            /**
+             * @description Known claimable USD value for this page only: the sum of the
+             *     positions' `claimable_value_usd`. Unvalued fees and rewards are left
+             *     out and not counted in `page_unpriced_leg_count`. Absent before any
+             *     saved scan.
+             */
+            page_known_claimable_value_usd?: string | null;
             page_known_principal_value_usd?: string | null;
             /** Format: int64 */
             page_unpriced_leg_count?: number | null;
             protocol: string;
             wallet: string;
         };
-        /** @description Raw pending reward counter from the last saved PositionV2 account update. */
+        /**
+         * @description Reward atoms pending at the position's `claimable_at`, including accrual
+         *     from its bins; when `claimable_at` is null, a settled PositionV2 counter
+         *     from an earlier scan, which is a lower bound. The value fields read like a
+         *     `WalletLiquidityLeg`'s: decimals come from DMND token metadata, and the
+         *     reward takes a leg's price, `dmnd_pool_implied` included, only when its
+         *     mint is that leg's mint; any other mint needs a market price. A reward
+         *     without a mint has no value and `value_reason` `decimals_unknown`.
+         */
         WalletMeteoraReward: {
+            /** Format: int32 */
+            decimals?: number | null;
+            /** @description Same as `WalletLiquidityLeg.image_url`; null without a mint. */
+            image_url?: string | null;
             mint?: string | null;
+            /** @description Same as `WalletLiquidityLeg.name`; null without a mint. */
+            name?: string | null;
             pending_atoms: string;
+            price_pool?: string | null;
+            /** Format: date-time */
+            price_pool_liquidity_at?: string | null;
+            price_pool_liquidity_usd?: string | null;
+            /** Format: int64 */
+            price_slot?: number | null;
+            price_source?: string | null;
+            /** Format: date-time */
+            price_updated_at?: string | null;
+            price_usd?: string | null;
+            /** @description Same as `WalletLiquidityLeg.symbol`; null without a mint. */
+            symbol?: string | null;
+            ui_amount?: string | null;
+            value_reason?: string | null;
+            value_usd?: string | null;
         };
         WalletNft: {
             /** Format: int64 */
@@ -7945,9 +8258,23 @@ export interface components {
         };
         /** @description One independently observed source in the current, partial wallet valuation. */
         WalletPortfolioComponent: {
+            /**
+             * @description Claimable fees and rewards valued in this component; they are already
+             *     included in its known value. Set only for an observed concentrated LP
+             *     component (Orca, Raydium CLMM, Meteora DLMM and DAMM v2); null
+             *     otherwise, including Raydium CPMM and AMM v4, whose fees accrue into
+             *     the pool reserves, and in observations saved before it existed.
+             */
+            claimable_value_usd?: string | null;
             coverage_complete: boolean;
             coverage_fresh?: boolean | null;
             coverage_status: string;
+            /**
+             * @description The pool-implied (`dmnd_pool_implied`) part of this component's known
+             *     value; it is already included in it. Set only for an observed LP
+             *     component; null otherwise and in observations saved before it existed.
+             */
+            fallback_value_usd?: string | null;
             id: string;
             included_in_known_total: boolean;
             /** @description Priced assets in this source; unknown amounts or prices are omitted. */
@@ -8077,7 +8404,22 @@ export interface components {
         };
         /** @description Current known-value composition. It is neither complete net worth nor a lower bound. */
         WalletPortfolioSummary: {
+            /**
+             * @description The claimable fees and rewards in `known_component_net_value_usd`: the
+             *     sum of `claimable_value_usd` over components included in the known
+             *     total; null when none carries one.
+             */
+            claimable_value_usd?: string | null;
             components: components["schemas"]["WalletPortfolioComponent"][];
+            /**
+             * @description The pool-implied (`dmnd_pool_implied`) part of
+             *     `known_component_net_value_usd`: the sum of `fallback_value_usd` over
+             *     components included in the known total; null when none carries one.
+             *     It does not include the liquid-staking protocol-claim fallback. A
+             *     lending component's net can be negative (debt above deposits, as in
+             *     MarginFi), so this can exceed `known_component_net_value_usd`.
+             */
+            fallback_value_usd?: string | null;
             known_component_net_value_usd?: string | null;
             unsupported_scopes: string[];
             /** @description Always `independent_snapshots`: source account and price observations span slots. */
@@ -8113,9 +8455,10 @@ export interface components {
             last_trade_at: string;
             /**
              * Format: decimal
-             * @description Qualified current SOL per whole token; null for a stale or missing
-             *     selected-pool token trade (maximum age one hour) or required quote
-             *     conversion (maximum age 120 seconds).
+             * @description Qualified current SOL per whole token, from the selected price pool's
+             *     last trade at any age; null for a missing trade or quote conversion. A
+             *     stablecoin quote's conversion has a maximum age of 120 seconds; any other
+             *     quote uses its deepest SOL pool's last trade at any age.
              */
             last_trade_price_sol?: string | null;
             /** Format: decimal */
