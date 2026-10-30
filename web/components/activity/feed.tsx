@@ -4,7 +4,6 @@ import {
   Activity as ActivityIcon,
   ArrowLeftRight,
   ChevronDown,
-  ArrowUpRight,
 } from "lucide-react";
 import { WalletFrame } from "../wallet/frame";
 import { ResourceState, LoadingRows } from "../resource-state";
@@ -19,6 +18,7 @@ import { toTransactionView } from "@/lib/activity/model";
 import { activityHref, type ActivityWindow } from "@/lib/activity/window";
 import { short } from "@/lib/portfolio/adapters/shared";
 import { explorerHref } from "@/lib/safe-url";
+import { SolscanMark } from "@/components/solscan-mark";
 import { DateFilter } from "./date-filter";
 import { TransactionDetail, ChangeAmount } from "./transaction-detail";
 type Props = {
@@ -302,7 +302,7 @@ function FeedBody({
                             rel="noreferrer"
                             aria-label="View transaction on Solscan"
                           >
-                            <ArrowUpRight size={13} />
+                            <SolscanMark />
                           </a>
                         </td>
                       </tr>

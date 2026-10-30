@@ -5,6 +5,7 @@
 import { useEffect, useId, useRef } from "react";
 import type { ActionStep } from "@/lib/actions/run";
 import { explorerHref } from "@/lib/safe-url";
+import { SolscanMark } from "@/components/solscan-mark";
 import { formatAmounts, type MintLookup } from "./amounts";
 
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
@@ -42,8 +43,14 @@ function Step({ step, lookup }: { step: ActionStep; lookup: MintLookup }) {
         ) : step.status === "confirmed" && step.signature ? (
           <>
             <span>{status.text}</span> ·{" "}
-            <a href={explorerHref("tx", step.signature)} target="_blank" rel="noopener noreferrer">
-              Solscan <span aria-hidden="true">↗</span>
+            <a
+              href={explorerHref("tx", step.signature)}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+            >
+              <SolscanMark />
+              Solscan
             </a>
           </>
         ) : (

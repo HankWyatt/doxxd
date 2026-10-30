@@ -1,6 +1,6 @@
 "use client";
 import { createContext, useContext, useState } from "react";
-import { ArrowUpRight, RefreshCw, ChevronRight } from "lucide-react";
+import { RefreshCw, ChevronRight } from "lucide-react";
 import { SiteFooter } from "../site-footer";
 import {
   useWalletResource,
@@ -13,6 +13,7 @@ import {
 } from "@/lib/dmnd/contracts";
 import { walletHref } from "@/lib/address";
 import { explorerHref } from "@/lib/safe-url";
+import { SolscanMark } from "@/components/solscan-mark";
 import { WalletSummary } from "./summary";
 import { RecoveryNotice } from "./recovery-notice";
 import { SaveWalletButton } from "../watchlist/watchlist";
@@ -95,7 +96,7 @@ function FrameContent({
                   rel="noreferrer"
                   aria-label="View wallet on Solscan"
                 >
-                  <ArrowUpRight size={13} />
+                  <SolscanMark />
                 </a>
               </div>
             </div>
