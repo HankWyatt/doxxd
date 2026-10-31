@@ -85,6 +85,8 @@ export type ProtocolView = {
   hasMore: boolean;
   continuationUnavailable: boolean;
   totalPositions: number | null;
+  /** Page-boundary note for a source that has more pages; never a source state. */
+  pageNote: string | null;
 };
 export function toSummary(raw: Schemas["WalletPortfolioSummary"]): SummaryView {
   return {
@@ -158,8 +160,13 @@ export function toProtocolView(
     rawTotalPositions >= 0
       ? rawTotalPositions
       : null;
+  // A page boundary is not a source state: a complete, fresh multi-page scan
+  // keeps its own label. Only a boundary the client cannot follow (more pages
+  // reported without a usable cursor, or a cursor on a last page) leaves
+  // coverage unconfirmed.
+  const boundaryUnclear = hasMore ? !usableCursor : Boolean(cursor);
   let coverage = coverageView({
-    complete: c.complete && !hasMore && !cursor,
+    complete: c.complete && !boundaryUnclear,
     fresh: "fresh" in c ? c.fresh : undefined,
     status: "status" in c ? c.status : c.snapshot_status,
     reason: c.reason,
@@ -173,7 +180,9 @@ export function toProtocolView(
   // page, without a contradictory inventory count, can establish scope emptiness.
   if (
     coverage.state === "empty" &&
-    (isContinuation || (hasPositionInventory && totalPositions !== 0))
+    (isContinuation ||
+      hasMore ||
+      (hasPositionInventory && totalPositions !== 0))
   ) {
     coverage = {
       ...coverage,
@@ -212,5 +221,13 @@ export function toProtocolView(
     hasMore,
     continuationUnavailable: hasMore && !usableCursor,
     totalPositions,
+    pageNote:
+      hasMore && usableCursor && coverage.state === "ready"
+        ? "Showing " +
+          (totalPositions === null
+            ? positions.length + " positions"
+            : positions.length + " of " + totalPositions + " positions") +
+          ". More on the next page."
+        : null,
   };
 }

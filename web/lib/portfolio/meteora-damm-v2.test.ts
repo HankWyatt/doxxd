@@ -108,7 +108,7 @@ it.each([
   ["pending", "pending"],
   ["empty", "empty"],
   ["complete", "ready"],
-  ["partial", "partial"],
+  ["paged", "ready"],
   ["disabled", "unavailable"],
   ["stale", "stale"],
 ] as const)("maps the %s coverage to %s", (state, expected) => {
@@ -122,7 +122,7 @@ it.each([
 });
 
 it("retains a continuation cursor and the source inventory count", () => {
-  const v = view(dammV2State("partial"));
+  const v = view(dammV2State("paged"));
   expect(v.hasMore).toBe(true);
   expect(v.cursor).toBe("synthetic-damm-v2-cursor-2");
   expect(v.totalPositions).toBe(2);

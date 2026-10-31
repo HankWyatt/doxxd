@@ -309,3 +309,74 @@ it("does not trim a malformed paged cursor when adapting without gateway validat
   expect(view.cursor).toBeNull();
   expect(view.continuationUnavailable).toBe(true);
 });
+
+function pagedOrca(patch: (d: ReturnType<typeof orcaData>) => void) {
+  const data = orcaData();
+  data.has_more = true;
+  data.cursor = "synthetic-next";
+  patch(data);
+  return toProtocolView({ resource: "orca", data });
+}
+function orcaData() {
+  const r = readFixture("orca", "complete");
+  if (!r.ok) throw Error("fixture");
+  return r.data;
+}
+
+it("labels a complete, fresh multi-page scan as current and notes the page boundary with the source total", () => {
+  const view = pagedOrca((d) => {
+    d.coverage.total_positions = 137;
+  });
+  const n = view.positions.length;
+  expect(view.coverage.state).toBe("ready");
+  expect(view.coverage.label).toBe("Current snapshot");
+  expect(view.pageNote).toBe(
+    `Showing ${n} of 137 positions. More on the next page.`,
+  );
+});
+
+it("notes the page boundary without a total when the resource gives none", () => {
+  const r = readFixture("raydium-cpmm", "complete");
+  if (!r.ok) throw Error("fixture");
+  r.data.has_more = true;
+  r.data.cursor = "synthetic-next";
+  const view = toProtocolView({ resource: "raydium-cpmm", data: r.data });
+  expect(view.totalPositions).toBeNull();
+  expect(view.coverage.label).toBe("Current snapshot");
+  expect(view.pageNote).toBe(
+    `Showing ${view.positions.length} positions. More on the next page.`,
+  );
+});
+
+it("does not establish an empty scope from an empty page that has more pages", () => {
+  const r = readFixture("raydium-cpmm", "complete");
+  if (!r.ok) throw Error("fixture");
+  r.data.data = [];
+  r.data.has_more = true;
+  r.data.cursor = "synthetic-next";
+  const view = toProtocolView({ resource: "raydium-cpmm", data: r.data });
+  expect(view.coverage.state).toBe("ready");
+  expect(view.coverage.label).not.toBe("No positions");
+});
+
+it("keeps the partial warning for an incomplete multi-page scan", () => {
+  const view = pagedOrca((d) => {
+    d.coverage.complete = false;
+  });
+  expect(view.coverage.state).toBe("partial");
+  expect(view.pageNote).toBeNull();
+});
+
+it("keeps the saved-snapshot label for a stale multi-page scan", () => {
+  const view = pagedOrca((d) => {
+    d.coverage.fresh = false;
+  });
+  expect(view.coverage.state).toBe("stale");
+  expect(view.pageNote).toBeNull();
+});
+
+it("has no page note on a single complete page", () => {
+  const view = toProtocolView({ resource: "orca", data: orcaData() });
+  expect(view.coverage.state).toBe("ready");
+  expect(view.pageNote).toBeNull();
+});

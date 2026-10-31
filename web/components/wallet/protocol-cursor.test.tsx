@@ -61,6 +61,26 @@ function protocolResponse(data: ReturnType<typeof orcaPage>) {
   return Response.json({ ok: true, data });
 }
 
+it("shows a complete multi-page scan as current with a page note and keeps the page subtotal", async () => {
+  const data = orcaPage();
+  data.has_more = true;
+  data.cursor = "synthetic-next";
+  data.coverage.total_positions = 137;
+  vi.stubGlobal("fetch", vi.fn(async () => protocolResponse(data)));
+  renderOrca();
+  expect(
+    await screen.findByText(
+      new RegExp(
+        `^Showing ${data.data.length} of 137 positions\\. More on the next page\\.`,
+      ),
+    ),
+  ).toBeVisible();
+  expect(screen.getByText("Current snapshot")).toBeVisible();
+  expect(screen.queryByText("Partial coverage")).toBeNull();
+  expect(screen.getByText(/^This page: /)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Next positions" })).toBeVisible();
+});
+
 it("labels an empty seed page as page-scoped when the snapshot reports positions", async () => {
   const data = orcaPage();
   data.data = [];

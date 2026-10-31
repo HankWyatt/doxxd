@@ -88,9 +88,11 @@ it("pages manually with the opaque cursor and returns to the first page", async 
   const second = dammV2Page();
   second.data[0].position = syntheticAddress("damm-v2/position-2");
   second.data[0].token_a.symbol = "SYNC";
-  const fetch = serve(dammV2State("partial"), second);
+  const fetch = serve(dammV2State("paged"), second);
   openSection();
-  expect(await screen.findByText("Partial coverage")).toBeInTheDocument();
+  expect(await screen.findByText("Current snapshot")).toBeInTheDocument();
+  expect(screen.queryByText("Partial coverage")).toBeNull();
+  expect(screen.getByText(/^Showing 1 of 2 positions\. More on the next page\./)).toBeVisible();
   expect(fetch).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole("button", { name: "Next positions" }));
   expect(await screen.findByText(/^SYNC \+ /)).toBeVisible();

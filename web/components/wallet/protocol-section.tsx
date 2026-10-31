@@ -636,7 +636,8 @@ function ProtocolBody({
           <span>
             {view.continuationUnavailable
               ? "More positions are reported, but the continuation cursor is unavailable."
-              : "Position pages preserve the source snapshot."}
+              : (view.pageNote ? view.pageNote + " " : "") +
+                "Position pages preserve the source snapshot."}
           </span>
           <span className="inline">
             {view.continuationUnavailable && (

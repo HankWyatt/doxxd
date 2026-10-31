@@ -109,7 +109,7 @@ export function dammV2Page(): Schemas["WalletMeteoraDammV2Positions"] {
 
 /** Coverage the endpoint reports for each lifecycle state, as DMND builds it. */
 export function dammV2State(
-  state: "pending" | "empty" | "complete" | "partial" | "disabled" | "stale",
+  state: "pending" | "empty" | "complete" | "paged" | "disabled" | "stale",
 ): Schemas["WalletMeteoraDammV2Positions"] {
   const page = dammV2Page();
   const c = page.coverage;
@@ -131,7 +131,7 @@ export function dammV2State(
     page.page_known_principal_value_usd = "0";
     page.page_unpriced_leg_count = 0;
     c.total_positions = 0;
-  } else if (state === "partial") {
+  } else if (state === "paged") {
     page.has_more = true;
     page.cursor = "synthetic-damm-v2-cursor-2";
     c.total_positions = 2;
